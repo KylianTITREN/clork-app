@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "scheme": "acme",
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "assets/fonts/Arvo-Regular.ttf",
+            "assets/fonts/Arvo-Bold.ttf"
+          ]
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "L'application demande l'accès à tes photos pour générer ton calendrier de travail.",
+          "cameraPermission": "L'application demande l'accès à ton appareil photo pour générer ton calendrier de travail."
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "L'application nécessite l'accès à ton calendrier."
+        }
+      ]
+    ],
+    "name": "clork-app",
+    "slug": "clork-app"
+  }
+}
