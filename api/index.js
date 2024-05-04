@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system";
+import Store from "../utils/store";
 
 class API {
   constructor() {
@@ -7,21 +8,26 @@ class API {
   }
 
   async generate(result) {
+    const user = await Store.get("user");
+    const chill = await Store.get("chill");
+    const sunday = await Store.get("sunday");
+
     return FileSystem.uploadAsync(
-      `${this.url}/generate?lastname=Copin&firstname=Typhanie&chill=6&sunday=0`,
+      `${this.url}/generate?lastname=${user.lastname}&firstname=${user.firstname}&chill=${chill}&sunday=${sunday}`,
       result.assets[0].uri,
       {
         httpMethod: "POST",
         headers: {
           Authorization: this.bearer,
         },
+        responseType: "json",
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: "file",
       }
     )
       .then((response) => {
-        console.log(response.body);
-        return response.body;
+        const resp = JSON.parse(response.body);
+        return resp.data;
       })
       .catch((error) => {
         console.error(error);
@@ -30,4 +36,4 @@ class API {
   }
 }
 
-export default API;
+export default new API();

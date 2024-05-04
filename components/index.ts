@@ -1,5 +1,4 @@
 // dashboard
-import Informations from "./dashboard/informations";
-import Welcome from "./dashboard/welcome";
+import Welcome from "./dashboard";
 
-export { Informations, Welcome };
+export { Welcome };
