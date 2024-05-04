@@ -12,11 +12,8 @@ const CAL_ID = "NOCIBE-CALENDRIER";
 
 const useGenerator = () => {
   const { colors } = useTheme();
-  const { getPermission, openSettings, createCalendar } = useCalendar(
-    "Nocibé",
-    colors.primary,
-    CAL_ID
-  );
+  const { getPermission, openSettings, createCalendar, getCalendarId } =
+    useCalendar("Nocibé", colors.primary, CAL_ID);
 
   const take = async (callback) => {
     let result = await ImagePicker.launchCameraAsync({
@@ -50,7 +47,10 @@ const useGenerator = () => {
       if (events.length) {
         const unmount = [];
 
-        await createCalendar();
+        const calendarId = await getCalendarId();
+        if (!calendarId) {
+          await createCalendar();
+        }
 
         try {
           const cal = await Store.get(CAL_ID);
