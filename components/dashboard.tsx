@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { ScrollView } from "react-native-gesture-handler";
 import {
+  ActivityIndicator,
   Button,
   IconButton,
   Text,
@@ -25,6 +26,8 @@ const Dashboard = () => {
   const navigation = useNavigation();
   const { colors } = useTheme();
   const scrollViewRef = useRef(null);
+
+  const [loading, setLoading] = useState(false);
 
   const [user, setUser] = useState({ firstname: "", lastname: "" });
   const { firstname, lastname } = user;
@@ -61,7 +64,7 @@ const Dashboard = () => {
   };
 
   const change = (text: string, name: string) => {
-    setUser({ ...user, [name]: text });
+    setUser({ ...user, [name]: text.trim() });
     Store.set("user", { ...user, [name]: text });
   };
 
@@ -71,8 +74,10 @@ const Dashboard = () => {
   };
 
   const picture = () => {
+    setLoading(true);
     Store.set("board", 1);
     generator.choose(({ text1, text2 }) => {
+      setLoading(false);
       navigation.push("home");
     });
   };
@@ -265,14 +270,21 @@ const Dashboard = () => {
             <Text variant="headlineLarge" style={{ marginBottom: 60 }}>
               Ajoute ta <Bold>première semaine !</Bold>
             </Text>
-            <IconButton
-              icon="plus"
-              containerColor={colors.primary}
-              iconColor="white"
-              mode="contained"
-              size={75}
-              onPress={picture}
-            />
+            {loading ? (
+              <ActivityIndicator
+                size={75}
+                animating={true}
+                color={colors.primary}
+              />
+            ) : (
+              <IconButton
+                icon="plus"
+                iconColor={colors.primary}
+                mode="contained"
+                size={75}
+                onPress={picture}
+              />
+            )}
           </View>
           <Button
             mode="outlined"

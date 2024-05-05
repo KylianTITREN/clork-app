@@ -8,7 +8,7 @@ import API from "../api";
 import { weekDays } from "../utils/constants";
 import Store from "../utils/store";
 
-const CAL_ID = "NOCIBE-CALENDRIER";
+const CAL_ID = "NOCIBE-CALENDAR";
 
 const useGenerator = () => {
   const { colors } = useTheme();
@@ -39,81 +39,92 @@ const useGenerator = () => {
   };
 
   const processing = async (result, callback) => {
-    const granted = await getPermission();
+    try {
+      const granted = await getPermission();
 
-    if (granted) {
-      const events = await API.generate(result);
+      if (granted) {
+        const events = await API.generate(result);
 
-      if (events.length) {
-        const unmount = [];
+        if (events.length) {
+          const unmount = [];
 
-        const calendarId = await getCalendarId();
-        if (!calendarId) {
-          await createCalendar();
-        }
-
-        try {
-          const cal = await Store.get(CAL_ID);
-
-          for (const { title, start, date, end, day, notes } of events) {
-            if (cal && title) {
-              const event: any = {
-                title,
-                notes,
-                alarms: [
-                  {
-                    relativeOffset: 0,
-                    method: Calendar.AlarmMethod.ALERT,
-                  },
-                ],
-              };
-
-              if (start) event.startDate = start;
-              if (end) event.endDate = end;
-              if (!end && !start) {
-                event.startDate = date;
-                event.endDate = date;
-                event.allDay = true;
-              }
-
-              await Calendar.createEventAsync(cal, event);
-            } else {
-              unmount.push(day);
-            }
+          const calendarId = await getCalendarId();
+          if (!calendarId) {
+            await createCalendar();
           }
-        } catch (e) {
+
+          try {
+            const cal = await Store.get(CAL_ID);
+
+            for (const { title, start, date, end, day, notes } of events) {
+              if (cal && title) {
+                const event: any = {
+                  title,
+                  notes,
+                  alarms: [
+                    {
+                      relativeOffset: 0,
+                      method: Calendar.AlarmMethod.ALERT,
+                    },
+                  ],
+                };
+
+                if (start) event.startDate = start;
+                if (end) event.endDate = end;
+                if (!end && !start) {
+                  event.startDate = date;
+                  event.endDate = date;
+                  event.allDay = true;
+                }
+
+                await Calendar.createEventAsync(cal, event);
+              } else {
+                unmount.push(day);
+              }
+            }
+          } catch (e) {
+            Toast.show({
+              type: "error",
+              text1: "Une erreur est survenue... 😞",
+              text2: "Impossible d'ajouter au calendrier.",
+            });
+          }
+
+          if (unmount.length) {
+            Toast.show({
+              type: "error",
+              text1: "Des jours n'ont pas été ajouté, réessaye !",
+              text2: `Il manque : ${unmount
+                .map((id) => weekDays.find((day) => day.id === id).label)
+                .join(", ")}`,
+            });
+          } else {
+            Toast.show({
+              type: "success",
+              text1: "Super ! ✨",
+              text2: "Ton calendrier est à jour.",
+            });
+          }
+          callback();
+        } else {
           Toast.show({
             type: "error",
             text1: "Une erreur est survenue... 😞",
-            text2: "Impossible d'ajouter au calendrier.",
+            text2: "Impossible de récupérer les horaires.",
           });
+          callback();
         }
-
-        if (unmount.length) {
-          Toast.show({
-            type: "error",
-            text1: "Des jours n'ont pas été ajouté, réessaye !",
-            text2: `Il manque : ${unmount
-              .map((id) => weekDays.find((day) => day.id === id).label)
-              .join(", ")}`,
-          });
-        } else {
-          Toast.show({
-            type: "success",
-            text1: "Super ! ✨",
-            text2: "Ton calendrier est à jour.",
-          });
-        }
-        callback();
       } else {
-        Toast.show({
-          type: "error",
-          text1: "Une erreur est survenue... 😞",
-          text2: "Impossible de récupérer les horaires.",
-        });
+        openSettings();
       }
-    } else {
-      openSettings();
+    } catch (e) {
+      console.log(e);
+      Toast.show({
+        type: "error",
+        text1: "Une erreur est survenue... 😞",
+        text2: "Impossible de créer les événements.",
+      });
+      callback();
     }
   };
 
