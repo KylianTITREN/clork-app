@@ -1,0 +1,143 @@
+// Phase 1 CLI harness: runs the extraction on planning-exemple.jpeg and prints
+// a human-readable report. Run with: npm run test:extraction
+// Requires ANTHROPIC_API_KEY in the environment or in .env.local at repo root.
+
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import {
+  extractPlanning,
+  type DayEntry,
+  type PlanningExtraction,
+} from "../supabase/functions/extract-planning/extraction.ts";
+
+const ROOT = path.resolve(import.meta.dirname, "..");
+const FIXTURE = path.join(ROOT, "planning-exemple.jpeg");
+// Haiku 4.5 pricing (USD per million tokens) — for the cost line only.
+const PRICE_INPUT_PER_MTOK = 1;
+const PRICE_OUTPUT_PER_MTOK = 5;
+
+async function loadApiKey(): Promise<string> {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+
+  const envFile = path.join(ROOT, ".env.local");
+  if (existsSync(envFile)) {
+    const content = await readFile(envFile, "utf-8");
+    const match = content.match(/^ANTHROPIC_API_KEY\s*=\s*"?([^"\n]+)"?/m);
+    if (match) return match[1].trim();
+  }
+
+  console.error(
+    "❌ Clé API introuvable.\n" +
+      "   Exporte ANTHROPIC_API_KEY ou crée clork-app/.env.local avec :\n" +
+      '   ANTHROPIC_API_KEY=sk-ant-...\n' +
+      "   (.env.local est dans le .gitignore, il ne sera jamais commité)",
+  );
+  process.exit(1);
+}
+
+function formatDay(day: DayEntry): string {
+  const flag = day.handwritten_override ? " ✍️" : "";
+  const note = day.note ? `  — ${day.note}` : "";
+  switch (day.status) {
+    case "work": {
+      const slots = day.shifts.map((s) => `${s.start}–${s.end}`).join(" / ");
+      const duration = day.duration_hours != null ? ` (${day.duration_hours}h)` : "";
+      return `${slots || "horaires manquants"}${duration}${flag}${note}`;
+    }
+    case "off":
+      return `repos${flag}${note}`;
+    case "rh":
+      return `RH${flag}${note}`;
+    case "cp":
+      return `CP${flag}${note}`;
+    case "unknown":
+      return `⚠️ illisible${flag}${note}`;
+  }
+}
+
+const DAY_NAMES = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+
+function printEmployee(employee: { name: string; days: DayEntry[]; total_hours: number | null }) {
+  console.log(`\n👤 ${employee.name}` + (employee.total_hours != null ? `  — total ${employee.total_hours}h` : ""));
+  employee.days.forEach((day, i) => {
+    const label = DAY_NAMES[i] ?? day.date;
+    console.log(`   ${label} ${day.date}  ${formatDay(day)}`);
+  });
+}
+
+function printReport(data: PlanningExtraction) {
+  console.log("═".repeat(60));
+  console.log(`🏪 ${data.store_label ?? "(magasin non lu)"}`);
+  console.log(
+    `📅 Semaine ${data.week_number ?? "?"} — du ${data.week_start} au ${data.week_end}`,
+  );
+  console.log(`👥 ${data.employees.length} employés extraits :`);
+  for (const employee of data.employees) {
+    const workedDays = employee.days.filter((d) => d.status === "work").length;
+    console.log(
+      `   • ${employee.name} (${workedDays}j travaillés${employee.total_hours != null ? `, ${employee.total_hours}h` : ""})`,
+    );
+  }
+
+  // La ligne cible du test : Typhanie, en détail.
+  const target = data.employees.find((e) => /typhanie/i.test(e.name));
+  if (target) {
+    console.log("\n🎯 Ligne cible trouvée :");
+    printEmployee(target);
+  } else {
+    console.log("\n❌ Ligne 'Typhanie' NON trouvée — échec du critère de phase 1");
+  }
+
+  if (data.global_notes.length > 0) {
+    console.log("\n📌 Notes hors tableau :");
+    for (const note of data.global_notes) {
+      const when = [note.date, note.start && `à ${note.start}`].filter(Boolean).join(" ");
+      console.log(`   • [${note.applies_to}] ${note.text}${when ? ` (${when})` : ""}`);
+    }
+  } else {
+    console.log("\n📌 Aucune note hors tableau détectée (le post-it 'Réunion équipe' aurait dû l'être !)");
+  }
+
+  if (data.warnings.length > 0) {
+    console.log("\n⚠️  Doutes signalés par le modèle :");
+    for (const warning of data.warnings) console.log(`   • ${warning}`);
+  }
+}
+
+async function main() {
+  const apiKey = await loadApiKey();
+  const image = await readFile(FIXTURE);
+  console.log(`📷 ${path.basename(FIXTURE)} (${(image.length / 1024).toFixed(0)} ko) → extraction en cours…`);
+
+  const startedAt = Date.now();
+  const result = await extractPlanning({
+    imageBase64: image.toString("base64"),
+    mediaType: "image/jpeg",
+    apiKey,
+  });
+  const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+  printReport(result.data);
+
+  const cost =
+    (result.usage.input_tokens / 1e6) * PRICE_INPUT_PER_MTOK +
+    (result.usage.output_tokens / 1e6) * PRICE_OUTPUT_PER_MTOK;
+  console.log("\n" + "═".repeat(60));
+  console.log(
+    `⏱  ${seconds}s — ${result.model} — ${result.usage.input_tokens} tokens in / ` +
+      `${result.usage.output_tokens} out ≈ $${cost.toFixed(4)}`,
+  );
+
+  // Dump complet pour inspection fine.
+  const { writeFile } = await import("node:fs/promises");
+  const outPath = path.join(ROOT, "scripts", "last-extraction.json");
+  await writeFile(outPath, JSON.stringify(result.data, null, 2));
+  console.log(`💾 JSON complet : ${path.relative(ROOT, outPath)}`);
+}
+
+main().catch((error) => {
+  console.error("❌ Extraction échouée :", error.message ?? error);
+  process.exit(1);
+});

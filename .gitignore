@@ -1,0 +1,27 @@
+# Secrets — jamais commités
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Expo (phase 2)
+.expo/
+dist/
+web-build/
+
+# Builds natifs EAS
+ios/
+android/
+*.ipa
+*.apk
+*.aab
+
+# Outputs de test locaux
+scripts/last-extraction.json
+
+# Supabase local
+supabase/.temp/
+
+# macOS
+.DS_Store
