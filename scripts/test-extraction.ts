@@ -13,14 +13,18 @@ import {
 } from "../supabase/functions/extract-planning/extraction.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-// Fixture par défaut, ou n'importe quelle photo passée en argument :
-// npm run test:extraction -- chemin/vers/photo.jpeg
-const FIXTURE = process.argv[2]
-  ? path.resolve(process.argv[2])
+// Usage : npm run test:extraction -- [photo.jpeg] [--model=claude-sonnet-4-6]
+const args = process.argv.slice(2);
+const modelArg = args.find((a) => a.startsWith("--model="))?.slice("--model=".length);
+const photoArg = args.find((a) => !a.startsWith("--"));
+const FIXTURE = photoArg
+  ? path.resolve(photoArg)
   : path.join(ROOT, "planning-exemple.jpeg");
-// Haiku 4.5 pricing (USD per million tokens) — for the cost line only.
-const PRICE_INPUT_PER_MTOK = 1;
-const PRICE_OUTPUT_PER_MTOK = 5;
+// Pricing USD / MTok — pour la ligne de coût uniquement.
+const PRICING: Record<string, { input: number; output: number }> = {
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+};
 
 async function loadApiKey(): Promise<string> {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
@@ -115,6 +119,23 @@ function printReport(data: PlanningExtraction) {
     console.log("\n⚠️  Doutes signalés par le modèle :");
     for (const warning of data.warnings) console.log(`   • ${warning}`);
   }
+
+  // Contrôle de cohérence côté code : somme des durées vs total hebdo imprimé.
+  // Un écart trahit une ligne mal lue ou décalée — signal objectif d'erreur.
+  const inconsistent = data.employees.filter((e) => {
+    if (e.total_hours == null) return false;
+    const sum = e.days.reduce((acc, d) => acc + (d.duration_hours ?? 0), 0);
+    return Math.abs(sum - e.total_hours) > 0.01;
+  });
+  if (inconsistent.length > 0) {
+    console.log("\n🔎 Incohérences durées/total (lignes suspectes) :");
+    for (const e of inconsistent) {
+      const sum = e.days.reduce((acc, d) => acc + (d.duration_hours ?? 0), 0);
+      console.log(`   • ${e.name} : somme jours = ${sum}h, total imprimé = ${e.total_hours}h`);
+    }
+  } else {
+    console.log("\n🔎 Cohérence durées/total : OK pour toutes les lignes vérifiables");
+  }
 }
 
 async function main() {
@@ -127,14 +148,17 @@ async function main() {
     imageBase64: image.toString("base64"),
     mediaType: FIXTURE.endsWith(".png") ? "image/png" : "image/jpeg",
     apiKey,
+    model: modelArg,
   });
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
 
   printReport(result.data);
 
+  const priceKey = Object.keys(PRICING).find((k) => result.model.startsWith(k));
+  const price = priceKey ? PRICING[priceKey] : { input: 0, output: 0 };
   const cost =
-    (result.usage.input_tokens / 1e6) * PRICE_INPUT_PER_MTOK +
-    (result.usage.output_tokens / 1e6) * PRICE_OUTPUT_PER_MTOK;
+    (result.usage.input_tokens / 1e6) * price.input +
+    (result.usage.output_tokens / 1e6) * price.output;
   console.log("\n" + "═".repeat(60));
   console.log(
     `⏱  ${seconds}s — ${result.model} — ${result.usage.input_tokens} tokens in / ` +

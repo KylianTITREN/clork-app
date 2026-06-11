@@ -2,7 +2,10 @@
 // and the local CLI test harness (Node 24+). Keep this file runtime-agnostic:
 // only `fetch` and plain TypeScript types (no enums — Node type-stripping).
 
-export const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+// Sonnet est nécessaire : Haiku décale les lignes du tableau (testé le 2026-06-11
+// sur planning-exemple-2.jpg — Haiku attribue à un employé les horaires de ses
+// voisins ; Sonnet lit la ligne cible parfaitement). ~0,16 $/scan, acceptable.
+export const ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MAX_OUTPUT_TOKENS = 16_000;
 
@@ -264,6 +267,23 @@ Règles de lecture, dans l'ordre de priorité :
    coupée ou trop petite pour une extraction fiable — dans ce cas l'application
    demandera à l'utilisateur de reprendre la photo, c'est le comportement attendu,
    ne force pas une lecture.
+9. ALIGNEMENT DES LIGNES — l'erreur la plus grave possible. Traite le tableau
+   ligne par ligne : repère le nom à gauche, puis suis CETTE ligne horizontale
+   jusqu'aux colonnes Total. Certaines lignes sont vides ou quasi vides (employé
+   absent ou en repos toute la semaine) : ne décale JAMAIS les horaires d'une
+   ligne vers une autre. Un employé sans aucun horaire reste avec des jours
+   "off", c'est normal.
+10. AUTO-VÉRIFICATION : pour chaque jour, durée ≈ départ − arrivée ; pour chaque
+   employé, somme des durées ≈ total hebdo imprimé. Si ça ne colle pas, relis la
+   ligne ; si le doute persiste, garde la valeur imprimée et ajoute un warning.
+11. NOMS : une liste propre « Nom du collaborateur » figure souvent sous le
+   tableau (zone signatures), en plus gros caractères. Sers-t'en pour
+   orthographier exactement les noms des lignes du tableau.
+12. COLONNES DE DROITE : distingue « Total hebdo » (heures réellement planifiées
+   cette semaine) de « Base horaire » (heures du contrat, souvent 35) et
+   « Delta ». total_hours = la colonne Total UNIQUEMENT. Un employé absent toute
+   la semaine a souvent une ligne vide avec seulement sa base (ex: 35) : dans ce
+   cas total_hours = null, ne recopie pas la base.
 
 Rapporte tout via l'outil report_planning.`;
 
@@ -271,6 +291,8 @@ export type ExtractPlanningInput = {
   imageBase64: string;
   mediaType: SupportedMediaType;
   apiKey: string;
+  /** Override du modèle (défaut : ANTHROPIC_MODEL). */
+  model?: string;
 };
 
 type AnthropicContentBlock =
@@ -287,7 +309,7 @@ type AnthropicResponse = {
 export async function extractPlanning(
   input: ExtractPlanningInput,
 ): Promise<ExtractionResult> {
-  const { imageBase64, mediaType, apiKey } = input;
+  const { imageBase64, mediaType, apiKey, model = ANTHROPIC_MODEL } = input;
 
   if (!apiKey) {
     throw new Error("Missing Anthropic API key");
@@ -307,7 +329,7 @@ export async function extractPlanning(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model,
       max_tokens: MAX_OUTPUT_TOKENS,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: "tool", name: EXTRACTION_TOOL.name },
