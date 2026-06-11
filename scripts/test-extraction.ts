@@ -13,7 +13,11 @@ import {
 } from "../supabase/functions/extract-planning/extraction.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const FIXTURE = path.join(ROOT, "planning-exemple.jpeg");
+// Fixture par défaut, ou n'importe quelle photo passée en argument :
+// npm run test:extraction -- chemin/vers/photo.jpeg
+const FIXTURE = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.join(ROOT, "planning-exemple.jpeg");
 // Haiku 4.5 pricing (USD per million tokens) — for the cost line only.
 const PRICE_INPUT_PER_MTOK = 1;
 const PRICE_OUTPUT_PER_MTOK = 5;
@@ -67,8 +71,15 @@ function printEmployee(employee: { name: string; days: DayEntry[]; total_hours: 
   });
 }
 
+const QUALITY_LABELS = {
+  good: "✅ bonne",
+  degraded: "🟡 dégradée (cellules douteuses)",
+  unusable: "🔴 inutilisable → l'app demanderait de reprendre la photo",
+} as const;
+
 function printReport(data: PlanningExtraction) {
   console.log("═".repeat(60));
+  console.log(`📸 Qualité photo : ${QUALITY_LABELS[data.photo_quality] ?? data.photo_quality}`);
   console.log(`🏪 ${data.store_label ?? "(magasin non lu)"}`);
   console.log(
     `📅 Semaine ${data.week_number ?? "?"} — du ${data.week_start} au ${data.week_end}`,
@@ -114,7 +125,7 @@ async function main() {
   const startedAt = Date.now();
   const result = await extractPlanning({
     imageBase64: image.toString("base64"),
-    mediaType: "image/jpeg",
+    mediaType: FIXTURE.endsWith(".png") ? "image/png" : "image/jpeg",
     apiKey,
   });
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);

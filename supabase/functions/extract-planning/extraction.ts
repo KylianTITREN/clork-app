@@ -37,7 +37,10 @@ export type GlobalNote = {
   end: string | null; // "HH:MM"
 };
 
+export type PhotoQuality = "good" | "degraded" | "unusable";
+
 export type PlanningExtraction = {
+  photo_quality: PhotoQuality;
   store_label: string | null;
   week_number: number | null;
   week_start: string;
@@ -80,6 +83,7 @@ const EXTRACTION_TOOL = {
     type: "object",
     additionalProperties: false,
     required: [
+      "photo_quality",
       "store_label",
       "week_number",
       "week_start",
@@ -89,6 +93,15 @@ const EXTRACTION_TOOL = {
       "warnings",
     ],
     properties: {
+      photo_quality: {
+        type: "string",
+        enum: ["good", "degraded", "unusable"],
+        description:
+          "Verdict global de lisibilité de la photo : good = tout est lisible, " +
+          "degraded = des cellules ou lignes sont douteuses/illisibles (détaillées " +
+          "dans warnings), unusable = la photo ne permet pas une extraction fiable " +
+          "(floue, coupée, trop petite) et doit être reprise.",
+      },
       store_label: {
         type: ["string", "null"],
         description: "Libellé du magasin tel qu'imprimé (ex: 'Magasin 1068 - WASQUEHAL').",
@@ -246,6 +259,11 @@ Règles de lecture, dans l'ordre de priorité :
 7. N'INVENTE RIEN. Si une case est illisible ou ambiguë : status "unknown" (ou
    duration_hours null) et ajoute un warning précis ("ligne X, jeudi : heure de
    départ illisible"). Un doute signalé vaut mieux qu'une valeur devinée.
+8. Évalue photo_quality honnêtement : "good" si tu as pu tout lire, "degraded"
+   si certaines cellules sont douteuses, "unusable" si la photo est trop floue,
+   coupée ou trop petite pour une extraction fiable — dans ce cas l'application
+   demandera à l'utilisateur de reprendre la photo, c'est le comportement attendu,
+   ne force pas une lecture.
 
 Rapporte tout via l'outil report_planning.`;
 
