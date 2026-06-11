@@ -4,13 +4,17 @@
 
 import { useColorScheme } from "react-native";
 
+// DA de référence (décision Kylian 2026-06-11) : style « Timezy » Dribbble
+// (planner clair, cartes très arrondies, typo grasse, blocs pastel) mais en
+// VIOLET. Refs : dribbble.com/shots/26775582 et dribbble.com/shots/17982564.
 export const palette = {
-  // Accent : corail chaleureux — app personnelle, pas un SaaS froid.
-  accent: "#FF6B4A",
-  accentSoft: "#FF8A70",
+  // Accent : violet Clork.
+  accent: "#6C4EF5",
+  accentSoft: "#A593F9",
+  accentMuted: "#EDE9FE",
 
   // Couleurs sémantiques par type de créneau (contrat produit).
-  shiftWork: "#5B7CFA",
+  shiftWork: "#6C4EF5",
   shiftOff: "#9BA1AE",
   shiftRh: "#34C28C",
   shiftCp: "#F5A623",
@@ -33,22 +37,22 @@ export type ThemeColors = Record<
 >;
 
 export const lightColors: ThemeColors = {
-  background: "#FAF7F2",
+  background: "#F6F4EF",
   surface: "#FFFFFF",
-  surfaceMuted: "#F1ECE4",
-  border: "#E4DDD2",
-  text: "#1C1B22",
-  textMuted: "#6E6A75",
+  surfaceMuted: "#EFECE4",
+  border: "#E3DFD5",
+  text: "#1D1A2B",
+  textMuted: "#6F6A7E",
   ...palette,
 };
 
 export const darkColors: ThemeColors = {
-  background: "#1C1B22",
-  surface: "#26242E",
-  surfaceMuted: "#2F2C39",
-  border: "#3A3744",
-  text: "#F5F2EC",
-  textMuted: "#A39FAC",
+  background: "#17141F",
+  surface: "#221E2E",
+  surfaceMuted: "#2C2738",
+  border: "#393345",
+  text: "#F4F1EA",
+  textMuted: "#A29DB0",
   ...palette,
 };
 
@@ -65,10 +69,11 @@ export const spacing = {
   xxl: 48,
 } as const;
 
+// Radius généreux — signature de la DA Timezy-like.
 export const radius = {
-  sm: 8,
-  md: 14,
-  lg: 22,
+  sm: 10,
+  md: 16,
+  lg: 24,
   pill: 999,
 } as const;
 
