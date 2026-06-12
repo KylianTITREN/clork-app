@@ -101,7 +101,8 @@
       "router": {},
       "eas": {
         "projectId": "a43416c5-1c32-4e33-8d72-3a54e8e0c1f3"
-      }
+      },
+      "pushEnabled": false
     },
     "owner": "kyksio"
   }

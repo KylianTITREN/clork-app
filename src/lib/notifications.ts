@@ -12,6 +12,11 @@ export async function registerPushToken(userId: string): Promise<void> {
   try {
     if (!Device.isDevice) return; // pas de push sur simulateur
 
+    // Interrupteur explicite : l'entitlement push est retiré des builds en
+    // signature gratuite — demander un token APNs ferait crasher le module
+    // natif. Passer extra.pushEnabled à true avec le compte Apple payant.
+    if (Constants.expoConfig?.extra?.pushEnabled !== true) return;
+
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
     if (!projectId) return; // EAS pas encore configuré
