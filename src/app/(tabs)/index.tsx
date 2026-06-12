@@ -121,7 +121,11 @@ export default function WeekScreen() {
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
     // Widgets : uniquement MON planning.
-    if (!viewing) void refreshWidgetData((data as Shift[]) ?? []);
+    if (!viewing)
+      void refreshWidgetData((data as Shift[]) ?? [], {
+        accent: colors.accent,
+        onAccent: colors.onAccent,
+      });
   }, [userId, monday, sunday, viewing]);
 
   useFocusEffect(

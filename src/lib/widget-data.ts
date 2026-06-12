@@ -59,12 +59,21 @@ export function buildWidgetPayload(shifts: Shift[], now: Date = new Date()): Wid
  * No-op silencieux hors iOS, en Expo Go, ou si l'App Group est indisponible
  * (ex. provisioning incomplet sur compte Apple gratuit).
  */
-export async function refreshWidgetData(shifts: Shift[]): Promise<void> {
+export type WidgetTheme = { accent: string; onAccent: string };
+
+export async function refreshWidgetData(
+  shifts: Shift[],
+  theme?: WidgetTheme,
+): Promise<void> {
   if (Platform.OS !== "ios") return;
   try {
     const { ExtensionStorage } = await import("@bacons/apple-targets");
     const storage = new ExtensionStorage(APP_GROUP);
     storage.set(STORAGE_KEY, JSON.stringify(buildWidgetPayload(shifts)));
+    if (theme) {
+      storage.set("widget-accent", theme.accent);
+      storage.set("widget-on-accent", theme.onAccent);
+    }
     ExtensionStorage.reloadWidget();
   } catch {
     // Module natif absent ou App Group inaccessible : les widgets
