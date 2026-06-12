@@ -245,7 +245,7 @@ export default function ScanScreen() {
 
   if (state.step === "processing") {
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <ProcessingView currentStep={state.processingStep} />
       </SafeAreaView>
     );
@@ -255,7 +255,7 @@ export default function ScanScreen() {
     const thisMonday = mondayOf(new Date());
     const candidates = [-7, 0, 7, 14].map((offset) => addDays(thisMonday, offset));
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={styles.pickWeek}>
           <Text style={[styles.title, { color: colors.text }]}>
             Ce planning commence quand ?
@@ -307,7 +307,7 @@ export default function ScanScreen() {
 
   if (state.step === "validate") {
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <ValidationView
           extraction={state.extraction}
           initialTarget={state.target}
@@ -321,7 +321,7 @@ export default function ScanScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={styles.idleContainer}>
         <View style={styles.header}>
           <Text style={[styles.kicker, { color: colors.textMuted }]}>Scanner</Text>

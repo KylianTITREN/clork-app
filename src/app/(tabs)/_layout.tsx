@@ -1,13 +1,13 @@
-import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { useEffect } from "react";
 
-import { useThemeColors } from "@/constants/tokens";
+import { palette } from "@/constants/tokens";
 import { registerPushToken } from "@/lib/notifications";
 import { useAuth } from "@/providers/auth-provider";
 
+// Tabs NATIVES (UITabBar) : sur iOS 26 elles héritent automatiquement du
+// Liquid Glass système — flou, reflets, minimisation au scroll.
 export default function TabsLayout() {
-  const colors = useThemeColors();
   const { session } = useAuth();
 
   useEffect(() => {
@@ -17,44 +17,19 @@ export default function TabsLayout() {
   }, [session?.user.id]);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Semaine",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" color={color} size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="scan"
-        options={{
-          title: "Scanner",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="camera-outline" color={color} size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profil",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle-outline" color={color} size={size} />
-          ),
-        }}
-      />
-    </Tabs>
+    <NativeTabs tintColor={palette.accent} minimizeBehavior="onScrollDown">
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Label>Semaine</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="calendar" drawable="ic_menu_my_calendar" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="scan">
+        <NativeTabs.Trigger.Label>Scanner</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="camera.viewfinder" drawable="ic_menu_camera" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Label>Profil</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="person.crop.circle" drawable="ic_menu_myplaces" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }
