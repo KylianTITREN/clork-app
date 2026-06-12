@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -6,15 +7,54 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import {
+  fonts,
+  inkOnAccent,
+  radius,
+  softShadow,
+  spacing,
+  typeScale,
+  useThemeColors,
+  type ThemeColors,
+} from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+
+type SectionProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  subtitle?: string;
+  colors: ThemeColors;
+  children: React.ReactNode;
+};
+
+function Section({ icon, iconBg, iconColor, title, subtitle, colors, children }: SectionProps) {
+  return (
+    <View style={[styles.section, { backgroundColor: colors.surface }, softShadow]}>
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionIcon, { backgroundColor: iconBg }]}>
+          <Ionicons name={icon} size={18} color={iconColor} />
+        </View>
+        <View style={styles.sectionTitleBox}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+          {subtitle ? (
+            <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>{subtitle}</Text>
+          ) : null}
+        </View>
+      </View>
+      {children}
+    </View>
+  );
+}
 
 export default function ProfileScreen() {
   const colors = useThemeColors();
@@ -33,6 +73,8 @@ export default function ProfileScreen() {
 
   const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
+  const email = session?.user.email ?? null;
+  const initial = (displayName.trim() || email || "C").charAt(0).toUpperCase();
 
   async function handleUpgrade() {
     if (!upgradeEmail.trim() || upgradePassword.length < 8) {
@@ -126,21 +168,38 @@ export default function ProfileScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.title, { color: colors.text }]}>Profil</Text>
-          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-            Ces infos servent à retrouver TA ligne sur le planning photographié.
-          </Text>
+          {/* En-tête identité */}
+          <View style={styles.headerRow}>
+            <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
+              <Text style={styles.avatarLetter}>{initial}</Text>
+            </View>
+            <View style={styles.headerTextBox}>
+              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+                {displayName.trim() || "Mon profil"}
+              </Text>
+              <Text style={[styles.headerMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                {isGuest ? "Mode invité · 1 scan/semaine" : (email ?? "")}
+              </Text>
+            </View>
+          </View>
 
           {isGuest ? (
-            <>
-              <Text style={[styles.guestTitle, { color: colors.accentDeep }]}>
-                Mode invité — crée ton compte
-              </Text>
-              <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-                Gratuit, tes données sont conservées : ça débloque le partage avec
-                tes collègues et les scans illimités.
-              </Text>
+            <View style={[styles.section, { backgroundColor: colors.accentMuted }]}>
+              <View style={styles.sectionHeader}>
+                <View style={[styles.sectionIcon, { backgroundColor: colors.accent }]}>
+                  <Ionicons name="rocket" size={18} color={inkOnAccent} />
+                </View>
+                <View style={styles.sectionTitleBox}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    Crée ton compte gratuit
+                  </Text>
+                  <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>
+                    Données conservées · partage débloqué · scans illimités
+                  </Text>
+                </View>
+              </View>
               <TextField
                 label="Email"
                 autoCapitalize="none"
@@ -157,47 +216,74 @@ export default function ProfileScreen() {
                 onChangeText={setUpgradePassword}
               />
               <Button label="Créer mon compte" onPress={handleUpgrade} isLoading={isUpgrading} />
-            </>
+            </View>
           ) : null}
 
           {isLoading ? null : (
             <>
-              <TextField
-                label="Prénom (ou pseudo)"
-                placeholder="Typhanie"
-                value={displayName}
-                onChangeText={setDisplayName}
-              />
-              <TextField
-                label="Nom sur le planning"
-                placeholder="COPIN Typhanie, Typhanie"
-                hint="Tel qu'il apparaît sur le planning papier. Plusieurs variantes possibles, séparées par des virgules."
-                value={planningNames}
-                onChangeText={setPlanningNames}
-              />
-              <TextField
-                label="ID employé (optionnel)"
-                placeholder="ex: 10684512"
-                hint="Utile si le planning affiche des matricules."
-                value={employeeId}
-                onChangeText={setEmployeeId}
-              />
-              <TextField
-                label="Pause par défaut (minutes)"
-                placeholder="60"
-                keyboardType="number-pad"
-                hint="Utilisée seulement si le planning n'imprime pas la durée payée. 0 = désactivé."
-                value={breakMinutes}
-                onChangeText={setBreakMinutes}
-              />
-              <TextField
-                label="À partir de combien d'heures ?"
-                placeholder="6"
-                keyboardType="decimal-pad"
-                hint="La pause s'applique dès que la journée atteint cette amplitude."
-                value={breakThreshold}
-                onChangeText={setBreakThreshold}
-              />
+              <Section
+                icon="finger-print"
+                iconBg={colors.accentMuted}
+                iconColor={colors.accentDeep}
+                title="Sur le planning"
+                subtitle="Pour retrouver TA ligne automatiquement"
+                colors={colors}
+              >
+                <TextField
+                  label="Prénom (ou pseudo)"
+                  placeholder="Typhanie"
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                />
+                <TextField
+                  label="Nom sur le planning"
+                  placeholder="COPIN Typhanie, Typhanie"
+                  hint="Plusieurs variantes possibles, séparées par des virgules."
+                  value={planningNames}
+                  onChangeText={setPlanningNames}
+                />
+                <TextField
+                  label="ID employé (optionnel)"
+                  placeholder="ex: 10684512"
+                  value={employeeId}
+                  onChangeText={setEmployeeId}
+                />
+              </Section>
+
+              <Section
+                icon="cafe"
+                iconBg={colors.shiftCpSoft}
+                iconColor={colors.shiftCp}
+                title="Pause déjeuner"
+                subtitle="Si le planning n'imprime pas la durée payée"
+                colors={colors}
+              >
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldHalf}>
+                    <TextField
+                      label="Durée (min)"
+                      placeholder="60"
+                      keyboardType="number-pad"
+                      value={breakMinutes}
+                      onChangeText={setBreakMinutes}
+                    />
+                  </View>
+                  <View style={styles.fieldHalf}>
+                    <TextField
+                      label="Dès (heures)"
+                      placeholder="6"
+                      keyboardType="decimal-pad"
+                      value={breakThreshold}
+                      onChangeText={setBreakThreshold}
+                    />
+                  </View>
+                </View>
+                <Text style={[styles.sectionFootnote, { color: colors.textMuted }]}>
+                  Ex. : 60 min déduites dès que la journée dépasse 6 h d'amplitude.
+                  0 = désactivé.
+                </Text>
+              </Section>
+
               <Button label="Enregistrer" onPress={handleSave} isLoading={isSaving} />
               <Button label="Se déconnecter" variant="ghost" onPress={handleSignOut} />
             </>
@@ -215,16 +301,75 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
   },
-  title: {
-    fontSize: typeScale.title,
-    fontWeight: "800",
-  },
-  subtitle: {
-    fontSize: typeScale.body,
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
     marginBottom: spacing.sm,
   },
-  guestTitle: {
-    fontSize: typeScale.heading,
-    fontWeight: "800",
+  avatar: {
+    width: 60,
+    height: 60,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarLetter: {
+    fontSize: typeScale.title,
+    fontFamily: fonts.black,
+    color: inkOnAccent,
+  },
+  headerTextBox: {
+    flex: 1,
+    gap: 2,
+  },
+  title: {
+    fontSize: typeScale.title,
+    fontFamily: fonts.black,
+  },
+  headerMeta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  section: {
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  sectionIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionTitleBox: {
+    flex: 1,
+    gap: 1,
+  },
+  sectionTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
+  },
+  sectionSubtitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  sectionFootnote: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
+    lineHeight: 17,
+  },
+  fieldRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  fieldHalf: {
+    flex: 1,
   },
 });

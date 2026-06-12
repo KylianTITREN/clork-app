@@ -11,7 +11,7 @@ import { addDays } from "@/lib/dates";
 import type { Shift } from "@/lib/types";
 
 const CALENDAR_TITLE = "Clork";
-const CALENDAR_COLOR = "#F1D001";
+const CALENDAR_COLOR = "#FFC233";
 
 export async function ensurePermission(): Promise<boolean> {
   const { granted } = await Calendar.requestCalendarPermissionsAsync();

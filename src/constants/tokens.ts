@@ -11,15 +11,15 @@ export const inkOnAccent = "#26210E";
 export const palette = {
   // Accent : jaune Clork (décision Kylian 2026-06-12). accentDeep = déclinaison
   // dorée lisible pour textes/icônes sur fond clair.
-  accent: "#F1D001",
-  accentDeep: "#A88F00",
-  accentSoft: "#F7E36A",
-  accentMuted: "#FAF3CC",
+  accent: "#FFC233",
+  accentDeep: "#A87900",
+  accentSoft: "#FFD877",
+  accentMuted: "#FFF3D6",
 
   // Types de créneau : couleur forte (dots) + fond pastel (cartes),
   // texte toujours en encre — signature Timezy.
-  shiftWork: "#D9B900",
-  shiftWorkSoft: "#F8F0C5",
+  shiftWork: "#E8A800",
+  shiftWorkSoft: "#FCEFC7",
   shiftOff: "#9BA1A0",
   shiftOffSoft: "#F0EFEA",
   shiftRh: "#2FA877",
