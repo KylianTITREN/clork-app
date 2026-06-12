@@ -329,15 +329,25 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
               ]}
             />
 
-            <Button
-              label={isCreate ? "Ajouter au planning" : "Enregistrer"}
-              variant="dark"
-              onPress={handleSave}
-              isLoading={isSaving}
-            />
-            {!isCreate ? (
-              <Button label="Supprimer" variant="danger" onPress={handleDelete} />
-            ) : null}
+            <View style={styles.actionsRow}>
+              <View style={styles.saveButton}>
+                <Button
+                  label={isCreate ? "Ajouter au planning" : "Enregistrer"}
+                  variant="dark"
+                  onPress={handleSave}
+                  isLoading={isSaving}
+                />
+              </View>
+              {!isCreate ? (
+                <Pressable
+                  onPress={handleDelete}
+                  accessibilityLabel="Supprimer le créneau"
+                  style={[styles.deleteButton, { backgroundColor: colors.surface }]}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#D64545" />
+                </Pressable>
+              ) : null}
+            </View>
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -456,6 +466,21 @@ const styles = StyleSheet.create({
   pauseAt: {
     fontSize: typeScale.body,
     fontFamily: fonts.semiBold,
+  },
+  actionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  saveButton: {
+    flex: 1, // Enregistrer prend toute la largeur restante (~85 %)
+  },
+  deleteButton: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   noteInput: {
     borderRadius: radius.md,

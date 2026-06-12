@@ -1,17 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
+import { SavePill } from "@/components/profile/SavePill";
 import { appIconByTheme } from "@/constants/logo-assets";
 import { themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
-import { fonts, radius, spacing, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { useTheme } from "@/providers/theme-provider";
 
+/**
+ * Choix du thème : la sélection est locale et ne prend effet (couleurs +
+ * icône d'app) qu'à l'enregistrement — pas de changement surprise en scrollant.
+ */
 export default function ThemeSettingsScreen() {
   const colors = useThemeColors();
   const { themeId, setThemeId } = useTheme();
+  const [selected, setSelected] = useState<ThemeId>(themeId);
+
+  const isDirty = selected !== themeId;
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -20,44 +29,64 @@ export default function ThemeSettingsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <SubPageHeader title="Thème" />
+        <SubPageHeader
+          title="Thème"
+          right={
+            <SavePill isDirty={isDirty} isSaving={false} onPress={() => setThemeId(selected)} />
+          }
+        />
 
         <Section
           icon="color-palette"
           iconBg={colors.accentMuted}
           iconColor={colors.accent}
-          title="Thème"
-          subtitle="Couleur de l'app et de son icône"
+          title="Couleur de l'app"
+          subtitle="L'icône sur l'écran d'accueil suit le thème"
         >
-          <View style={styles.themeGrid}>
-            {themeOrder.map((id) => {
-              const isSelected = id === themeId;
+          <View style={styles.list}>
+            {themeOrder.map((idRaw) => {
+              const id = idRaw as ThemeId;
+              const isSelected = id === selected;
               return (
-                <Pressable key={id} onPress={() => setThemeId(id as ThemeId)} style={styles.themeItem}>
-                  {/* L'icône d'app réelle : ce que l'écran d'accueil affichera. */}
-                  <View style={[styles.themeSwatchRing, { borderColor: isSelected ? colors.text : "transparent" }]}>
-                    <Image source={appIconByTheme[id as ThemeId]} style={styles.themeIcon} />
-                    {isSelected ? (
-                      <View style={[styles.themeCheck, { backgroundColor: colors.text }]}>
-                        <Ionicons name="checkmark" size={12} color={themes[id as ThemeId].accent} />
-                      </View>
-                    ) : null}
-                  </View>
+                <Pressable
+                  key={id}
+                  onPress={() => setSelected(id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
+                  style={[
+                    styles.row,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: isSelected ? colors.text : colors.border,
+                    },
+                    isSelected && softShadow,
+                  ]}
+                >
+                  <Image source={appIconByTheme[id]} style={styles.rowIcon} />
                   <Text
                     style={[
-                      styles.themeLabel,
+                      styles.rowLabel,
                       {
                         color: isSelected ? colors.text : colors.textMuted,
                         fontFamily: isSelected ? fonts.extraBold : fonts.semiBold,
                       },
                     ]}
                   >
-                    {themeLabels[id as ThemeId]}
+                    {themeLabels[id]}
                   </Text>
+                  <View style={[styles.rowSwatch, { backgroundColor: themes[id].accent }]} />
+                  <Ionicons
+                    name={isSelected ? "radio-button-on" : "radio-button-off"}
+                    size={20}
+                    color={isSelected ? colors.text : colors.border}
+                  />
                 </Pressable>
               );
             })}
           </View>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>
+            Touche « Enregistrer » pour appliquer la couleur et changer l'icône de l'app.
+          </Text>
         </Section>
       </ScrollView>
     </SafeAreaView>
@@ -67,20 +96,23 @@ export default function ThemeSettingsScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md },
-  themeGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
-  themeItem: { alignItems: "center", gap: spacing.xs, width: 72 },
-  themeSwatchRing: { borderWidth: 2, borderRadius: 17, padding: 3 },
-  // Arrondi « squircle » iOS (~22 % de la taille).
-  themeIcon: { width: 52, height: 52, borderRadius: 12 },
-  themeCheck: {
-    position: "absolute",
-    right: -2,
-    top: -2,
-    width: 20,
-    height: 20,
-    borderRadius: radius.pill,
+  list: { gap: spacing.sm },
+  row: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  themeLabel: { fontSize: 11 },
+  // Arrondi « squircle » iOS (~22 % de la taille).
+  rowIcon: { width: 40, height: 40, borderRadius: 9 },
+  rowLabel: { flex: 1, fontSize: typeScale.body },
+  rowSwatch: { width: 22, height: 22, borderRadius: radius.pill },
+  hint: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
+    lineHeight: 17,
+  },
 });

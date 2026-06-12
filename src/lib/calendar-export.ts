@@ -3,7 +3,9 @@
 // Google/Apple/Outlook est ensuite assurée par les comptes du téléphone.
 // Ré-exporter une semaine remplace ses événements (pas de doublons).
 
-import * as Calendar from "expo-calendar";
+// Entrée /legacy obligatoire depuis SDK 56 : les mêmes fonctions importées
+// depuis "expo-calendar" sont des stubs dépréciés qui throwent à l'exécution.
+import * as Calendar from "expo-calendar/legacy";
 import { Platform } from "react-native";
 
 import { shiftTypeLabel } from "@/constants/tokens";
