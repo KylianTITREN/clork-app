@@ -1,6 +1,10 @@
 // Supabase Edge Function: POST a planning photo (base64) and get back the
 // structured extraction. The Anthropic API key lives ONLY in function secrets
 // (`supabase secrets set ANTHROPIC_API_KEY=...`), never in the app.
+// Requires an authenticated user JWT — the publishable key alone is rejected
+// (sinon n'importe qui avec la clé embarquée dans l'app brûlerait le crédit).
+
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 import {
   extractPlanning,
@@ -39,6 +43,17 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") {
     return errorResponse(405, "Method not allowed");
+  }
+
+  // Authentification : exige un JWT utilisateur valide.
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const supabaseAuth = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+  );
+  const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
+  if (userError || !userData.user) {
+    return errorResponse(401, "Authentication required");
   }
 
   let body: RequestBody;

@@ -28,6 +28,13 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Clork utilise l'appareil photo pour scanner le planning affiché en magasin.",
+          "photosPermission": "Clork accède à tes photos pour importer une photo du planning."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#6C4EF5",
