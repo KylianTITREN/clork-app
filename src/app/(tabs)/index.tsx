@@ -20,6 +20,7 @@ import {
 } from "@/constants/tokens";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
+import { rescheduleFromShifts } from "@/lib/reminder-service";
 import { createShare } from "@/lib/share-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
@@ -124,11 +125,16 @@ export default function WeekScreen() {
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
     // Widgets : uniquement MON planning.
-    if (!viewing)
+    if (!viewing) {
       void refreshWidgetData((data as Shift[]) ?? [], {
         accent: colors.accent,
         onAccent: colors.onAccent,
       });
+      // Rappels locaux : seulement sur MON planning de la semaine courante.
+      if (monday === mondayOf(new Date())) {
+        void rescheduleFromShifts((data as Shift[]) ?? []);
+      }
+    }
   }, [userId, monday, sunday, viewing]);
 
   useFocusEffect(
