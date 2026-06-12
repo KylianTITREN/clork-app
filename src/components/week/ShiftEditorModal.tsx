@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { Button } from "@/components/ui/Button";
+import { DatePickerField } from "@/components/ui/DatePickerField";
 import { DurationChips } from "@/components/ui/DurationChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
@@ -28,6 +29,8 @@ import {
   type ShiftPeriod,
   type ShiftType,
 } from "@/constants/tokens";
+import { addDays } from "@/lib/dates";
+import { DEFAULT_PRESETS, loadPresets, type ShiftPreset } from "@/lib/preset-service";
 import { supabase } from "@/lib/supabase";
 import type { Shift } from "@/lib/types";
 
@@ -36,15 +39,39 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
 });
-const TYPES: ShiftType[] = ["work", "training", "off", "rh", "cp", "leave", "meeting"];
-// Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
-const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
 
-// Presets de création rapide — remplissent les horaires en un tap.
-const PRESETS: { label: string; start: string; end: string; period: ShiftPeriod }[] = [
-  { label: "🌅 Matin", start: "09:00", end: "13:00", period: "morning" },
-  { label: "☀️ Journée", start: "09:00", end: "17:00", period: "day" },
-  { label: "🌙 Soir", start: "14:00", end: "20:00", period: "evening" },
+// Picker : rh et leave (legacy extraction) volontairement absents.
+const TYPES: ShiftType[] = [
+  "work",
+  "opening",
+  "closing",
+  "training",
+  "overtime",
+  "meeting",
+  "off",
+  "cp",
+  "rtt",
+  "sick",
+  "absent",
+  "unpaid",
+];
+// Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
+const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave", "opening", "absent"];
+
+// Types horaires (début/fin obligatoires) vs absences (journée/demi-journée).
+const TIMED_TYPES: ShiftType[] = ["work", "opening", "closing", "training", "overtime", "meeting"];
+const HALF_DAY_TYPES: ShiftType[] = ["cp", "rtt", "sick", "absent", "unpaid"];
+// Presets proposés sur les types « poste » (demande : travail ou formation).
+const PRESET_TYPES: ShiftType[] = ["work", "training"];
+
+// Garde-fou multi-jours : un ajout du 11 au 20 = 10 lignes, jamais plus de 31.
+const MAX_RANGE_DAYS = 31;
+
+type HalfDay = "day" | "morning" | "afternoon";
+const HALF_DAY_OPTIONS: { id: HalfDay; label: string }[] = [
+  { id: "day", label: "Journée" },
+  { id: "morning", label: "Matin" },
+  { id: "afternoon", label: "Après-midi" },
 ];
 
 export type EditorTarget =
@@ -62,6 +89,16 @@ function toLocalTime(iso: string | null): string | null {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function datesBetween(from: string, to: string): string[] {
+  const dates: string[] = [];
+  let cursor = from;
+  while (cursor <= to && dates.length < MAX_RANGE_DAYS) {
+    dates.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return dates;
+}
+
 export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const colors = useThemeColors();
   const [type, setType] = useState<ShiftType>("work");
@@ -71,7 +108,15 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const [pauseStart, setPauseStart] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [period, setPeriod] = useState<ShiftPeriod | null>(null);
+  const [halfDay, setHalfDay] = useState<HalfDay>("day");
+  const [endDate, setEndDate] = useState<string | null>(null); // multi-jours
+  const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    loadPresets().then(setPresets);
+  }, []);
 
   useEffect(() => {
     if (!target) return;
@@ -83,6 +128,11 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setPauseStart(target.shift.break_start ? target.shift.break_start.slice(0, 5) : null);
       setNote(target.shift.note ?? "");
       setPeriod(target.shift.period ?? null);
+      setHalfDay(
+        target.shift.period === "morning" || target.shift.period === "afternoon"
+          ? target.shift.period
+          : "day",
+      );
     } else {
       setType("work");
       setStart(null);
@@ -91,14 +141,27 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setPauseStart(null);
       setNote("");
       setPeriod(null);
+      setHalfDay("day");
     }
+    setEndDate(null);
+    setSelectedPresetId(null);
   }, [target]);
 
   if (!target) return null;
 
   const isCreate = target.mode === "create";
   const date = target.mode === "edit" ? target.shift.date : target.date;
-  const needsTimes = type === "work" || type === "meeting" || type === "training";
+  const needsTimes = TIMED_TYPES.includes(type);
+  const isHalfDayType = HALF_DAY_TYPES.includes(type);
+  const showPresets = isCreate && PRESET_TYPES.includes(type) && presets.length > 0;
+
+  function applyPreset(preset: ShiftPreset) {
+    setType(preset.type);
+    setStart(preset.start);
+    setEnd(preset.end);
+    setPauseMinutes(preset.breakMinutes);
+    setSelectedPresetId(preset.id);
+  }
 
   async function handleSave() {
     if (!target) return;
@@ -113,23 +176,39 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       }
     }
     setIsSaving(true);
-    const payload = {
-      date,
-      start_at: needsTimes && start ? new Date(`${date}T${start}:00`).toISOString() : null,
-      end_at: needsTimes && end ? new Date(`${date}T${end}:00`).toISOString() : null,
+    // Demi-journée stockée dans period (morning/afternoon), journée = null.
+    const effectivePeriod: ShiftPeriod | null = isHalfDayType
+      ? halfDay === "day"
+        ? null
+        : halfDay
+      : period;
+    const basePayload = {
+      start_at: null as string | null,
+      end_at: null as string | null,
       type,
       break_minutes: needsTimes ? pauseMinutes : 0,
       break_start: needsTimes && pauseMinutes > 0 ? pauseStart : null,
       note: note.trim() || null,
-      period,
+      period: effectivePeriod,
       is_edited: true,
     };
+
+    const targetDates =
+      isCreate && endDate && endDate > date ? datesBetween(date, endDate) : [date];
+
+    const rows = targetDates.map((day) => ({
+      ...basePayload,
+      date: day,
+      start_at: needsTimes && start ? new Date(`${day}T${start}:00`).toISOString() : null,
+      end_at: needsTimes && end ? new Date(`${day}T${end}:00`).toISOString() : null,
+    }));
+
     const result =
       target.mode === "edit"
-        ? await supabase.from("shifts").update(payload).eq("id", target.shift.id)
+        ? await supabase.from("shifts").update(rows[0]).eq("id", target.shift.id)
         : await supabase
             .from("shifts")
-            .insert({ ...payload, user_id: target.userId, source: "manual" });
+            .insert(rows.map((row) => ({ ...row, user_id: target.userId, source: "manual" })));
     setIsSaving(false);
     if (result.error) {
       Alert.alert("Enregistrement impossible", result.error.message);
@@ -193,39 +272,6 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
               </Pressable>
             </View>
 
-            {/* Presets express en création */}
-            {isCreate ? (
-              <View style={styles.presetRow}>
-                {PRESETS.map((preset) => (
-                  <Pressable
-                    key={preset.label}
-                    onPress={() => {
-                      // Remplit horaires + catégorie SANS toucher au type choisi.
-                      setStart(preset.start);
-                      setEnd(preset.end);
-                      setPeriod(preset.period);
-                    }}
-                    style={[
-                      styles.presetChip,
-                      {
-                        backgroundColor:
-                          start === preset.start && end === preset.end
-                            ? colors.accent
-                            : colors.surface,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.presetLabel, { color: colors.text }]}>
-                      {preset.label}
-                    </Text>
-                    <Text style={[styles.presetHours, { color: colors.textMuted }]}>
-                      {preset.start}–{preset.end}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-
             {/* Type */}
             <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Type</Text>
             <View style={styles.typeRow}>
@@ -234,7 +280,10 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                 return (
                   <Pressable
                     key={t}
-                    onPress={() => setType(t)}
+                    onPress={() => {
+                      setType(t);
+                      setSelectedPresetId(null);
+                    }}
                     style={[
                       styles.typeChip,
                       { backgroundColor: selected ? shiftTypeColor[t] : colors.surface },
@@ -258,6 +307,32 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                 );
               })}
             </View>
+
+            {/* Presets personnalisables (Profil → Créneaux types) */}
+            {showPresets ? (
+              <View style={styles.presetRow}>
+                {presets.map((preset) => {
+                  const selected = selectedPresetId === preset.id;
+                  return (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => applyPreset(preset)}
+                      style={[
+                        styles.presetChip,
+                        { backgroundColor: selected ? colors.accent : colors.surface },
+                      ]}
+                    >
+                      <Text style={[styles.presetLabel, { color: colors.text }]} numberOfLines={1}>
+                        {preset.label}
+                      </Text>
+                      <Text style={[styles.presetHours, { color: colors.textMuted }]}>
+                        {preset.start}–{preset.end}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
 
             {/* Horaires + pause */}
             {needsTimes ? (
@@ -284,7 +359,65 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
               </>
             ) : null}
 
-            {/* Catégorie (optionnelle) */}
+            {/* Journée ou demi-journée pour les absences */}
+            {isHalfDayType ? (
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Durée</Text>
+                <View style={styles.typeRow}>
+                  {HALF_DAY_OPTIONS.map((option) => {
+                    const selected = halfDay === option.id;
+                    return (
+                      <Pressable
+                        key={option.id}
+                        onPress={() => setHalfDay(option.id)}
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: selected ? colors.text : colors.surface },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.typeLabel,
+                            { color: selected ? colors.background : colors.textMuted },
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+
+            {/* Multi-jours : congés du 11 au 20, 2 jours de formation… */}
+            {isCreate ? (
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                  Jusqu'au (optionnel)
+                </Text>
+                <View style={styles.rangeRow}>
+                  <DatePickerField
+                    value={endDate}
+                    onChange={setEndDate}
+                    placeholder="Un seul jour"
+                    minimumDate={addDays(date, 1)}
+                  />
+                  {endDate ? (
+                    <Pressable onPress={() => setEndDate(null)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                    </Pressable>
+                  ) : null}
+                  {endDate && endDate > date ? (
+                    <Text style={[styles.rangeCount, { color: colors.textMuted }]}>
+                      {datesBetween(date, endDate).length} jours d'affilée
+                    </Text>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+
+            {/* Catégorie (optionnelle) pour les créneaux horaires */}
             {needsTimes ? (
               <>
                 <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
@@ -415,12 +548,15 @@ const styles = StyleSheet.create({
   },
   presetRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   presetChip: {
-    flex: 1,
+    flexBasis: "30%",
+    flexGrow: 1,
     borderRadius: radius.md,
     paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xs,
     alignItems: "center",
     gap: 1,
   },
@@ -458,12 +594,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
   },
+  rangeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  rangeCount: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
   pauseStartRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
   },
   pauseAt: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
+  },
+  noteInput: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     fontSize: typeScale.body,
     fontFamily: fonts.semiBold,
   },
@@ -481,12 +633,5 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-  },
-  noteInput: {
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    fontSize: typeScale.body,
-    fontFamily: fonts.semiBold,
   },
 });

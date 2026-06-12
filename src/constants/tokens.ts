@@ -148,7 +148,21 @@ export const softShadow = {
   elevation: 3,
 } as const;
 
-export type ShiftType = "work" | "off" | "rh" | "cp" | "leave" | "meeting" | "training";
+export type ShiftType =
+  | "work"
+  | "off"
+  | "rh" // legacy : encore produit par l'extraction des plannings papier
+  | "cp"
+  | "leave" // legacy : idem
+  | "meeting"
+  | "training"
+  | "opening"
+  | "closing"
+  | "rtt"
+  | "sick"
+  | "absent"
+  | "unpaid"
+  | "overtime";
 
 // `work` suit le thème actif via un getter (pont module-level, voir themes.ts) :
 // les écrans qui lisent ces maps à chaque rendu récupèrent la bonne couleur
@@ -163,6 +177,13 @@ export const shiftTypeColor: Record<ShiftType, string> = {
   leave: palette.shiftLeave,
   meeting: palette.shiftMeeting,
   training: "#4D9DE0",
+  opening: "#F2994A",
+  closing: "#5C6BC0",
+  rtt: "#2BB3A3",
+  sick: "#E25555",
+  absent: "#8A8A8A",
+  unpaid: "#A98467",
+  overtime: "#9B59B6",
 };
 
 export const shiftTypeSoftColor: Record<ShiftType, string> = {
@@ -175,6 +196,13 @@ export const shiftTypeSoftColor: Record<ShiftType, string> = {
   leave: palette.shiftLeaveSoft,
   meeting: palette.shiftMeetingSoft,
   training: "#DEEDFA",
+  opening: "#FCE8D5",
+  closing: "#E2E5F6",
+  rtt: "#D7F1EE",
+  sick: "#FADCDC",
+  absent: "#ECECEC",
+  unpaid: "#EFE4DB",
+  overtime: "#EDDFF4",
 };
 
 export const shiftTypeLabel: Record<ShiftType, string> = {
@@ -185,14 +213,22 @@ export const shiftTypeLabel: Record<ShiftType, string> = {
   leave: "Congé",
   meeting: "Réunion",
   training: "Formation",
+  opening: "Ouverture",
+  closing: "Fermeture",
+  rtt: "RTT",
+  sick: "Malade",
+  absent: "Absent",
+  unpaid: "Congé sans solde",
+  overtime: "Heures supp",
 };
 
-export type ShiftPeriod = "morning" | "day" | "evening";
+export type ShiftPeriod = "morning" | "day" | "evening" | "afternoon";
 
 export const shiftPeriodLabels: Record<ShiftPeriod, string> = {
   morning: "Matin",
   day: "Jour",
   evening: "Soir",
+  afternoon: "Après-midi",
 };
 
 /** Poste déduit des horaires : Matin / Après-midi / Journée. */

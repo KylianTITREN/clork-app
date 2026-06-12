@@ -127,6 +127,14 @@ export default function ProfileHubScreen() {
             onPress={() => router.push("/profile/planning")}
           />
           <NavRow
+            icon="flash"
+            iconBg={colors.accentMuted}
+            iconColor={colors.accent}
+            title="Créneaux types"
+            subtitle="Tes presets Matin / Journée / Soir"
+            onPress={() => router.push("/profile/presets")}
+          />
+          <NavRow
             icon="cafe"
             iconBg={colors.shiftCpSoft}
             iconColor={colors.shiftCp}
