@@ -74,53 +74,78 @@ export async function uploadScanPhoto(
   return path;
 }
 
-export async function runExtraction(base64: string): Promise<PlanningExtraction> {
+// Lance l'extraction côté serveur : la fonction répond 202 immédiatement et
+// continue en tâche de fond, on suit l'avancement par polling sur la table.
+export async function startExtraction(scanId: string, base64: string): Promise<void> {
   const { data, error } = await supabase.functions.invoke<ExtractFunctionResponse>(
     "extract-planning",
-    { body: { image_base64: base64, media_type: "image/jpeg" } },
+    { body: { scan_id: scanId, image_base64: base64, media_type: "image/jpeg" } },
   );
   if (error) {
-    throw new Error("Extraction échouée : " + error.message);
+    throw new Error("Lancement de l'extraction échoué : " + error.message);
   }
-  if (!data?.success || !data.data) {
-    throw new Error(data?.error ?? "Extraction échouée");
+  if (!data?.success) {
+    throw new Error(data?.error ?? "Lancement de l'extraction échoué");
   }
-  return data.data;
 }
 
-export async function saveExtractionResult(
-  scanId: string,
-  extraction: PlanningExtraction,
-): Promise<Map<number, string>> {
-  const { error } = await supabase
-    .from("scans")
-    .update({
-      status: "extracted",
-      photo_quality: extraction.photo_quality,
-      store_label: extraction.store_label,
-      week_start: extraction.week_start,
-      week_end: extraction.week_end,
-      raw_extraction: extraction,
-    })
-    .eq("id", scanId);
-  if (error) {
-    throw new Error("Sauvegarde du scan impossible : " + error.message);
-  }
+const POLL_INTERVAL_MS = 4_000;
+const POLL_TIMEOUT_MS = 5 * 60_000;
 
-  const rows = extraction.employees.map((employee) => ({
-    scan_id: scanId,
-    employee_label: employee.name,
-    row_index: employee.row_index,
-    raw: employee,
-  }));
-  const { data: inserted, error: rowsError } = await supabase
-    .from("scan_rows")
-    .insert(rows)
-    .select("id, row_index");
-  if (rowsError || !inserted) {
-    throw new Error("Sauvegarde des lignes impossible : " + (rowsError?.message ?? "?"));
+export async function waitForExtraction(scanId: string): Promise<PlanningExtraction> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { data, error } = await supabase
+      .from("scans")
+      .select("status, raw_extraction, error_message")
+      .eq("id", scanId)
+      .single<{ status: string; raw_extraction: PlanningExtraction | null; error_message: string | null }>();
+    if (error) {
+      throw new Error("Suivi du scan impossible : " + error.message);
+    }
+    if (data.status === "extracted" && data.raw_extraction) {
+      return data.raw_extraction;
+    }
+    if (data.status === "failed") {
+      throw new Error(data.error_message ?? "L'extraction a échoué — réessaie.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-  return new Map(inserted.map((r: { id: string; row_index: number }) => [r.row_index, r.id]));
+  throw new Error("L'extraction prend trop de temps — réessaie dans un instant.");
+}
+
+export async function fetchScanRowIds(scanId: string): Promise<Map<number, string>> {
+  const { data, error } = await supabase
+    .from("scan_rows")
+    .select("id, row_index")
+    .eq("scan_id", scanId);
+  if (error || !data) {
+    throw new Error("Lecture des lignes impossible : " + (error?.message ?? "?"));
+  }
+  return new Map(data.map((r: { id: string; row_index: number }) => [r.row_index, r.id]));
+}
+
+export async function markScanValidated(scanId: string): Promise<void> {
+  await supabase.from("scans").update({ status: "validated" }).eq("id", scanId);
+}
+
+// Scan extrait mais jamais validé (app fermée pendant la lecture) → à reprendre.
+export type PendingScan = {
+  id: string;
+  week_start: string | null;
+  raw_extraction: PlanningExtraction;
+};
+
+export async function findPendingValidation(userId: string): Promise<PendingScan | null> {
+  const { data } = await supabase
+    .from("scans")
+    .select("id, week_start, raw_extraction")
+    .eq("uploader_id", userId)
+    .eq("status", "extracted")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<PendingScan>();
+  return data?.raw_extraction ? data : null;
 }
 
 // --- Ciblage de SA ligne -----------------------------------------------------
@@ -177,10 +202,35 @@ export type DraftShift = {
   type: ShiftType;
   start: string | null; // "HH:MM"
   end: string | null;
+  // Durée PAYÉE imprimée sur le planning ; l'écart avec l'amplitude = pause.
+  durationHours: number | null;
   note: string | null;
   fromHandwriting: boolean;
+  highlighted: boolean;
   include: boolean; // décoché = pas enregistré
 };
+
+export function spanHours(draft: DraftShift): number | null {
+  if (!draft.start || !draft.end) return null;
+  const [sh, sm] = draft.start.split(":").map(Number);
+  const [eh, em] = draft.end.split(":").map(Number);
+  if ([sh, sm, eh, em].some(Number.isNaN)) return null;
+  return (eh * 60 + em - (sh * 60 + sm)) / 60;
+}
+
+// Pause non payée déduite (ex: 10h-18h durée 7 → 1h), null si indéterminable.
+export function breakMinutes(draft: DraftShift): number {
+  if (draft.durationHours == null) return 0;
+  const span = spanHours(draft);
+  if (span == null) return 0;
+  const minutes = Math.round((span - draft.durationHours) * 60);
+  return minutes > 0 && minutes <= 480 ? minutes : 0;
+}
+
+// Heures payées du créneau : durée imprimée si dispo, sinon amplitude brute.
+export function paidHours(draft: DraftShift): number {
+  return draft.durationHours ?? spanHours(draft) ?? 0;
+}
 
 const STATUS_TO_TYPE: Record<ExtractionDay["status"], ShiftType> = {
   work: "work",
@@ -200,8 +250,12 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
           type: "work",
           start: slot.start,
           end: slot.end,
+          // En cas de coupure (2 créneaux), la durée imprimée couvre la journée
+          // entière : impossible de la ventiler par créneau → pas de pause déduite.
+          durationHours: day.shifts.length === 1 ? day.duration_hours : null,
           note: day.note,
           fromHandwriting: day.handwritten_override,
+          highlighted: day.highlighted,
           include: true,
         });
       }
@@ -211,8 +265,10 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
         type: STATUS_TO_TYPE[day.status],
         start: null,
         end: null,
+        durationHours: null,
         note: day.status === "unknown" ? (day.note ?? "Illisible sur la photo") : day.note,
         fromHandwriting: day.handwritten_override,
+        highlighted: day.highlighted,
         // Les repos simples ne polluent pas le calendrier par défaut ;
         // RH/CP oui (utile à voir), unknown non (à corriger manuellement).
         include: day.status === "rh" || day.status === "cp",
@@ -232,8 +288,10 @@ export function meetingDraftsFromNotes(
       type: "meeting" as ShiftType,
       start: n.start,
       end: n.end ?? addOneHour(n.start as string),
+      durationHours: null,
       note: n.text,
       fromHandwriting: true,
+      highlighted: false,
       include: true,
     }));
 }
@@ -276,6 +334,7 @@ export async function saveShifts(
       start_at: d.start ? toTimestamp(d.date, d.start) : null,
       end_at: d.end ? toTimestamp(d.date, d.end) : null,
       type: d.type,
+      break_minutes: breakMinutes(d),
       note: d.note,
       source: "scan" as const,
       is_edited: d.fromHandwriting,

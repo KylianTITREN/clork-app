@@ -37,6 +37,7 @@ export type Shift = {
   start_at: string | null;
   end_at: string | null;
   type: ShiftType;
+  break_minutes: number;
   note: string | null;
   source: "scan" | "manual";
   is_edited: boolean;

@@ -22,6 +22,7 @@ export type DayEntry = {
   shifts: ShiftSlot[];
   duration_hours: number | null;
   handwritten_override: boolean;
+  highlighted: boolean;
   note: string | null;
 };
 
@@ -149,6 +150,7 @@ const EXTRACTION_TOOL = {
                   "shifts",
                   "duration_hours",
                   "handwritten_override",
+                  "highlighted",
                   "note",
                 ],
                 properties: {
@@ -185,6 +187,13 @@ const EXTRACTION_TOOL = {
                     description:
                       "true si la valeur retenue vient d'une correction manuscrite " +
                       "(rature, heure au stylo, code au marqueur) qui remplace l'imprimé.",
+                  },
+                  highlighted: {
+                    type: "boolean",
+                    description:
+                      "true si la case est mise en évidence visuellement (surligneur, " +
+                      "couleur de fond, encadré) SANS que la valeur soit modifiée. " +
+                      "Décris la couleur et l'interprétation probable dans note.",
                   },
                   note: {
                     type: ["string", "null"],
@@ -279,6 +288,17 @@ Règles de lecture, dans l'ordre de priorité :
 11. NOMS : une liste propre « Nom du collaborateur » figure souvent sous le
    tableau (zone signatures), en plus gros caractères. Sers-t'en pour
    orthographier exactement les noms des lignes du tableau.
+11bis. SURLIGNAGE : distingue deux cas. (a) Une CORRECTION (rature, valeur
+   réécrite) → handwritten_override=true. (b) Une simple MISE EN ÉVIDENCE
+   (surligneur ou fond coloré sur une heure inchangée) → highlighted=true,
+   et indique dans note la couleur + l'interprétation la plus probable dans
+   un commerce (ex: "surligné jaune sur l'heure d'arrivée : probablement
+   ouverture du magasin", "surligné sur le départ : probablement fermeture").
+   N'invente pas de sens si rien ne le suggère : décris juste la couleur.
+11ter. DURÉE vs AMPLITUDE : la colonne durée est le temps PAYÉ. Si
+   départ − arrivée > durée, l'écart est la pause non payée (souvent 1h de
+   pause déjeuner) : c'est NORMAL, ne le « corrige » pas et ne le signale en
+   warning que si l'écart dépasse 2h.
 12. COLONNES DE DROITE : distingue « Total hebdo » (heures réellement planifiées
    cette semaine) de « Base horaire » (heures du contrat, souvent 35) et
    « Delta ». total_hours = la colonne Total UNIQUEMENT. Un employé absent toute

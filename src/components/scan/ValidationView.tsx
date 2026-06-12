@@ -9,6 +9,7 @@ import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-ty
 import {
   isRowCoherent,
   meetingDraftsFromNotes,
+  paidHours,
   toDraftShifts,
   type DraftShift,
 } from "@/lib/scan-service";
@@ -38,15 +39,12 @@ export function ValidationView({
       : [],
   );
 
+  // Heures PAYÉES (durée imprimée, pause déduite) — comparables au total du planning.
   const totalHours = useMemo(
     () =>
       drafts
-        .filter((d) => d.include && d.start && d.end && d.type === "work")
-        .reduce((acc, d) => {
-          const [sh, sm] = (d.start as string).split(":").map(Number);
-          const [eh, em] = (d.end as string).split(":").map(Number);
-          return acc + (eh * 60 + em - (sh * 60 + sm)) / 60;
-        }, 0),
+        .filter((d) => d.include && d.type === "work")
+        .reduce((acc, d) => acc + paidHours(d), 0),
     [drafts],
   );
 

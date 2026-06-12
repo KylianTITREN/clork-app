@@ -14,6 +14,7 @@ export type ExtractionDay = {
   shifts: ShiftSlot[];
   duration_hours: number | null;
   handwritten_override: boolean;
+  highlighted: boolean;
   note: string | null;
 };
 

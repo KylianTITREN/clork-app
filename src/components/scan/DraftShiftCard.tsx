@@ -9,7 +9,7 @@ import {
   useThemeColors,
   type ShiftType,
 } from "@/constants/tokens";
-import type { DraftShift } from "@/lib/scan-service";
+import { breakMinutes, type DraftShift } from "@/lib/scan-service";
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
@@ -29,6 +29,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
   const typeColor = shiftTypeColor[draft.type];
   const dayLabel = DAY_FORMATTER.format(new Date(`${draft.date}T12:00:00`));
   const showTimes = draft.type === "work" || draft.type === "meeting";
+  const pause = breakMinutes(draft);
 
   return (
     <View
@@ -126,6 +127,21 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
         </View>
       ) : null}
 
+      {showTimes && (pause > 0 || draft.durationHours != null) ? (
+        <Text style={[styles.pause, { color: colors.textMuted }]}>
+          {draft.durationHours != null ? `${draft.durationHours}h payées` : ""}
+          {pause > 0
+            ? ` · ${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause`
+            : ""}
+        </Text>
+      ) : null}
+
+      {draft.highlighted ? (
+        <View style={[styles.highlightBadge, { backgroundColor: colors.surfaceMuted }]}>
+          <Text style={[styles.highlightLabel, { color: colors.text }]}>🖍️ Surligné sur le planning</Text>
+        </View>
+      ) : null}
+
       {draft.note ? (
         <Text style={[styles.note, { color: colors.textMuted }]} numberOfLines={2}>
           {draft.note}
@@ -204,5 +220,19 @@ const styles = StyleSheet.create({
   },
   note: {
     fontSize: typeScale.caption,
+  },
+  pause: {
+    fontSize: typeScale.caption,
+    fontWeight: "600",
+  },
+  highlightBadge: {
+    alignSelf: "flex-start",
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  highlightLabel: {
+    fontSize: typeScale.caption,
+    fontWeight: "600",
   },
 });

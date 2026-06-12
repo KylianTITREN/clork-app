@@ -1,16 +1,21 @@
-// Supabase Edge Function: POST a planning photo (base64) and get back the
-// structured extraction. The Anthropic API key lives ONLY in function secrets
-// (`supabase secrets set ANTHROPIC_API_KEY=...`), never in the app.
-// Requires an authenticated user JWT — the publishable key alone is rejected
-// (sinon n'importe qui avec la clé embarquée dans l'app brûlerait le crédit).
+// Supabase Edge Function : lance l'extraction d'un planning en ASYNCHRONE.
+// L'app crée d'abord la ligne `scans` + upload la photo, puis appelle cette
+// fonction qui répond 202 immédiatement et continue en tâche de fond
+// (EdgeRuntime.waitUntil) : résultat écrit dans scans/scan_rows, que l'app
+// observe par polling. L'utilisateur peut quitter l'app pendant la lecture.
+// Auth : JWT utilisateur OBLIGATOIRE + le scan doit lui appartenir.
+// La clé Anthropic ne vit QUE dans les secrets de la fonction.
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 import {
   extractPlanning,
   SUPPORTED_MEDIA_TYPES,
+  type PlanningExtraction,
   type SupportedMediaType,
 } from "./extraction.ts";
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
 // ~8 MB of base64 ≈ 6 MB image, well above what the app sends after compression.
 const MAX_BASE64_LENGTH = 8_000_000;
@@ -22,6 +27,7 @@ const CORS_HEADERS = {
 };
 
 type RequestBody = {
+  scan_id?: unknown;
   image_base64?: unknown;
   media_type?: unknown;
 };
@@ -35,6 +41,55 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 
 function errorResponse(status: number, message: string): Response {
   return jsonResponse(status, { success: false, data: null, error: message });
+}
+
+async function processInBackground(
+  service: SupabaseClient,
+  scanId: string,
+  imageBase64: string,
+  mediaType: SupportedMediaType,
+  apiKey: string,
+): Promise<void> {
+  try {
+    const result = await extractPlanning({ imageBase64, mediaType, apiKey });
+    const extraction: PlanningExtraction = result.data;
+
+    const { error: updateError } = await service
+      .from("scans")
+      .update({
+        status: "extracted",
+        photo_quality: extraction.photo_quality,
+        store_label: extraction.store_label,
+        week_start: extraction.week_start,
+        week_end: extraction.week_end,
+        raw_extraction: extraction,
+        error_message: null,
+      })
+      .eq("id", scanId);
+    if (updateError) throw new Error("scan update failed: " + updateError.message);
+
+    const rows = extraction.employees.map((employee) => ({
+      scan_id: scanId,
+      employee_label: employee.name,
+      row_index: employee.row_index,
+      raw: employee,
+    }));
+    if (rows.length > 0) {
+      const { error: rowsError } = await service.from("scan_rows").insert(rows);
+      if (rowsError) throw new Error("scan_rows insert failed: " + rowsError.message);
+    }
+    console.log(`scan ${scanId}: extracted ${rows.length} rows (${result.usage.output_tokens} tokens out)`);
+  } catch (error) {
+    console.error(`scan ${scanId} failed:`, error);
+    await service
+      .from("scans")
+      .update({
+        status: "failed",
+        error_message:
+          error instanceof Error ? error.message.slice(0, 500) : "Extraction failed",
+      })
+      .eq("id", scanId);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -63,8 +118,11 @@ Deno.serve(async (req) => {
     return errorResponse(400, "Invalid JSON body");
   }
 
-  const { image_base64: imageBase64, media_type: mediaType } = body;
+  const { scan_id: scanId, image_base64: imageBase64, media_type: mediaType } = body;
 
+  if (typeof scanId !== "string" || scanId.length === 0) {
+    return errorResponse(400, "scan_id is required");
+  }
   if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
     return errorResponse(400, "image_base64 is required (base64 string)");
   }
@@ -87,20 +145,32 @@ Deno.serve(async (req) => {
     return errorResponse(500, "Extraction service is not configured");
   }
 
-  try {
-    const result = await extractPlanning({
-      imageBase64,
-      mediaType: mediaType as SupportedMediaType,
-      apiKey,
-    });
-    return jsonResponse(200, {
-      success: true,
-      data: result.data,
-      error: null,
-      meta: { model: result.model, usage: result.usage },
-    });
-  } catch (error) {
-    console.error("extract-planning failed:", error);
-    return errorResponse(502, "Extraction failed — try a sharper photo");
+  // Le scan doit appartenir à l'utilisateur authentifié.
+  const service = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const { data: scan } = await service
+    .from("scans")
+    .select("id, uploader_id, status")
+    .eq("id", scanId)
+    .single();
+  if (!scan || scan.uploader_id !== userData.user.id) {
+    return errorResponse(404, "Scan not found");
   }
+  if (scan.status !== "pending" && scan.status !== "failed") {
+    return errorResponse(409, "Scan already processed");
+  }
+
+  EdgeRuntime.waitUntil(
+    processInBackground(
+      service,
+      scanId,
+      imageBase64,
+      mediaType as SupportedMediaType,
+      apiKey,
+    ),
+  );
+
+  return jsonResponse(202, { success: true, data: { scan_id: scanId }, error: null });
 });

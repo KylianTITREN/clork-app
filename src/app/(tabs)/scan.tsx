@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -11,14 +11,18 @@ import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import {
   createScan,
+  fetchScanRowIds,
+  findPendingValidation,
   findTargetEmployee,
+  markScanValidated,
   prepareImage,
-  runExtraction,
-  saveExtractionResult,
   saveShifts,
+  startExtraction,
   uploadScanPhoto,
   validateDraft,
+  waitForExtraction,
   type DraftShift,
+  type PendingScan,
 } from "@/lib/scan-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
@@ -29,6 +33,7 @@ type ScanState =
   | { step: "processing"; processingStep: ProcessingStep }
   | {
       step: "validate";
+      scanId: string;
       extraction: PlanningExtraction;
       target: ExtractionEmployee | null;
       rowIds: Map<number, string>;
@@ -45,8 +50,43 @@ export default function ScanScreen() {
   const { session } = useAuth();
   const [state, setState] = useState<ScanState>({ step: "idle" });
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
 
   const userId = session?.user.id;
+
+  // Un scan extrait pendant que l'app était fermée attend d'être validé.
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId || state.step !== "idle") return;
+      findPendingValidation(userId).then(setPendingScan);
+    }, [userId, state.step]),
+  );
+
+  async function resumePendingScan(pending: PendingScan) {
+    if (!userId) return;
+    try {
+      const rowIds = await fetchScanRowIds(pending.id);
+      const profile = await loadProfile(userId);
+      const target = findTargetEmployee(
+        pending.raw_extraction.employees,
+        profile?.employee_aliases ?? [],
+        profile?.display_name ?? "",
+      );
+      setPendingScan(null);
+      setState({
+        step: "validate",
+        scanId: pending.id,
+        extraction: pending.raw_extraction,
+        target,
+        rowIds,
+      });
+    } catch (error) {
+      Alert.alert(
+        "Reprise impossible",
+        error instanceof Error ? error.message : "Erreur inconnue",
+      );
+    }
+  }
 
   async function pickImage(source: "camera" | "library") {
     if (source === "camera") {
@@ -77,7 +117,10 @@ export default function ScanScreen() {
       await uploadScanPhoto(userId, scanId, image.base64);
 
       setState({ step: "processing", processingStep: "extract" });
-      const extraction = await runExtraction(image.base64);
+      await startExtraction(scanId, image.base64);
+      // L'extraction tourne côté serveur : même si l'app est fermée ici, le
+      // résultat sera proposé à la reprise (bannière « scan à valider »).
+      const extraction = await waitForExtraction(scanId);
 
       if (extraction.photo_quality === "unusable") {
         await supabase.from("scans").update({ status: "failed" }).eq("id", scanId);
@@ -90,7 +133,7 @@ export default function ScanScreen() {
       }
 
       setState({ step: "processing", processingStep: "save" });
-      const rowIds = await saveExtractionResult(scanId, extraction);
+      const rowIds = await fetchScanRowIds(scanId);
 
       const profile = await loadProfile(userId);
       const target = findTargetEmployee(
@@ -99,7 +142,7 @@ export default function ScanScreen() {
         profile?.display_name ?? "",
       );
 
-      setState({ step: "validate", extraction, target, rowIds });
+      setState({ step: "validate", scanId, extraction, target, rowIds });
     } catch (error) {
       setState({ step: "idle" });
       Alert.alert(
@@ -129,6 +172,7 @@ export default function ScanScreen() {
     try {
       const scanRowId = state.rowIds.get(target.row_index) ?? null;
       const count = await saveShifts(userId, drafts, scanRowId);
+      await markScanValidated(state.scanId);
       setIsSaving(false);
       setState({ step: "idle" });
       Alert.alert(
@@ -175,6 +219,23 @@ export default function ScanScreen() {
           Cadre tout le tableau, bien à plat, sans reflet.
         </Text>
       </View>
+
+      {pendingScan ? (
+        <Pressable
+          onPress={() => resumePendingScan(pendingScan)}
+          style={[styles.pendingBanner, { backgroundColor: colors.surfaceMuted, borderColor: colors.accent }]}
+        >
+          <Ionicons name="document-text-outline" size={22} color={colors.accent} />
+          <Text style={[styles.pendingText, { color: colors.text }]}>
+            Un scan extrait t'attend
+            {pendingScan.week_start
+              ? ` (semaine du ${new Date(`${pendingScan.week_start}T12:00:00`).toLocaleDateString("fr-FR")})`
+              : ""}{" "}
+            — appuie pour le valider.
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.actions}>
         <Pressable
@@ -223,6 +284,21 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: typeScale.body,
+  },
+  pendingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  pendingText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontWeight: "600",
   },
   actions: {
     flex: 1,

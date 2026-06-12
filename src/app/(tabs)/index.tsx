@@ -77,6 +77,7 @@ export default function WeekScreen() {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [shifts]);
 
+  // Heures payées : amplitude moins la pause non payée.
   const weekHours = useMemo(
     () =>
       shifts
@@ -86,7 +87,8 @@ export default function WeekScreen() {
             acc +
             (new Date(s.end_at as string).getTime() -
               new Date(s.start_at as string).getTime()) /
-              3_600_000,
+              3_600_000 -
+            s.break_minutes / 60,
           0,
         ),
     [shifts],
@@ -158,10 +160,20 @@ export default function WeekScreen() {
                     ) : null}
                   </View>
                   {shift.start_at && shift.end_at ? (
-                    <Text style={[styles.shiftTime, { color: colors.text }]}>
-                      {TIME_FORMATTER.format(new Date(shift.start_at))} –{" "}
-                      {TIME_FORMATTER.format(new Date(shift.end_at))}
-                    </Text>
+                    <View style={styles.shiftTimeBox}>
+                      <Text style={[styles.shiftTime, { color: colors.text }]}>
+                        {TIME_FORMATTER.format(new Date(shift.start_at))} –{" "}
+                        {TIME_FORMATTER.format(new Date(shift.end_at))}
+                      </Text>
+                      {shift.break_minutes > 0 ? (
+                        <Text style={[styles.shiftBreak, { color: colors.textMuted }]}>
+                          {shift.break_minutes >= 60
+                            ? `${Math.floor(shift.break_minutes / 60)}h${shift.break_minutes % 60 ? String(shift.break_minutes % 60).padStart(2, "0") : ""}`
+                            : `${shift.break_minutes} min`}{" "}
+                          pause
+                        </Text>
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
               ))}
@@ -228,9 +240,16 @@ const styles = StyleSheet.create({
   shiftNote: {
     fontSize: typeScale.caption,
   },
+  shiftTimeBox: {
+    alignItems: "flex-end",
+    gap: 2,
+  },
   shiftTime: {
     fontSize: typeScale.body,
     fontWeight: "800",
+  },
+  shiftBreak: {
+    fontSize: typeScale.caption,
   },
   empty: {
     flex: 1,
