@@ -25,9 +25,15 @@ export type PreparedImage = {
 
 export async function prepareImage(
   uri: string,
-  width: number,
-  height: number,
+  width?: number,
+  height?: number,
 ): Promise<PreparedImage> {
+  // Dimensions inconnues (scanner de documents) : un premier rendu les donne.
+  if (width == null || height == null) {
+    const probe = await ImageManipulator.ImageManipulator.manipulate(uri).renderAsync();
+    width = probe.width;
+    height = probe.height;
+  }
   const context = ImageManipulator.ImageManipulator.manipulate(uri);
   if (Math.max(width, height) > TARGET_LONG_EDGE) {
     context.resize(

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import DocumentScanner from "react-native-document-scanner-plugin";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
@@ -120,18 +121,25 @@ export default function ScanScreen() {
         Alert.alert("Caméra refusée", "Autorise la caméra dans Réglages pour scanner le planning.");
         return;
       }
+      // Scanner de documents natif (VisionKit iOS / ML Kit Android) :
+      // détection des bords, redressement de perspective, contraste — la photo
+      // arrive « à plat » à l'extraction.
+      const { scannedImages, status } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        croppedImageQuality: 95,
+      });
+      if (status !== "success" || !scannedImages || scannedImages.length === 0) return;
+      await processPhoto(scannedImages[0]);
+      return;
     }
-    const result =
-      source === "camera"
-        ? await ImagePicker.launchCameraAsync(PICKER_OPTIONS)
-        : await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
+    const result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
     if (result.canceled || result.assets.length === 0) return;
 
     const asset = result.assets[0];
     await processPhoto(asset.uri, asset.width, asset.height);
   }
 
-  async function processPhoto(uri: string, width: number, height: number) {
+  async function processPhoto(uri: string, width?: number, height?: number) {
     if (!userId) return;
     try {
       setState({ step: "processing", processingStep: "compress" });
@@ -372,7 +380,7 @@ export default function ScanScreen() {
           <View style={styles.cameraTextBox}>
             <Text style={styles.cameraTitle}>Prendre en photo</Text>
             <Text style={styles.cameraSubtitle}>
-              L'IA lit les horaires, tu valides. ~2 min
+              Cadrage et redressement autos · l'IA lit, tu valides
             </Text>
           </View>
           <View style={styles.cameraArrow}>
