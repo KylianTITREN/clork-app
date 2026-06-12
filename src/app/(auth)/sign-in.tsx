@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { logoByTheme } from "@/constants/logo-assets";
+import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/providers/theme-provider";
 
@@ -37,7 +38,7 @@ export default function SignInScreen() {
     });
     setIsSubmitting(false);
     if (error) {
-      Alert.alert("Connexion impossible", error.message);
+      Alert.alert("Connexion impossible", authErrorMessage(error));
     }
     // Succès : l'AuthProvider met à jour la session, le Stack.Protected bascule.
   }
@@ -87,7 +88,7 @@ export default function SignInScreen() {
             variant="ghost"
             onPress={async () => {
               const { error } = await supabase.auth.signInAnonymously();
-              if (error) Alert.alert("Oups", error.message);
+              if (error) Alert.alert("Oups", authErrorMessage(error));
             }}
           />
           <Text style={[styles.guestHint, { color: colors.textMuted }]}>

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { logoByTheme } from "@/constants/logo-assets";
 import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/providers/theme-provider";
 
@@ -51,7 +52,7 @@ export default function SignUpScreen() {
     });
     setIsSubmitting(false);
     if (error) {
-      Alert.alert("Inscription impossible", error.message);
+      Alert.alert("Inscription impossible", authErrorMessage(error));
     }
   }
 

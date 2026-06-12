@@ -15,6 +15,7 @@ import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -93,7 +94,7 @@ export default function AccountSettingsScreen() {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setIsChangingPassword(false);
     if (error) {
-      Alert.alert("Erreur", error.message);
+      Alert.alert("Erreur", authErrorMessage(error));
     } else {
       setNewPassword("");
       setConfirmPassword("");
@@ -116,7 +117,7 @@ export default function AccountSettingsScreen() {
             const { error } = await supabase.auth.updateUser({ email: target });
             setIsChangingEmail(false);
             if (error) {
-              Alert.alert("Erreur", error.message);
+              Alert.alert("Erreur", authErrorMessage(error));
             } else {
               setNewEmail("");
               Alert.alert("Email mis à jour ✅", "Pense à valider l'email de confirmation.");
@@ -148,7 +149,7 @@ export default function AccountSettingsScreen() {
                   onPress: async () => {
                     const { error } = await supabase.rpc("delete_account");
                     if (error) {
-                      Alert.alert("Suppression impossible", error.message);
+                      Alert.alert("Suppression impossible", authErrorMessage(error));
                     } else {
                       await supabase.auth.signOut();
                     }
