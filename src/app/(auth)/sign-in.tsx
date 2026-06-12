@@ -46,7 +46,7 @@ export default function SignInScreen() {
       >
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={[styles.brand, { color: colors.accentDeep }]}>Clork</Text>
+            <Text style={[styles.brand, { color: colors.text }]}>Clork</Text>
             <Text style={[styles.tagline, { color: colors.textMuted }]}>
               Ton planning papier, dans ta poche.
             </Text>
@@ -73,7 +73,7 @@ export default function SignInScreen() {
             <Button label="Se connecter" onPress={handleSignIn} isLoading={isSubmitting} />
           </View>
 
-          <Link href="/sign-up" style={[styles.link, { color: colors.accentDeep }]}>
+          <Link href="/sign-up" style={[styles.link, { color: colors.text }]}>
             Pas encore de compte ? Créer un compte
           </Link>
 

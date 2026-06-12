@@ -36,7 +36,7 @@ export function Button({
         : "transparent";
   const labelColor =
     variant === "ghost"
-      ? colors.accentDeep
+      ? colors.text
       : variant === "danger"
         ? "#FFFFFF"
         : inkOnAccent;

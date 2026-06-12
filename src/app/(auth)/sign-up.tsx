@@ -93,7 +93,7 @@ export default function SignUpScreen() {
             <Button label="Créer mon compte" onPress={handleSignUp} isLoading={isSubmitting} />
           </View>
 
-          <Link href="/sign-in" style={[styles.link, { color: colors.accentDeep }]}>
+          <Link href="/sign-in" style={[styles.link, { color: colors.text }]}>
             Déjà un compte ? Se connecter
           </Link>
         </View>

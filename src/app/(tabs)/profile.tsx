@@ -246,7 +246,7 @@ export default function ProfileScreen() {
               <Section
                 icon="finger-print"
                 iconBg={colors.accentMuted}
-                iconColor={colors.accentDeep}
+                iconColor={colors.text}
                 title="Sur le planning"
                 subtitle="Pour retrouver TA ligne automatiquement"
                 colors={colors}
