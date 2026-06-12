@@ -1,7 +1,7 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { useEffect } from "react";
 
-import { palette } from "@/constants/tokens";
+import { useThemeColors } from "@/constants/tokens";
 import { registerPushToken } from "@/lib/notifications";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -9,6 +9,7 @@ import { useAuth } from "@/providers/auth-provider";
 // Liquid Glass système — flou, reflets, minimisation au scroll.
 export default function TabsLayout() {
   const { session } = useAuth();
+  const colors = useThemeColors();
 
   useEffect(() => {
     if (session?.user.id) {
@@ -17,7 +18,7 @@ export default function TabsLayout() {
   }, [session?.user.id]);
 
   return (
-    <NativeTabs tintColor={palette.accent} minimizeBehavior="onScrollDown">
+    <NativeTabs tintColor={colors.accent} minimizeBehavior="onScrollDown">
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Planning</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="calendar" drawable="ic_menu_my_calendar" />

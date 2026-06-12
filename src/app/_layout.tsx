@@ -12,6 +12,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
+import { ThemeProvider } from "@/providers/theme-provider";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -55,9 +56,11 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <RootStack />
-      <StatusBar style="auto" />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <RootStack />
+        <StatusBar style="auto" />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
