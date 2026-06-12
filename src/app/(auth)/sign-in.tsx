@@ -12,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
 
 export default function SignInScreen() {
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
   },
   brand: {
     fontSize: typeScale.hero,
-    fontWeight: "800",
+    fontFamily: fonts.black,
     letterSpacing: -1,
   },
   tagline: {

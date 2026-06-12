@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { ValidationView } from "@/components/scan/ValidationView";
-import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, mondayOf, weekLabel } from "@/lib/dates";
 import {
@@ -419,10 +419,11 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: typeScale.title,
-    fontWeight: "800",
+    fontFamily: fonts.black,
   },
   subtitle: {
     fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
   },
   pickWeek: {
     flex: 1,
@@ -474,13 +475,13 @@ const styles = StyleSheet.create({
   actionLabelPrimary: {
     color: "#FFF",
     fontSize: typeScale.heading,
-    fontWeight: "800",
+    fontFamily: fonts.extraBold,
     textAlign: "center",
     paddingHorizontal: spacing.lg,
   },
   actionLabelSecondary: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   joinCard: {
     borderRadius: radius.md,
@@ -489,7 +490,7 @@ const styles = StyleSheet.create({
   },
   joinTitle: {
     fontSize: typeScale.caption,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   joinRow: {
     flexDirection: "row",

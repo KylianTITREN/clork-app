@@ -6,9 +6,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import {
+  fonts,
   radius,
+  shiftPeriodLabel,
   shiftTypeColor,
   shiftTypeLabel,
+  shiftTypeSoftColor,
+  softShadow,
   spacing,
   typeScale,
   useThemeColors,
@@ -21,6 +25,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric" });
 const TIME_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const CHIP_LETTERS = ["L", "M", "M", "J", "V", "S", "D"];
 
 function formatBreak(minutes: number): string {
   return minutes >= 60
@@ -28,17 +33,22 @@ function formatBreak(minutes: number): string {
     : `${minutes} min`;
 }
 
+function toLocalTime(iso: string): string {
+  return TIME_FORMATTER.format(new Date(iso));
+}
+
 export default function WeekScreen() {
   const colors = useThemeColors();
   const { session } = useAuth();
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [focusedDay, setFocusedDay] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
   const userId = session?.user.id;
   const sunday = addDays(monday, 6);
-  const todayIso = mondayOf(new Date()) === monday ? new Date().toISOString().slice(0, 10) : null;
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   const loadShifts = useCallback(async () => {
     if (!userId) return;
@@ -67,6 +77,8 @@ export default function WeekScreen() {
       }),
     [monday, shifts],
   );
+
+  const visibleDays = focusedDay ? days.filter((d) => d.date === focusedDay) : days;
 
   // Heures payées de la semaine affichée.
   const weekHours = useMemo(
@@ -103,14 +115,11 @@ export default function WeekScreen() {
       const count = await exportWeek(monday, shifts);
       Alert.alert(
         "Exporté ✅",
-        `${count} événement${count > 1 ? "s" : ""} dans le calendrier « Clork » de ton téléphone. ` +
-          "Il se synchronise automatiquement avec Google/Apple/Outlook selon tes comptes.",
+        `${count} événement${count > 1 ? "s" : ""} dans le calendrier « Clork ». ` +
+          "Il se synchronise avec Google/Apple/Outlook via les comptes du téléphone.",
       );
     } catch (error) {
-      Alert.alert(
-        "Export échoué",
-        error instanceof Error ? error.message : "Erreur inconnue",
-      );
+      Alert.alert("Export échoué", error instanceof Error ? error.message : "Erreur inconnue");
     } finally {
       setIsExporting(false);
     }
@@ -119,11 +128,18 @@ export default function WeekScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Ma semaine</Text>
+        <View>
+          <Text style={[styles.kicker, { color: colors.textMuted }]}>Mon planning</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Ma semaine</Text>
+        </View>
         <Pressable
           onPress={handleExport}
           disabled={isExporting}
-          style={[styles.exportButton, { backgroundColor: colors.surfaceMuted, opacity: isExporting ? 0.5 : 1 }]}
+          style={[
+            styles.exportButton,
+            { backgroundColor: colors.surface, opacity: isExporting ? 0.5 : 1 },
+            softShadow,
+          ]}
         >
           <Ionicons name="share-outline" size={18} color={colors.accent} />
           <Text style={[styles.exportLabel, { color: colors.accent }]}>Exporter</Text>
@@ -131,34 +147,94 @@ export default function WeekScreen() {
       </View>
 
       <View style={styles.weekNav}>
-        <Pressable onPress={() => setMonday(addDays(monday, -7))} hitSlop={12}>
-          <Ionicons name="chevron-back" size={22} color={colors.accent} />
+        <Pressable
+          onPress={() => setMonday(addDays(monday, -7))}
+          hitSlop={12}
+          style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
+        >
+          <Ionicons name="chevron-back" size={18} color={colors.accent} />
         </Pressable>
         <Pressable onPress={() => setMonday(mondayOf(new Date()))}>
           <Text style={[styles.weekLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
         </Pressable>
-        <Pressable onPress={() => setMonday(addDays(monday, 7))} hitSlop={12}>
-          <Ionicons name="chevron-forward" size={22} color={colors.accent} />
+        <Pressable
+          onPress={() => setMonday(addDays(monday, 7))}
+          hitSlop={12}
+          style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
+        >
+          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.dayStrip}>
+        {days.map(({ date, shifts: dayShifts }, i) => {
+          const isToday = date === todayIso;
+          const isFocused = focusedDay === date;
+          const hasWork = dayShifts.some((s) => s.type === "work" || s.type === "meeting");
+          return (
+            <Pressable
+              key={date}
+              onPress={() => setFocusedDay(isFocused ? null : date)}
+              style={styles.dayChipWrap}
+            >
+              <Text style={[styles.dayChipLetter, { color: colors.textMuted }]}>
+                {CHIP_LETTERS[i]}
+              </Text>
+              <View
+                style={[
+                  styles.dayChip,
+                  {
+                    backgroundColor: isFocused
+                      ? colors.accent
+                      : isToday
+                        ? colors.accentMuted
+                        : colors.surface,
+                  },
+                  !isFocused && softShadow,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dayChipNumber,
+                    { color: isFocused ? "#FFF" : colors.text },
+                  ]}
+                >
+                  {date.slice(8)}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.dayChipDot,
+                  { backgroundColor: hasWork ? colors.accent : "transparent" },
+                ]}
+              />
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {shifts.length > 0 ? (
-          <View style={[styles.heroCard, { backgroundColor: colors.accent }]}>
-            <Text style={styles.heroLabel}>Heures payées cette semaine</Text>
-            <Text style={styles.heroValue}>
-              {weekHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
-            </Text>
+          <View style={[styles.heroCard, { backgroundColor: colors.accent }, softShadow]}>
+            <View style={styles.heroTextBox}>
+              <Text style={styles.heroLabel}>Heures payées cette semaine</Text>
+              <Text style={styles.heroValue}>
+                {weekHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
+              </Text>
+            </View>
+            <View style={styles.heroBadge}>
+              <Ionicons name="time-outline" size={28} color="#FFF" />
+            </View>
           </View>
         ) : (
-          <View style={[styles.emptyHint, { backgroundColor: colors.surfaceMuted }]}>
+          <View style={[styles.emptyHint, { backgroundColor: colors.surface }, softShadow]}>
             <Text style={[styles.emptyHintText, { color: colors.textMuted }]}>
               Aucun créneau cette semaine — scanne un planning ou ajoute un jour avec « + ».
             </Text>
           </View>
         )}
 
-        {days.map(({ date, shifts: dayShifts }) => (
+        {visibleDays.map(({ date, shifts: dayShifts }) => (
           <View key={date} style={styles.daySection}>
             <View style={styles.dayHeader}>
               <Text
@@ -168,60 +244,83 @@ export default function WeekScreen() {
                 ]}
               >
                 {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
-                {date === todayIso ? "  · aujourd'hui" : ""}
+                {date === todayIso ? "  ·  aujourd'hui" : ""}
               </Text>
               <Pressable
                 onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
                 hitSlop={8}
               >
-                <Ionicons name="add-circle-outline" size={22} color={colors.accent} />
+                <Ionicons name="add-circle" size={24} color={colors.accent} />
               </Pressable>
             </View>
 
             {dayShifts.length === 0 ? (
               <View style={[styles.restCard, { borderColor: colors.border }]}>
-                <Text style={[styles.restLabel, { color: colors.textMuted }]}>—</Text>
+                <Text style={[styles.restLabel, { color: colors.textMuted }]}>
+                  Rien de prévu
+                </Text>
               </View>
             ) : (
-              dayShifts.map((shift) => (
-                <Pressable
-                  key={shift.id}
-                  onPress={() => setEditorTarget({ mode: "edit", shift })}
-                  style={({ pressed }) => [
-                    styles.shiftCard,
-                    {
-                      backgroundColor: colors.surface,
-                      borderLeftColor: shiftTypeColor[shift.type],
-                      opacity: pressed ? 0.8 : 1,
-                    },
-                  ]}
-                >
-                  <View style={styles.shiftMain}>
-                    <Text style={[styles.shiftType, { color: colors.text }]}>
-                      {shiftTypeLabel[shift.type]}
-                      {shift.is_edited ? " ✍️" : ""}
-                    </Text>
-                    {shift.note ? (
-                      <Text style={[styles.shiftNote, { color: colors.textMuted }]} numberOfLines={1}>
-                        {shift.note}
-                      </Text>
-                    ) : null}
-                  </View>
-                  {shift.start_at && shift.end_at ? (
-                    <View style={styles.shiftTimeBox}>
-                      <Text style={[styles.shiftTime, { color: colors.text }]}>
-                        {TIME_FORMATTER.format(new Date(shift.start_at))} –{" "}
-                        {TIME_FORMATTER.format(new Date(shift.end_at))}
-                      </Text>
-                      {shift.break_minutes > 0 ? (
-                        <Text style={[styles.shiftBreak, { color: colors.textMuted }]}>
-                          {formatBreak(shift.break_minutes)} pause
+              dayShifts.map((shift) => {
+                const period = shiftPeriodLabel(
+                  shift.start_at ? toLocalTime(shift.start_at) : null,
+                  shift.end_at ? toLocalTime(shift.end_at) : null,
+                );
+                return (
+                  <Pressable
+                    key={shift.id}
+                    onPress={() => setEditorTarget({ mode: "edit", shift })}
+                    style={({ pressed }) => [
+                      styles.shiftCard,
+                      {
+                        backgroundColor: shiftTypeSoftColor[shift.type],
+                        opacity: pressed ? 0.8 : 1,
+                      },
+                    ]}
+                  >
+                    <View style={styles.shiftHeader}>
+                      <View style={styles.shiftTitleRow}>
+                        <View
+                          style={[styles.shiftDot, { backgroundColor: shiftTypeColor[shift.type] }]}
+                        />
+                        <Text style={[styles.shiftType, { color: "#251F3D" }]}>
+                          {shiftTypeLabel[shift.type]}
+                          {shift.is_edited ? " ✍️" : ""}
+                        </Text>
+                        {shift.type === "work" && period ? (
+                          <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
+                            <Text style={[styles.periodLabel, { color: "#251F3D" }]}>{period}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      {shift.start_at && shift.end_at ? (
+                        <Text style={[styles.shiftTime, { color: "#251F3D" }]}>
+                          {toLocalTime(shift.start_at)} – {toLocalTime(shift.end_at)}
                         </Text>
                       ) : null}
                     </View>
-                  ) : null}
-                </Pressable>
-              ))
+
+                    {shift.break_minutes > 0 ? (
+                      <View style={styles.pauseRow}>
+                        <View style={[styles.pauseLine, { borderColor: "rgba(37,31,61,0.25)" }]} />
+                        <Text style={[styles.pauseText, { color: "rgba(37,31,61,0.6)" }]}>
+                          {formatBreak(shift.break_minutes)} de pause
+                        </Text>
+                        <View style={[styles.pauseLine, { borderColor: "rgba(37,31,61,0.25)" }]} />
+                      </View>
+                    ) : null}
+
+                    {shift.note ? (
+                      <Text
+                        style={[styles.shiftNote, { color: "rgba(37,31,61,0.65)" }]}
+                        numberOfLines={2}
+                      >
+                        {shift.note}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })
             )}
           </View>
         ))}
@@ -247,9 +346,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
+  kicker: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
   title: {
     fontSize: typeScale.title,
-    fontWeight: "800",
+    fontFamily: fonts.black,
   },
   exportButton: {
     flexDirection: "row",
@@ -261,7 +366,7 @@ const styles = StyleSheet.create({
   },
   exportLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
   },
   weekNav: {
     flexDirection: "row",
@@ -270,9 +375,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  navChevron: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   weekLabel: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
+  },
+  dayStrip: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  dayChipWrap: {
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  dayChipLetter: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
+  dayChip: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayChipNumber: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
+  },
+  dayChipDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
   },
   content: {
     paddingHorizontal: spacing.lg,
@@ -280,21 +422,34 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   heroCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderRadius: radius.lg,
     padding: spacing.lg,
+  },
+  heroTextBox: {
     gap: spacing.xs,
   },
   heroLabel: {
     color: "rgba(255,255,255,0.8)",
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   heroValue: {
     color: "#FFF",
     fontSize: typeScale.hero,
-    fontWeight: "800",
+    fontFamily: fonts.black,
+  },
+  heroBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyHint: {
     borderRadius: radius.md,
@@ -302,6 +457,7 @@ const styles = StyleSheet.create({
   },
   emptyHintText: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
     lineHeight: 18,
   },
   daySection: {
@@ -314,47 +470,75 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
     textTransform: "capitalize",
   },
   restCard: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderStyle: "dashed",
     borderRadius: radius.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     alignItems: "center",
   },
   restLabel: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
   shiftCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderLeftWidth: 4,
     borderRadius: radius.md,
     padding: spacing.md,
     gap: spacing.sm,
   },
-  shiftMain: {
-    flex: 1,
-    gap: 2,
+  shiftHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  shiftTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  shiftDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   shiftType: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
   },
-  shiftNote: {
-    fontSize: typeScale.caption,
+  periodChip: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
   },
-  shiftTimeBox: {
-    alignItems: "flex-end",
-    gap: 2,
+  periodLabel: {
+    fontSize: 11,
+    fontFamily: fonts.bold,
   },
   shiftTime: {
     fontSize: typeScale.body,
-    fontWeight: "800",
+    fontFamily: fonts.black,
   },
-  shiftBreak: {
+  pauseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  pauseLine: {
+    flex: 1,
+    borderBottomWidth: 1.5,
+    borderStyle: "dashed",
+  },
+  pauseText: {
+    fontSize: 11,
+    fontFamily: fonts.bold,
+  },
+  shiftNote: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
 });

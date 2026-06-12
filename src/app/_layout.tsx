@@ -1,7 +1,19 @@
+import {
+  Nunito_400Regular,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+  Nunito_900Black,
+  useFonts,
+} from "@expo-google-fonts/nunito";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
 
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
+
+SplashScreen.preventAutoHideAsync();
 
 function RootStack() {
   const { session, isLoading } = useAuth();
@@ -24,6 +36,24 @@ function RootStack() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    Nunito_400Regular,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+    Nunito_900Black,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <AuthProvider>
       <RootStack />

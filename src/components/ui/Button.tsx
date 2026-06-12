@@ -6,7 +6,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 type ButtonProps = {
   label: string;
@@ -63,14 +63,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    minHeight: 52,
+    borderRadius: radius.pill,
+    minHeight: 54,
   },
   pressed: {
     transform: [{ scale: 0.98 }],
   },
   label: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
   },
 });

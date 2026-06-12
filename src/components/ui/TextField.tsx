@@ -1,6 +1,6 @@
 import { StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 
-import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 type TextFieldProps = TextInputProps & {
   label: string;
@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
@@ -49,9 +49,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
     minHeight: 52,
   },
   hint: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
   },
 });
