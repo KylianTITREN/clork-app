@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
@@ -27,6 +27,7 @@ import {
   type DraftShift,
   type PendingScan,
 } from "@/lib/scan-service";
+import { claimShare, createShare, recordClaimedRow } from "@/lib/share-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -57,6 +58,8 @@ export default function ScanScreen() {
   const [state, setState] = useState<ScanState>({ step: "idle" });
   const [isSaving, setIsSaving] = useState(false);
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
+  const [joinCode, setJoinCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
 
   const userId = session?.user.id;
 
@@ -172,6 +175,39 @@ export default function ScanScreen() {
     return data;
   }
 
+  async function handleShare(scanId: string) {
+    try {
+      const code = await createShare(scanId);
+      await Share.share({
+        message:
+          `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
+          `Ouvre l'app → Scanner → « J'ai reçu un code » et saisis : ${code.toUpperCase()}`,
+      });
+    } catch (error) {
+      Alert.alert(
+        "Partage impossible",
+        error instanceof Error ? error.message : "Erreur inconnue",
+      );
+    }
+  }
+
+  async function handleJoin() {
+    if (!joinCode.trim()) return;
+    setIsJoining(true);
+    try {
+      const claimed = await claimShare(joinCode);
+      setJoinCode("");
+      await enterValidation(claimed.scanId, claimed.extraction);
+    } catch (error) {
+      Alert.alert(
+        "Code refusé",
+        error instanceof Error ? error.message : "Erreur inconnue",
+      );
+    } finally {
+      setIsJoining(false);
+    }
+  }
+
   async function handleSave(drafts: DraftShift[], target: ExtractionEmployee) {
     if (!userId || state.step !== "validate") return;
     const problem = drafts.map(validateDraft).find((p) => p !== null);
@@ -181,15 +217,22 @@ export default function ScanScreen() {
     }
     setIsSaving(true);
     try {
+      const scanId = state.scanId;
       const scanRowId = state.rowIds.get(target.row_index) ?? null;
       const count = await saveShifts(userId, drafts, scanRowId);
-      await markScanValidated(state.scanId);
+      await markScanValidated(scanId); // sans effet (RLS) sur un scan partagé, voulu
+      if (scanRowId) {
+        await recordClaimedRow(scanId, scanRowId);
+      }
       setIsSaving(false);
       setState({ step: "idle" });
       Alert.alert(
         "C'est dans ton calendrier ✅",
         `${count} créneau${count > 1 ? "x" : ""} enregistré${count > 1 ? "s" : ""}.`,
-        [{ text: "Voir ma semaine", onPress: () => router.navigate("/(tabs)") }],
+        [
+          { text: "Partager aux collègues", onPress: () => handleShare(scanId) },
+          { text: "Voir ma semaine", onPress: () => router.navigate("/(tabs)") },
+        ],
       );
     } catch (error) {
       setIsSaving(false);
@@ -332,6 +375,36 @@ export default function ScanScreen() {
             Choisir dans la galerie
           </Text>
         </Pressable>
+
+        <View style={[styles.joinCard, { backgroundColor: colors.surfaceMuted }]}>
+          <Text style={[styles.joinTitle, { color: colors.text }]}>
+            Une collègue a déjà scanné ? 🤝
+          </Text>
+          <View style={styles.joinRow}>
+            <TextInput
+              value={joinCode}
+              onChangeText={setJoinCode}
+              placeholder="Code reçu (ex: A3F2B1C4)"
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              style={[
+                styles.joinInput,
+                { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border },
+              ]}
+            />
+            <Pressable
+              onPress={handleJoin}
+              disabled={isJoining || !joinCode.trim()}
+              style={[
+                styles.joinButton,
+                { backgroundColor: colors.accent, opacity: isJoining || !joinCode.trim() ? 0.5 : 1 },
+              ]}
+            >
+              <Ionicons name="arrow-forward" size={20} color="#FFF" />
+            </Pressable>
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -408,5 +481,33 @@ const styles = StyleSheet.create({
   actionLabelSecondary: {
     fontSize: typeScale.body,
     fontWeight: "700",
+  },
+  joinCard: {
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  joinTitle: {
+    fontSize: typeScale.caption,
+    fontWeight: "700",
+  },
+  joinRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  joinInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: typeScale.body,
+    fontWeight: "600",
+  },
+  joinButton: {
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.md,
   },
 });

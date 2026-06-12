@@ -27,8 +27,33 @@ export default function ProfileScreen() {
   const [breakThreshold, setBreakThreshold] = useState("6");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [upgradeEmail, setUpgradeEmail] = useState("");
+  const [upgradePassword, setUpgradePassword] = useState("");
+  const [isUpgrading, setIsUpgrading] = useState(false);
 
   const userId = session?.user.id;
+  const isGuest = session?.user.is_anonymous ?? false;
+
+  async function handleUpgrade() {
+    if (!upgradeEmail.trim() || upgradePassword.length < 8) {
+      Alert.alert("Champs invalides", "Email valide + mot de passe de 8 caractères minimum.");
+      return;
+    }
+    setIsUpgrading(true);
+    const { error } = await supabase.auth.updateUser({
+      email: upgradeEmail.trim(),
+      password: upgradePassword,
+    });
+    setIsUpgrading(false);
+    if (error) {
+      Alert.alert("Création impossible", error.message);
+    } else {
+      Alert.alert(
+        "Compte créé ✅",
+        "Toutes tes données sont conservées. Le partage et les scans illimités sont débloqués.",
+      );
+    }
+  }
 
   const loadProfile = useCallback(async () => {
     if (!userId) return;
@@ -106,6 +131,34 @@ export default function ProfileScreen() {
             Ces infos servent à retrouver TA ligne sur le planning photographié.
           </Text>
 
+          {isGuest ? (
+            <>
+              <Text style={[styles.guestTitle, { color: colors.accent }]}>
+                Mode invité — crée ton compte
+              </Text>
+              <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+                Gratuit, tes données sont conservées : ça débloque le partage avec
+                tes collègues et les scans illimités.
+              </Text>
+              <TextField
+                label="Email"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                placeholder="typhanie@exemple.fr"
+                value={upgradeEmail}
+                onChangeText={setUpgradeEmail}
+              />
+              <TextField
+                label="Mot de passe"
+                secureTextEntry
+                placeholder="8 caractères minimum"
+                value={upgradePassword}
+                onChangeText={setUpgradePassword}
+              />
+              <Button label="Créer mon compte" onPress={handleUpgrade} isLoading={isUpgrading} />
+            </>
+          ) : null}
+
           {isLoading ? null : (
             <>
               <TextField
@@ -168,5 +221,9 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: typeScale.body,
     marginBottom: spacing.sm,
+  },
+  guestTitle: {
+    fontSize: typeScale.heading,
+    fontWeight: "800",
   },
 });

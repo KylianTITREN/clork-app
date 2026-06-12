@@ -76,6 +76,19 @@ export default function SignInScreen() {
           <Link href="/sign-up" style={[styles.link, { color: colors.accent }]}>
             Pas encore de compte ? Créer un compte
           </Link>
+
+          <Button
+            label="Essayer sans compte"
+            variant="ghost"
+            onPress={async () => {
+              const { error } = await supabase.auth.signInAnonymously();
+              if (error) Alert.alert("Oups", error.message);
+            }}
+          />
+          <Text style={[styles.guestHint, { color: colors.textMuted }]}>
+            Mode essai : 1 scan par semaine, sans partage. Tu pourras créer ton
+            compte plus tard sans rien perdre.
+          </Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -109,5 +122,10 @@ const styles = StyleSheet.create({
     fontSize: typeScale.body,
     fontWeight: "600",
     textAlign: "center",
+  },
+  guestHint: {
+    fontSize: typeScale.caption,
+    textAlign: "center",
+    lineHeight: 18,
   },
 });

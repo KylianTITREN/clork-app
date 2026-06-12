@@ -43,9 +43,36 @@ function errorResponse(status: number, message: string): Response {
   return jsonResponse(status, { success: false, data: null, error: message });
 }
 
+// Notifie l'utilisateur via Expo Push quand l'extraction se termine
+// (silencieux si pas de token : simulateur, permissions refusées…).
+async function sendPushNotification(
+  service: SupabaseClient,
+  userId: string,
+  title: string,
+  body: string,
+): Promise<void> {
+  try {
+    const { data: profile } = await service
+      .from("profiles")
+      .select("expo_push_token")
+      .eq("id", userId)
+      .single();
+    const token = profile?.expo_push_token;
+    if (!token) return;
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ to: token, title, body, sound: "default" }),
+    });
+  } catch (error) {
+    console.error("push notification failed:", error);
+  }
+}
+
 async function processInBackground(
   service: SupabaseClient,
   scanId: string,
+  uploaderId: string,
   imageBase64: string,
   mediaType: SupportedMediaType,
   apiKey: string,
@@ -79,6 +106,14 @@ async function processInBackground(
       if (rowsError) throw new Error("scan_rows insert failed: " + rowsError.message);
     }
     console.log(`scan ${scanId}: extracted ${rows.length} rows (${result.usage.output_tokens} tokens out)`);
+    await sendPushNotification(
+      service,
+      uploaderId,
+      "Planning prêt ✅",
+      extraction.photo_quality === "unusable"
+        ? "La photo était illisible — reprends-la dans Clork."
+        : "Tes horaires sont extraits, ouvre Clork pour les valider.",
+    );
   } catch (error) {
     console.error(`scan ${scanId} failed:`, error);
     await service
@@ -89,6 +124,12 @@ async function processInBackground(
           error instanceof Error ? error.message.slice(0, 500) : "Extraction failed",
       })
       .eq("id", scanId);
+    await sendPushNotification(
+      service,
+      uploaderId,
+      "Scan échoué",
+      "La lecture du planning a échoué — réessaie dans Clork.",
+    );
   }
 }
 
@@ -162,10 +203,29 @@ Deno.serve(async (req) => {
     return errorResponse(409, "Scan already processed");
   }
 
+  // Mode invité : 1 scan par semaine glissante (le compte lève la limite).
+  if (userData.user.is_anonymous) {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const { count } = await service
+      .from("scans")
+      .select("id", { count: "exact", head: true })
+      .eq("uploader_id", userData.user.id)
+      .neq("id", scanId)
+      .gte("created_at", weekAgo);
+    if ((count ?? 0) >= 1) {
+      await service.from("scans").delete().eq("id", scanId);
+      return errorResponse(
+        403,
+        "Limite du mode invité atteinte (1 scan/semaine). Crée un compte gratuit dans Profil pour continuer.",
+      );
+    }
+  }
+
   EdgeRuntime.waitUntil(
     processInBackground(
       service,
       scanId,
+      userData.user.id,
       imageBase64,
       mediaType as SupportedMediaType,
       apiKey,
