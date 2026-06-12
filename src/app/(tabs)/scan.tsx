@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { ValidationView } from "@/components/scan/ValidationView";
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, mondayOf, weekLabel } from "@/lib/dates";
 import {
@@ -322,75 +322,107 @@ export default function ScanScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Scanner</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          Cadre tout le tableau, bien à plat, sans reflet.
-        </Text>
-      </View>
+      <View style={styles.idleContainer}>
+        <View style={styles.header}>
+          <Text style={[styles.kicker, { color: colors.textMuted }]}>Scanner</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Nouveau planning</Text>
+        </View>
 
-      {pendingScan ? (
-        <Pressable
-          onPress={() => resumePendingScan(pendingScan)}
-          style={[styles.pendingBanner, { backgroundColor: colors.surfaceMuted, borderColor: colors.accent }]}
-        >
-          <Ionicons name="document-text-outline" size={22} color={colors.accent} />
-          <Text style={[styles.pendingText, { color: colors.text }]}>
-            Un scan extrait t'attend
-            {pendingScan.week_start
-              ? ` (semaine du ${new Date(`${pendingScan.week_start}T12:00:00`).toLocaleDateString("fr-FR")})`
-              : ""}{" "}
-            — appuie pour le valider.
-          </Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
-        </Pressable>
-      ) : null}
+        {pendingScan ? (
+          <Pressable
+            onPress={() => resumePendingScan(pendingScan)}
+            style={({ pressed }) => [
+              styles.pendingBanner,
+              { backgroundColor: colors.surface, opacity: pressed ? 0.85 : 1 },
+              softShadow,
+            ]}
+          >
+            <View style={[styles.iconCircle, styles.iconCircleSmall, { backgroundColor: colors.accentMuted }]}>
+              <Ionicons name="sparkles" size={18} color={colors.accent} />
+            </View>
+            <View style={styles.pendingTextBox}>
+              <Text style={[styles.pendingTitle, { color: colors.text }]}>
+                Un scan t'attend ✨
+              </Text>
+              <Text style={[styles.pendingText, { color: colors.textMuted }]}>
+                {pendingScan.week_start
+                  ? `Semaine du ${new Date(`${pendingScan.week_start}T12:00:00`).toLocaleDateString("fr-FR")} — `
+                  : ""}
+                appuie pour le valider
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+          </Pressable>
+        ) : null}
 
-      <View style={styles.actions}>
+        {/* Action principale : grande carte caméra */}
         <Pressable
           onPress={() => pickImage("camera")}
           style={({ pressed }) => [
-            styles.actionCard,
-            { backgroundColor: colors.accent, opacity: pressed ? 0.9 : 1 },
+            styles.cameraCard,
+            { backgroundColor: colors.accent, transform: [{ scale: pressed ? 0.98 : 1 }] },
+            softShadow,
           ]}
         >
-          <Ionicons name="camera" size={44} color="#FFF" />
-          <Text style={styles.actionLabelPrimary}>Prendre le planning en photo</Text>
+          <View style={styles.cameraIconCircle}>
+            <Ionicons name="camera" size={32} color="#FFF" />
+          </View>
+          <View style={styles.cameraTextBox}>
+            <Text style={styles.cameraTitle}>Prendre en photo</Text>
+            <Text style={styles.cameraSubtitle}>
+              L'IA lit les horaires, tu valides. ~2 min
+            </Text>
+          </View>
+          <View style={styles.cameraArrow}>
+            <Ionicons name="arrow-forward" size={20} color={colors.accent} />
+          </View>
         </Pressable>
 
+        {/* Action secondaire : rangée galerie */}
         <Pressable
           onPress={() => pickImage("library")}
           style={({ pressed }) => [
-            styles.actionCard,
-            styles.actionCardSecondary,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-              opacity: pressed ? 0.9 : 1,
-            },
+            styles.rowCard,
+            { backgroundColor: colors.surface, opacity: pressed ? 0.85 : 1 },
+            softShadow,
           ]}
         >
-          <Ionicons name="images-outline" size={32} color={colors.accent} />
-          <Text style={[styles.actionLabelSecondary, { color: colors.text }]}>
-            Choisir dans la galerie
-          </Text>
+          <View style={[styles.iconCircle, { backgroundColor: colors.shiftMeetingSoft }]}>
+            <Ionicons name="images" size={22} color={colors.shiftMeeting} />
+          </View>
+          <View style={styles.rowTextBox}>
+            <Text style={[styles.rowTitle, { color: colors.text }]}>Importer de la galerie</Text>
+            <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>
+              Une photo déjà prise du planning
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
 
-        <View style={[styles.joinCard, { backgroundColor: colors.surfaceMuted }]}>
-          <Text style={[styles.joinTitle, { color: colors.text }]}>
-            Une collègue a déjà scanné ? 🤝
-          </Text>
+        {/* Code collègue */}
+        <View style={[styles.rowCard, styles.joinCard, { backgroundColor: colors.surface }, softShadow]}>
+          <View style={styles.joinHeader}>
+            <View style={[styles.iconCircle, { backgroundColor: colors.shiftRhSoft }]}>
+              <Ionicons name="people" size={22} color={colors.shiftRh} />
+            </View>
+            <View style={styles.rowTextBox}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Code d'une collègue</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>
+                Récupère tes horaires sans re-scanner
+              </Text>
+            </View>
+          </View>
           <View style={styles.joinRow}>
             <TextInput
               value={joinCode}
               onChangeText={setJoinCode}
-              placeholder="Code reçu (ex: A3F2B1C4)"
+              placeholder="A3F2B1C4"
               placeholderTextColor={colors.textMuted}
               autoCapitalize="characters"
               autoCorrect={false}
               style={[
                 styles.joinInput,
-                { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border },
+                { backgroundColor: colors.surfaceMuted, color: colors.text },
               ]}
             />
             <Pressable
@@ -398,12 +430,21 @@ export default function ScanScreen() {
               disabled={isJoining || !joinCode.trim()}
               style={[
                 styles.joinButton,
-                { backgroundColor: colors.accent, opacity: isJoining || !joinCode.trim() ? 0.5 : 1 },
+                { backgroundColor: colors.accent, opacity: isJoining || !joinCode.trim() ? 0.4 : 1 },
               ]}
             >
               <Ionicons name="arrow-forward" size={20} color="#FFF" />
             </Pressable>
           </View>
+        </View>
+
+        {/* Conseils de cadrage */}
+        <View style={styles.tipsRow}>
+          {["📐  Bien à plat", "💡  Sans reflet", "🖼️  Tout le tableau"].map((tip) => (
+            <View key={tip} style={[styles.tipChip, { backgroundColor: colors.surfaceMuted }]}>
+              <Text style={[styles.tipText, { color: colors.textMuted }]}>{tip}</Text>
+            </View>
+          ))}
         </View>
       </View>
     </SafeAreaView>
@@ -440,57 +481,113 @@ const styles = StyleSheet.create({
     fontSize: typeScale.body,
     fontWeight: "700",
   },
+  idleContainer: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+  },
+  kicker: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
   pendingBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
+  },
+  pendingTextBox: {
+    flex: 1,
+    gap: 2,
+  },
+  pendingTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
   },
   pendingText: {
-    flex: 1,
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.semiBold,
   },
-  actions: {
-    flex: 1,
-    justifyContent: "center",
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  actionCard: {
+  iconCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.sm,
+  },
+  iconCircleSmall: {
+    width: 38,
+    height: 38,
+  },
+  cameraCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
     borderRadius: radius.lg,
-    paddingVertical: spacing.xl,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
   },
-  actionCardSecondary: {
-    borderWidth: 1,
-    paddingVertical: spacing.lg,
+  cameraIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  actionLabelPrimary: {
+  cameraTextBox: {
+    flex: 1,
+    gap: 2,
+  },
+  cameraTitle: {
     color: "#FFF",
     fontSize: typeScale.heading,
-    fontFamily: fonts.extraBold,
-    textAlign: "center",
-    paddingHorizontal: spacing.lg,
+    fontFamily: fonts.black,
   },
-  actionLabelSecondary: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.bold,
+  cameraSubtitle: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
-  joinCard: {
+  cameraArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: "#FFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
     borderRadius: radius.md,
     padding: spacing.md,
-    gap: spacing.sm,
   },
-  joinTitle: {
+  rowTextBox: {
+    flex: 1,
+    gap: 2,
+  },
+  rowTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
+  },
+  rowSubtitle: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.semiBold,
+  },
+  joinCard: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: spacing.md,
+  },
+  joinHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
   },
   joinRow: {
     flexDirection: "row",
@@ -498,17 +595,35 @@ const styles = StyleSheet.create({
   },
   joinInput: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
     fontSize: typeScale.body,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
+    letterSpacing: 2,
   },
   joinButton: {
-    borderRadius: radius.sm,
+    width: 46,
+    height: 46,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
+  },
+  tipsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: "auto",
+    paddingBottom: spacing.md,
+  },
+  tipChip: {
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+  },
+  tipText: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
 });
