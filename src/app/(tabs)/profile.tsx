@@ -134,7 +134,7 @@ export default function ProfileScreen() {
 
           {isGuest ? (
             <>
-              <Text style={[styles.guestTitle, { color: colors.accent }]}>
+              <Text style={[styles.guestTitle, { color: colors.accentDeep }]}>
                 Mode invité — crée ton compte
               </Text>
               <Text style={[styles.subtitle, { color: colors.textMuted }]}>

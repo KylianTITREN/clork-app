@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import {
   fonts,
+  inkOnAccent,
   radius,
   shiftPeriodLabel,
   shiftTypeColor,
@@ -141,8 +142,8 @@ export default function WeekScreen() {
             softShadow,
           ]}
         >
-          <Ionicons name="share-outline" size={18} color={colors.accent} />
-          <Text style={[styles.exportLabel, { color: colors.accent }]}>Exporter</Text>
+          <Ionicons name="share-outline" size={18} color={colors.accentDeep} />
+          <Text style={[styles.exportLabel, { color: colors.accentDeep }]}>Exporter</Text>
         </Pressable>
       </View>
 
@@ -152,7 +153,7 @@ export default function WeekScreen() {
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
-          <Ionicons name="chevron-back" size={18} color={colors.accent} />
+          <Ionicons name="chevron-back" size={18} color={colors.accentDeep} />
         </Pressable>
         <Pressable onPress={() => setMonday(mondayOf(new Date()))}>
           <Text style={[styles.weekLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
@@ -162,7 +163,7 @@ export default function WeekScreen() {
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
-          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+          <Ionicons name="chevron-forward" size={18} color={colors.accentDeep} />
         </Pressable>
       </View>
 
@@ -196,7 +197,7 @@ export default function WeekScreen() {
                 <Text
                   style={[
                     styles.dayChipNumber,
-                    { color: isFocused ? "#FFF" : colors.text },
+                    { color: isFocused ? inkOnAccent : colors.text },
                   ]}
                 >
                   {date.slice(8)}
@@ -205,7 +206,7 @@ export default function WeekScreen() {
               <View
                 style={[
                   styles.dayChipDot,
-                  { backgroundColor: hasWork ? colors.accent : "transparent" },
+                  { backgroundColor: hasWork ? colors.accentDeep : "transparent" },
                 ]}
               />
             </Pressable>
@@ -227,7 +228,7 @@ export default function WeekScreen() {
               </Text>
             </View>
             <View style={styles.heroBadge}>
-              <Ionicons name="time-outline" size={28} color="#FFF" />
+              <Ionicons name="time-outline" size={28} color={inkOnAccent} />
             </View>
           </View>
         ) : (
@@ -244,7 +245,7 @@ export default function WeekScreen() {
               <Text
                 style={[
                   styles.dayLabel,
-                  { color: date === todayIso ? colors.accent : colors.textMuted },
+                  { color: date === todayIso ? colors.accentDeep : colors.textMuted },
                 ]}
               >
                 {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
@@ -254,7 +255,7 @@ export default function WeekScreen() {
                 onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
                 hitSlop={8}
               >
-                <Ionicons name="add-circle" size={24} color={colors.accent} />
+                <Ionicons name="add-circle" size={24} color={colors.accentDeep} />
               </Pressable>
             </View>
 
@@ -436,14 +437,14 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   heroLabel: {
-    color: "rgba(255,255,255,0.8)",
+    color: "rgba(38,33,14,0.65)",
     fontSize: typeScale.caption,
     fontFamily: fonts.bold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   heroValue: {
-    color: "#FFF",
+    color: inkOnAccent,
     fontSize: typeScale.hero,
     fontFamily: fonts.black,
   },
@@ -451,7 +452,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(38,33,14,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },

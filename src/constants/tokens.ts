@@ -5,24 +5,29 @@
 
 import { useColorScheme } from "react-native";
 
-export const palette = {
-  // Accent : violet Clork.
-  accent: "#6C4EF5",
-  accentSoft: "#A593F9",
-  accentMuted: "#E9E4FD",
+// Encre posée sur les surfaces jaunes/pastel (jamais de blanc sur jaune).
+export const inkOnAccent = "#26210E";
 
-  // Types de créneau : couleur forte (points, dots) + fond pastel (cartes),
-  // texte toujours en encre — c'est la signature Timezy.
-  shiftWork: "#6C4EF5",
-  shiftWorkSoft: "#E9E4FD",
-  shiftOff: "#9BA1AE",
-  shiftOffSoft: "#F0EFF4",
+export const palette = {
+  // Accent : jaune Clork (décision Kylian 2026-06-12). accentDeep = déclinaison
+  // dorée lisible pour textes/icônes sur fond clair.
+  accent: "#F1D001",
+  accentDeep: "#A88F00",
+  accentSoft: "#F7E36A",
+  accentMuted: "#FAF3CC",
+
+  // Types de créneau : couleur forte (dots) + fond pastel (cartes),
+  // texte toujours en encre — signature Timezy.
+  shiftWork: "#D9B900",
+  shiftWorkSoft: "#F8F0C5",
+  shiftOff: "#9BA1A0",
+  shiftOffSoft: "#F0EFEA",
   shiftRh: "#2FA877",
   shiftRhSoft: "#DFF4EA",
-  shiftCp: "#E79A23",
-  shiftCpSoft: "#FCF0DB",
-  shiftLeave: "#E79A23",
-  shiftLeaveSoft: "#FCF0DB",
+  shiftCp: "#EE8A3B",
+  shiftCpSoft: "#FCE9D9",
+  shiftLeave: "#EE8A3B",
+  shiftLeaveSoft: "#FCE9D9",
   shiftMeeting: "#E861A4",
   shiftMeetingSoft: "#FDE4F0",
 
@@ -42,22 +47,22 @@ export type ThemeColors = Record<
 >;
 
 export const lightColors: ThemeColors = {
-  background: "#EFECF9", // lavande pastel
+  background: "#F7F5EE", // crème chaud, neutre
   surface: "#FFFFFF",
-  surfaceMuted: "#F6F4FC",
-  border: "#E3DFF0",
-  text: "#251F3D", // encre violette
-  textMuted: "#716C87",
+  surfaceMuted: "#F1EEE3",
+  border: "#E6E2D4",
+  text: "#221F15", // encre chaude
+  textMuted: "#75705F",
   ...palette,
 };
 
 export const darkColors: ThemeColors = {
-  background: "#171321",
-  surface: "#221C31",
-  surfaceMuted: "#2B2440",
-  border: "#3A3252",
-  text: "#F2EFFA",
-  textMuted: "#A39DBA",
+  background: "#191712",
+  surface: "#23211A",
+  surfaceMuted: "#2D2A21",
+  border: "#3C382B",
+  text: "#F4F2E8",
+  textMuted: "#A8A493",
   ...palette,
 };
 
@@ -102,7 +107,7 @@ export const fonts = {
 
 // Ombre douce des cartes (iOS) + elevation légère (Android).
 export const softShadow = {
-  shadowColor: "#3B2E7A",
+  shadowColor: "#4A4430",
   shadowOpacity: 0.08,
   shadowRadius: 16,
   shadowOffset: { width: 0, height: 8 },

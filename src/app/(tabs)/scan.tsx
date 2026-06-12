@@ -7,7 +7,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { ValidationView } from "@/components/scan/ValidationView";
-import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, inkOnAccent, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, mondayOf, weekLabel } from "@/lib/dates";
 import {
@@ -339,7 +339,7 @@ export default function ScanScreen() {
             ]}
           >
             <View style={[styles.iconCircle, styles.iconCircleSmall, { backgroundColor: colors.accentMuted }]}>
-              <Ionicons name="sparkles" size={18} color={colors.accent} />
+              <Ionicons name="sparkles" size={18} color={colors.accentDeep} />
             </View>
             <View style={styles.pendingTextBox}>
               <Text style={[styles.pendingTitle, { color: colors.text }]}>
@@ -352,7 +352,7 @@ export default function ScanScreen() {
                 appuie pour le valider
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+            <Ionicons name="chevron-forward" size={18} color={colors.accentDeep} />
           </Pressable>
         ) : null}
 
@@ -366,7 +366,7 @@ export default function ScanScreen() {
           ]}
         >
           <View style={styles.cameraIconCircle}>
-            <Ionicons name="camera" size={32} color="#FFF" />
+            <Ionicons name="camera" size={32} color={inkOnAccent} />
           </View>
           <View style={styles.cameraTextBox}>
             <Text style={styles.cameraTitle}>Prendre en photo</Text>
@@ -375,7 +375,7 @@ export default function ScanScreen() {
             </Text>
           </View>
           <View style={styles.cameraArrow}>
-            <Ionicons name="arrow-forward" size={20} color={colors.accent} />
+            <Ionicons name="arrow-forward" size={20} color={colors.accentDeep} />
           </View>
         </Pressable>
 
@@ -434,7 +434,7 @@ export default function ScanScreen() {
                 { backgroundColor: colors.accent, opacity: isJoining || !joinCode.trim() ? 0.4 : 1 },
               ]}
             >
-              <Ionicons name="arrow-forward" size={20} color="#FFF" />
+              <Ionicons name="arrow-forward" size={20} color={inkOnAccent} />
             </Pressable>
           </View>
         </View>
@@ -535,7 +535,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(38,33,14,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -544,12 +544,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   cameraTitle: {
-    color: "#FFF",
+    color: inkOnAccent,
     fontSize: typeScale.heading,
     fontFamily: fonts.black,
   },
   cameraSubtitle: {
-    color: "rgba(255,255,255,0.8)",
+    color: "rgba(38,33,14,0.65)",
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },

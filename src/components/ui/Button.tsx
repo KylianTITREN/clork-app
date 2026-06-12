@@ -6,7 +6,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, inkOnAccent, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 type ButtonProps = {
   label: string;
@@ -34,7 +34,12 @@ export function Button({
       : variant === "danger"
         ? colors.danger
         : "transparent";
-  const labelColor = variant === "ghost" ? colors.accent : "#FFFFFF";
+  const labelColor =
+    variant === "ghost"
+      ? colors.accentDeep
+      : variant === "danger"
+        ? "#FFFFFF"
+        : inkOnAccent;
 
   return (
     <Pressable

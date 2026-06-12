@@ -47,7 +47,7 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={colors.accent} />
+      <ActivityIndicator size="large" color={colors.accentDeep} />
       <View style={styles.steps}>
         {STEPS.map((step, index) => {
           const isDone = index < currentIndex;
@@ -57,7 +57,7 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
               <Ionicons
                 name={isDone ? "checkmark-circle" : isCurrent ? "ellipse" : "ellipse-outline"}
                 size={20}
-                color={isDone ? colors.success : isCurrent ? colors.accent : colors.textMuted}
+                color={isDone ? colors.success : isCurrent ? colors.accentDeep : colors.textMuted}
               />
               <Text
                 style={[

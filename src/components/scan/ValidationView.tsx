@@ -104,7 +104,7 @@ export function ValidationView({
           {extraction.store_label ? ` · ${extraction.store_label}` : ""}
         </Text>
         <Pressable onPress={() => setTarget(null)}>
-          <Text style={[styles.switchLine, { color: colors.accent }]}>
+          <Text style={[styles.switchLine, { color: colors.accentDeep }]}>
             Ce n'est pas la bonne ligne ?
           </Text>
         </Pressable>
