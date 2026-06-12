@@ -47,7 +47,15 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
       themeId === DEFAULT_THEME_ID
         ? null
         : themeId.charAt(0).toUpperCase() + themeId.slice(1); // catalogues en PascalCase
-    await icons.setAlternateAppIcon(iconName);
+    try {
+      await icons.setAlternateAppIcon(iconName);
+    } catch (firstError) {
+      // « Resource temporarily unavailable » : le springboard refuse juste
+      // après un lancement par débogueur ou un retour au premier plan —
+      // une seconde tentative différée suffit en général.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await icons.setAlternateAppIcon(iconName);
+    }
     if (__DEV__) {
       const { Alert } = require("react-native") as typeof import("react-native");
       Alert.alert("[dev] Icône", `setAlternateAppIcon(${iconName ?? "null"}) OK → active : ${icons.getAppIconName() ?? "défaut"}`);
