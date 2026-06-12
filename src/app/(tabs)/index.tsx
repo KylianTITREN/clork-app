@@ -288,18 +288,18 @@ export default function WeekScreen() {
                         <View
                           style={[styles.shiftDot, { backgroundColor: shiftTypeColor[shift.type] }]}
                         />
-                        <Text style={[styles.shiftType, { color: "#251F3D" }]}>
+                        <Text style={[styles.shiftType, { color: inkOnAccent }]}>
                           {shiftTypeLabel[shift.type]}
                           {shift.is_edited ? " ✍️" : ""}
                         </Text>
                         {shift.type === "work" && period ? (
                           <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
-                            <Text style={[styles.periodLabel, { color: "#251F3D" }]}>{period}</Text>
+                            <Text style={[styles.periodLabel, { color: inkOnAccent }]}>{period}</Text>
                           </View>
                         ) : null}
                       </View>
                       {shift.start_at && shift.end_at ? (
-                        <Text style={[styles.shiftTime, { color: "#251F3D" }]}>
+                        <Text style={[styles.shiftTime, { color: inkOnAccent }]}>
                           {toLocalTime(shift.start_at)} – {toLocalTime(shift.end_at)}
                         </Text>
                       ) : null}
@@ -307,17 +307,17 @@ export default function WeekScreen() {
 
                     {shift.break_minutes > 0 ? (
                       <View style={styles.pauseRow}>
-                        <View style={[styles.pauseLine, { borderColor: "rgba(37,31,61,0.25)" }]} />
-                        <Text style={[styles.pauseText, { color: "rgba(37,31,61,0.6)" }]}>
+                        <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
+                        <Text style={[styles.pauseText, { color: "rgba(38,33,14,0.6)" }]}>
                           {formatBreak(shift.break_minutes)} de pause
                         </Text>
-                        <View style={[styles.pauseLine, { borderColor: "rgba(37,31,61,0.25)" }]} />
+                        <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
                       </View>
                     ) : null}
 
                     {shift.note ? (
                       <Text
-                        style={[styles.shiftNote, { color: "rgba(37,31,61,0.65)" }]}
+                        style={[styles.shiftNote, { color: "rgba(38,33,14,0.65)" }]}
                         numberOfLines={2}
                       >
                         {shift.note}
