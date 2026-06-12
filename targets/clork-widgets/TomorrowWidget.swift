@@ -1,46 +1,72 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
+// MARK: - Configuration (appui long sur le widget → « Modifier le widget »)
+
+enum ClorkDayOption: String, AppEnum {
+    case today
+    case tomorrow
+
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Jour")
+    static let caseDisplayRepresentations: [ClorkDayOption: DisplayRepresentation] = [
+        .today: "Aujourd'hui",
+        .tomorrow: "Demain",
+    ]
+}
+
+struct DayConfigIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Jour affiché"
+    static let description = IntentDescription("Choisis le jour affiché par le widget.")
+
+    @Parameter(title: "Jour", default: .tomorrow)
+    var day: ClorkDayOption
+}
+
 // MARK: - Timeline
 
-struct TomorrowEntry: TimelineEntry {
+struct DayEntry: TimelineEntry {
     let date: Date
+    let kicker: String // "AUJOURD'HUI" / "DEMAIN"
     let dayLabel: String
     let shifts: [WidgetShift]
 }
 
-struct TomorrowProvider: TimelineProvider {
-    func placeholder(in _: Context) -> TomorrowEntry {
-        TomorrowEntry(date: .now, dayLabel: "demain", shifts: SampleData.tomorrow)
+struct DayProvider: AppIntentTimelineProvider {
+    func placeholder(in _: Context) -> DayEntry {
+        DayEntry(date: .now, kicker: "DEMAIN", dayLabel: "14/06", shifts: SampleData.tomorrow)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (TomorrowEntry) -> Void) {
-        completion(context.isPreview ? placeholder(in: context) : makeEntry(now: .now))
+    func snapshot(for configuration: DayConfigIntent, in context: Context) async -> DayEntry {
+        context.isPreview ? placeholder(in: context) : makeEntry(configuration, now: .now)
     }
 
-    func getTimeline(in _: Context, completion: @escaping (Timeline<TomorrowEntry>) -> Void) {
+    func timeline(for configuration: DayConfigIntent, in _: Context) async -> Timeline<DayEntry> {
         let now = Date.now
-        let timeline = Timeline(
-            entries: [makeEntry(now: now)],
+        return Timeline(
+            entries: [makeEntry(configuration, now: now)],
             policy: .after(ClorkDates.nextMidnight(after: now))
         )
-        completion(timeline)
     }
 
-    private func makeEntry(now: Date) -> TomorrowEntry {
-        let tomorrow = ClorkDates.calendar.date(byAdding: .day, value: 1, to: now) ?? now
-        return TomorrowEntry(
+    private func makeEntry(_ configuration: DayConfigIntent, now: Date) -> DayEntry {
+        let isToday = configuration.day == .today
+        let target = isToday
+            ? now
+            : ClorkDates.calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        return DayEntry(
             date: now,
-            dayLabel: ClorkDates.shortDayLabel(tomorrow),
-            shifts: WidgetStore.shifts(on: tomorrow)
+            kicker: isToday ? "AUJOURD'HUI" : "DEMAIN",
+            dayLabel: ClorkDates.shortDayLabel(target),
+            shifts: WidgetStore.shifts(on: target)
         )
     }
 }
 
 // MARK: - Views
 
-struct TomorrowWidgetView: View {
-    let entry: TomorrowEntry
+struct DayWidgetView: View {
+    let entry: DayEntry
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
@@ -60,13 +86,14 @@ struct TomorrowWidgetView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("DEMAIN")
+            Text(entry.kicker)
                 .font(.clork(11, weight: .heavy))
                 .kerning(1.2)
                 .foregroundStyle(ClorkTheme.ink)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(ClorkTheme.accent, in: Capsule())
+                .minimumScaleFactor(0.8)
             Text(entry.dayLabel)
                 .font(.clork(12, weight: .bold))
                 .foregroundStyle(ClorkTheme.inkSoft)
@@ -137,13 +164,19 @@ private struct ShiftRow: View {
 
 // MARK: - Widget
 
+// Kind conservé (« ClorkTomorrowWidget ») pour ne pas casser les widgets déjà
+// posés sur l'écran d'accueil — seul l'intérieur devient configurable.
 struct TomorrowWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "ClorkTomorrowWidget", provider: TomorrowProvider()) { entry in
-            TomorrowWidgetView(entry: entry)
+        AppIntentConfiguration(
+            kind: "ClorkTomorrowWidget",
+            intent: DayConfigIntent.self,
+            provider: DayProvider()
+        ) { entry in
+            DayWidgetView(entry: entry)
         }
-        .configurationDisplayName("Demain")
-        .description("Tes créneaux du lendemain en un coup d'œil.")
+        .configurationDisplayName("Aujourd'hui / Demain")
+        .description("Tes créneaux du jour choisi — appui long pour changer de jour.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -162,15 +195,15 @@ enum SampleData {
     ]
 }
 
-#Preview("Demain · small", as: .systemSmall) {
+#Preview("Jour · small", as: .systemSmall) {
     TomorrowWidget()
 } timeline: {
-    TomorrowEntry(date: .now, dayLabel: "sam. 14 juin", shifts: SampleData.tomorrow)
-    TomorrowEntry(date: .now, dayLabel: "sam. 14 juin", shifts: [])
+    DayEntry(date: .now, kicker: "DEMAIN", dayLabel: "14/06", shifts: SampleData.tomorrow)
+    DayEntry(date: .now, kicker: "AUJOURD'HUI", dayLabel: "13/06", shifts: [])
 }
 
-#Preview("Demain · medium", as: .systemMedium) {
+#Preview("Jour · medium", as: .systemMedium) {
     TomorrowWidget()
 } timeline: {
-    TomorrowEntry(date: .now, dayLabel: "sam. 14 juin", shifts: SampleData.tomorrow)
+    DayEntry(date: .now, kicker: "DEMAIN", dayLabel: "14/06", shifts: SampleData.tomorrow)
 }

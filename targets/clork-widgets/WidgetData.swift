@@ -97,11 +97,13 @@ enum ClorkDates {
 
     static let french = Locale(identifier: "fr_FR")
 
+    /// Clé de correspondance avec `shift.date` côté app — NE PAS toucher au
+    /// format : l'app écrit "yyyy-MM-dd" (voir src/lib/widget-data.ts).
     static func isoDay(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "dd/MM"
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }
 

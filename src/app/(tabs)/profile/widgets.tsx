@@ -51,9 +51,10 @@ export default function WidgetsScreen() {
               <Ionicons name="sunny" size={16} color={colors.text} />
             </View>
             <View style={styles.widgetTextBox}>
-              <Text style={[styles.widgetName, { color: colors.text }]}>Demain</Text>
+              <Text style={[styles.widgetName, { color: colors.text }]}>Aujourd'hui / Demain</Text>
               <Text style={[styles.widgetDesc, { color: colors.textMuted }]}>
-                Tes horaires de demain en un coup d'œil (petit format).
+                Les horaires du jour de ton choix : appui long sur le widget →
+                « Modifier le widget » pour basculer entre aujourd'hui et demain.
               </Text>
             </View>
           </View>
