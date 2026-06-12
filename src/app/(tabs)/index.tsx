@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
@@ -21,6 +21,7 @@ import {
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
+import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -46,6 +47,41 @@ export default function WeekScreen() {
   const [focusedDay, setFocusedDay] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
+
+  // Swipe horizontal sur le bandeau de jours = changer de semaine.
+  const mondayRef = useRef(monday);
+  mondayRef.current = monday;
+  const swipeResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx <= -48) setMonday(addDays(mondayRef.current, 7));
+        else if (g.dx >= 48) setMonday(addDays(mondayRef.current, -7));
+      },
+    }),
+  ).current;
+
+  async function openColleagues() {
+    const { data } = await supabase
+      .from("scans")
+      .select("raw_extraction")
+      .eq("week_start", monday)
+      .eq("status", "validated")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ raw_extraction: PlanningExtraction | null }>();
+    const employees = data?.raw_extraction?.employees;
+    if (!employees || employees.length === 0) {
+      Alert.alert(
+        "Pas de planning d'équipe",
+        "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues.",
+      );
+      return;
+    }
+    setColleagues(employees);
+  }
 
   const userId = session?.user.id;
   const sunday = addDays(monday, 6);
@@ -135,6 +171,13 @@ export default function WeekScreen() {
         </View>
         <View style={styles.headerActions}>
           <Pressable
+            onPress={openColleagues}
+            style={[styles.iconPill, { backgroundColor: colors.surface }, softShadow]}
+            hitSlop={6}
+          >
+            <Ionicons name="people-outline" size={18} color={colors.accent} />
+          </Pressable>
+          <Pressable
             onPress={() => router.navigate("/(tabs)/scan")}
             style={[styles.iconPill, { backgroundColor: colors.surface }, softShadow]}
             hitSlop={6}
@@ -176,7 +219,7 @@ export default function WeekScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.dayStrip}>
+      <View style={styles.dayStrip} {...swipeResponder.panHandlers}>
         {days.map(({ date, shifts: dayShifts }, i) => {
           const isToday = date === todayIso;
           const isFocused = focusedDay === date;
@@ -341,6 +384,47 @@ export default function WeekScreen() {
           </View>
         ))}
       </ScrollView>
+
+      {colleagues ? (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setColleagues(null)}>
+          <Pressable style={styles.colleaguesBackdrop} onPress={() => setColleagues(null)} />
+          <View style={[styles.colleaguesSheet, { backgroundColor: colors.background }]}>
+            <Text style={[styles.colleaguesTitle, { color: colors.text }]}>
+              L'équipe · {weekLabel(monday)}
+            </Text>
+            <ScrollView contentContainerStyle={styles.colleaguesList}>
+              {colleagues.map((employee) => {
+                const day = focusedDay ?? todayIso;
+                const dayEntry = employee.days.find((d) => d.date === day);
+                const summary =
+                  dayEntry?.status === "work" && dayEntry.shifts.length > 0
+                    ? dayEntry.shifts.map((sl) => `${sl.start}–${sl.end}`).join(" / ")
+                    : dayEntry?.status === "rh"
+                      ? "RH"
+                      : dayEntry?.status === "cp"
+                        ? "CP"
+                        : "Repos";
+                return (
+                  <View
+                    key={employee.row_index}
+                    style={[styles.colleagueRow, { backgroundColor: colors.surface }, softShadow]}
+                  >
+                    <View style={styles.colleagueText}>
+                      <Text style={[styles.colleagueName, { color: colors.text }]} numberOfLines={1}>
+                        {employee.name}
+                      </Text>
+                      <Text style={[styles.colleagueMeta, { color: colors.textMuted }]}>
+                        {employee.total_hours != null ? `${employee.total_hours}h cette semaine` : "—"}
+                      </Text>
+                    </View>
+                    <Text style={[styles.colleagueDay, { color: colors.text }]}>{summary}</Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Modal>
+      ) : null}
 
       <ShiftEditorModal
         target={editorTarget}
