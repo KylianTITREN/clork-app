@@ -22,7 +22,7 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   month: "long",
 });
 
-const EDITABLE_TYPES: ShiftType[] = ["work", "off", "rh", "cp", "meeting"];
+const EDITABLE_TYPES: ShiftType[] = ["work", "training", "off", "rh", "cp", "meeting"];
 // Texte des chips sélectionnées : encre sur les couleurs claires, blanc sinon.
 const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
 
@@ -38,7 +38,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
   const colors = useThemeColors();
   const typeColor = shiftTypeColor[draft.type];
   const dayLabel = DAY_FORMATTER.format(new Date(`${draft.date}T12:00:00`));
-  const showTimes = draft.type === "work" || draft.type === "meeting";
+  const showTimes = draft.type === "work" || draft.type === "meeting" || draft.type === "training";
   const pause = breakMinutes(draft);
 
   return (
@@ -88,8 +88,8 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
                   ...draft,
                   type,
                   // Un type sans horaires vide les heures ; work/meeting les exige.
-                  start: type === "work" || type === "meeting" ? draft.start : null,
-                  end: type === "work" || type === "meeting" ? draft.end : null,
+                  start: type === "work" || type === "meeting" || type === "training" ? draft.start : null,
+                  end: type === "work" || type === "meeting" || type === "training" ? draft.end : null,
                 })
               }
               style={[

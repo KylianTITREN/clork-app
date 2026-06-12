@@ -389,7 +389,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function validateDraft(draft: DraftShift): string | null {
   if (!draft.include) return null;
-  if (draft.type === "work" || draft.type === "meeting") {
+  if (draft.type === "work" || draft.type === "meeting" || draft.type === "training") {
     if (!draft.start || !TIME_RE.test(draft.start)) return `${draft.date} : heure de début invalide`;
     if (!draft.end || !TIME_RE.test(draft.end)) return `${draft.date} : heure de fin invalide`;
     if (draft.end <= draft.start) return `${draft.date} : la fin doit être après le début`;

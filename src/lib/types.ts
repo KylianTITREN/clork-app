@@ -1,7 +1,7 @@
 // Types des lignes Postgres manipulées par l'app.
 // (Génération automatique via `supabase gen types` envisageable plus tard.)
 
-import type { ShiftType } from "@/constants/tokens";
+import type { ShiftPeriod, ShiftType } from "@/constants/tokens";
 
 export type Profile = {
   id: string;
@@ -45,6 +45,8 @@ export type Shift = {
   type: ShiftType;
   break_minutes: number;
   break_start: string | null; // "HH:MM:SS" côté Postgres (time)
+  // Catégorie assignée par l'utilisateur (sinon déduite des horaires à l'affichage).
+  period: ShiftPeriod | null;
   note: string | null;
   source: "scan" | "manual";
   is_edited: boolean;

@@ -19,11 +19,13 @@ import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
   fonts,
   radius,
+  shiftPeriodLabels,
   shiftTypeColor,
   shiftTypeLabel,
   spacing,
   typeScale,
   useThemeColors,
+  type ShiftPeriod,
   type ShiftType,
 } from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
@@ -34,7 +36,7 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
 });
-const TYPES: ShiftType[] = ["work", "off", "rh", "cp", "leave", "meeting"];
+const TYPES: ShiftType[] = ["work", "training", "off", "rh", "cp", "leave", "meeting"];
 // Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
 const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
 
@@ -68,6 +70,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const [pauseMinutes, setPauseMinutes] = useState(0);
   const [pauseStart, setPauseStart] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [period, setPeriod] = useState<ShiftPeriod | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -79,6 +82,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setPauseMinutes(target.shift.break_minutes);
       setPauseStart(target.shift.break_start ? target.shift.break_start.slice(0, 5) : null);
       setNote(target.shift.note ?? "");
+      setPeriod(target.shift.period ?? null);
     } else {
       setType("work");
       setStart(null);
@@ -86,6 +90,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setPauseMinutes(0);
       setPauseStart(null);
       setNote("");
+      setPeriod(null);
     }
   }, [target]);
 
@@ -93,7 +98,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
 
   const isCreate = target.mode === "create";
   const date = target.mode === "edit" ? target.shift.date : target.date;
-  const needsTimes = type === "work" || type === "meeting";
+  const needsTimes = type === "work" || type === "meeting" || type === "training";
 
   async function handleSave() {
     if (!target) return;
@@ -116,6 +121,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       break_minutes: needsTimes ? pauseMinutes : 0,
       break_start: needsTimes && pauseMinutes > 0 ? pauseStart : null,
       note: note.trim() || null,
+      period,
       is_edited: true,
     };
     const result =
@@ -267,6 +273,39 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                     />
                   </View>
                 ) : null}
+              </>
+            ) : null}
+
+            {/* Catégorie (optionnelle) */}
+            {needsTimes ? (
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                  Catégorie (optionnel)
+                </Text>
+                <View style={styles.typeRow}>
+                  {(Object.keys(shiftPeriodLabels) as ShiftPeriod[]).map((id) => {
+                    const selected = period === id;
+                    return (
+                      <Pressable
+                        key={id}
+                        onPress={() => setPeriod(selected ? null : id)}
+                        style={[
+                          styles.typeChip,
+                          { backgroundColor: selected ? colors.text : colors.surface },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.typeLabel,
+                            { color: selected ? colors.background : colors.textMuted },
+                          ]}
+                        >
+                          {shiftPeriodLabels[id]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </>
             ) : null}
 

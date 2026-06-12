@@ -148,7 +148,7 @@ export const softShadow = {
   elevation: 3,
 } as const;
 
-export type ShiftType = "work" | "off" | "rh" | "cp" | "leave" | "meeting";
+export type ShiftType = "work" | "off" | "rh" | "cp" | "leave" | "meeting" | "training";
 
 // `work` suit le thème actif via un getter (pont module-level, voir themes.ts) :
 // les écrans qui lisent ces maps à chaque rendu récupèrent la bonne couleur
@@ -162,6 +162,7 @@ export const shiftTypeColor: Record<ShiftType, string> = {
   cp: palette.shiftCp,
   leave: palette.shiftLeave,
   meeting: palette.shiftMeeting,
+  training: "#4D9DE0",
 };
 
 export const shiftTypeSoftColor: Record<ShiftType, string> = {
@@ -173,6 +174,7 @@ export const shiftTypeSoftColor: Record<ShiftType, string> = {
   cp: palette.shiftCpSoft,
   leave: palette.shiftLeaveSoft,
   meeting: palette.shiftMeetingSoft,
+  training: "#DEEDFA",
 };
 
 export const shiftTypeLabel: Record<ShiftType, string> = {
@@ -182,6 +184,15 @@ export const shiftTypeLabel: Record<ShiftType, string> = {
   cp: "Congé payé",
   leave: "Congé",
   meeting: "Réunion",
+  training: "Formation",
+};
+
+export type ShiftPeriod = "morning" | "day" | "evening";
+
+export const shiftPeriodLabels: Record<ShiftPeriod, string> = {
+  morning: "Matin",
+  day: "Jour",
+  evening: "Soir",
 };
 
 /** Poste déduit des horaires : Matin / Après-midi / Journée. */

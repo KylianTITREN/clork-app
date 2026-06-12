@@ -9,6 +9,7 @@ import {
   fonts,
   radius,
   shiftPeriodLabel,
+  shiftPeriodLabels,
   shiftTypeColor,
   shiftTypeLabel,
   shiftTypeSoftColor,
@@ -320,10 +321,12 @@ export default function WeekScreen() {
               </View>
             ) : (
               dayShifts.map((shift) => {
-                const period = shiftPeriodLabel(
-                  shift.start_at ? toLocalTime(shift.start_at) : null,
-                  shift.end_at ? toLocalTime(shift.end_at) : null,
-                );
+                const period = shift.period
+                  ? shiftPeriodLabels[shift.period]
+                  : shiftPeriodLabel(
+                      shift.start_at ? toLocalTime(shift.start_at) : null,
+                      shift.end_at ? toLocalTime(shift.end_at) : null,
+                    );
                 return (
                   <Pressable
                     key={shift.id}
@@ -344,7 +347,7 @@ export default function WeekScreen() {
                         <Text style={[styles.shiftType, { color: INK }]}>
                           {shiftTypeLabel[shift.type]}
                         </Text>
-                        {shift.type === "work" && period ? (
+                        {(shift.type === "work" || shift.type === "training") && period ? (
                           <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
                             <Text style={[styles.periodLabel, { color: INK }]}>{period}</Text>
                           </View>
