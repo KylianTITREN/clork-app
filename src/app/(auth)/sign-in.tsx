@@ -1,4 +1,5 @@
 import { Link } from "expo-router";
+import { Image } from "react-native";
 import { useState } from "react";
 import {
   Alert,
@@ -13,10 +14,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { logoByTheme } from "@/constants/logo-assets";
 import { supabase } from "@/lib/supabase";
+import { useTheme } from "@/providers/theme-provider";
 
 export default function SignInScreen() {
   const colors = useThemeColors();
+  const { themeId } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,7 +50,8 @@ export default function SignInScreen() {
       >
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={[styles.brand, { color: colors.accent }]}>Clork</Text>
+            <Image source={logoByTheme[themeId]} style={styles.logo} />
+            <Text style={[styles.brand, { color: colors.text }]}>Clork</Text>
             <Text style={[styles.tagline, { color: colors.textMuted }]}>
               Ton planning papier, dans ta poche.
             </Text>
@@ -106,6 +111,11 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: spacing.xs,
+  },
+  logo: {
+    width: 110,
+    height: 110,
+    marginBottom: spacing.sm,
   },
   brand: {
     fontSize: typeScale.hero,
