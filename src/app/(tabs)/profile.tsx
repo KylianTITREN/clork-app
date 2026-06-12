@@ -58,6 +58,14 @@ function Section({ icon, iconBg, iconColor, title, subtitle, colors, children }:
   );
 }
 
+type FormSnapshot = {
+  displayName: string;
+  planningNames: string;
+  employeeId: string;
+  breakMinutes: string;
+  breakThreshold: string;
+};
+
 export default function ProfileScreen() {
   const colors = useThemeColors();
   const { session } = useAuth();
@@ -69,6 +77,7 @@ export default function ProfileScreen() {
   const [breakThreshold, setBreakThreshold] = useState("6");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState<FormSnapshot | null>(null);
   const [upgradeEmail, setUpgradeEmail] = useState("");
   const [upgradePassword, setUpgradePassword] = useState("");
   const [isUpgrading, setIsUpgrading] = useState(false);
@@ -77,6 +86,14 @@ export default function ProfileScreen() {
   const isGuest = session?.user.is_anonymous ?? false;
   const email = session?.user.email ?? null;
   const initial = (displayName.trim() || email || "C").charAt(0).toUpperCase();
+
+  const isDirty =
+    savedSnapshot != null &&
+    (displayName !== savedSnapshot.displayName ||
+      planningNames !== savedSnapshot.planningNames ||
+      employeeId !== savedSnapshot.employeeId ||
+      breakMinutes !== savedSnapshot.breakMinutes ||
+      breakThreshold !== savedSnapshot.breakThreshold);
 
   async function handleUpgrade() {
     if (!upgradeEmail.trim() || upgradePassword.length < 8) {
@@ -114,6 +131,13 @@ export default function ProfileScreen() {
       setEmployeeId(data.employee_id ?? "");
       setBreakMinutes(String(data.break_default_minutes ?? 0));
       setBreakThreshold(String(data.break_threshold_hours ?? 6));
+      setSavedSnapshot({
+        displayName: data.display_name,
+        planningNames: data.employee_aliases.join(", "),
+        employeeId: data.employee_id ?? "",
+        breakMinutes: String(data.break_default_minutes ?? 0),
+        breakThreshold: String(data.break_threshold_hours ?? 6),
+      });
     }
     setIsLoading(false);
   }, [userId]);
@@ -149,6 +173,7 @@ export default function ProfileScreen() {
     if (error) {
       Alert.alert("Erreur", "Sauvegarde impossible : " + error.message);
     } else {
+      setSavedSnapshot({ displayName, planningNames, employeeId, breakMinutes, breakThreshold });
       Alert.alert("Profil enregistré", "Tes infos planning sont à jour. ✅");
     }
   }
@@ -188,19 +213,33 @@ export default function ProfileScreen() {
             {!isLoading ? (
               <Pressable
                 onPress={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || !isDirty}
                 style={({ pressed }) => [
                   styles.savePill,
-                  { backgroundColor: colors.accent, opacity: isSaving ? 0.5 : pressed ? 0.85 : 1 },
-                  softShadow,
+                  {
+                    backgroundColor: isDirty ? colors.accent : colors.surfaceMuted,
+                    opacity: isSaving ? 0.5 : pressed && isDirty ? 0.85 : 1,
+                  },
+                  isDirty && softShadow,
                 ]}
               >
                 {isSaving ? (
                   <ActivityIndicator size="small" color={inkOnAccent} />
                 ) : (
                   <>
-                    <Ionicons name="checkmark" size={16} color={inkOnAccent} />
-                    <Text style={styles.savePillLabel}>Enregistrer</Text>
+                    <Ionicons
+                      name={isDirty ? "checkmark" : "checkmark-done"}
+                      size={16}
+                      color={isDirty ? inkOnAccent : colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.savePillLabel,
+                        { color: isDirty ? inkOnAccent : colors.textMuted },
+                      ]}
+                    >
+                      {isDirty ? "Enregistrer" : "À jour"}
+                    </Text>
                   </>
                 )}
               </Pressable>
@@ -411,7 +450,6 @@ const styles = StyleSheet.create({
   savePillLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.extraBold,
-    color: inkOnAccent,
   },
   signOutRow: {
     flexDirection: "row",
