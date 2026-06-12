@@ -43,8 +43,6 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
 // Picker : rh et leave (legacy extraction) volontairement absents.
 const TYPES: ShiftType[] = [
   "work",
-  "opening",
-  "closing",
   "training",
   "overtime",
   "meeting",
@@ -56,10 +54,12 @@ const TYPES: ShiftType[] = [
   "unpaid",
 ];
 // Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
-const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave", "opening", "absent"];
+const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave", "absent"];
 
 // Types horaires (début/fin obligatoires) vs absences (journée/demi-journée).
-const TIMED_TYPES: ShiftType[] = ["work", "opening", "closing", "training", "overtime", "meeting"];
+const TIMED_TYPES: ShiftType[] = ["work", "training", "overtime", "meeting"];
+// Catégories proposées, dans l'ordre demandé.
+const PERIOD_ORDER: ShiftPeriod[] = ["day", "morning", "afternoon", "evening", "opening", "closing"];
 const HALF_DAY_TYPES: ShiftType[] = ["cp", "rtt", "sick", "absent", "unpaid"];
 // Presets proposés sur les types « poste » (demande : travail ou formation).
 const PRESET_TYPES: ShiftType[] = ["work", "training"];
@@ -272,6 +272,36 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
               </Pressable>
             </View>
 
+            {/* Presets en premier : un tap et tout est pré-rempli */}
+            {showPresets ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.presetRow}
+              >
+                {presets.map((preset) => {
+                  const selected = selectedPresetId === preset.id;
+                  return (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => applyPreset(preset)}
+                      style={[
+                        styles.presetChip,
+                        { backgroundColor: selected ? colors.accent : colors.surface },
+                      ]}
+                    >
+                      <Text style={[styles.presetLabel, { color: colors.text }]} numberOfLines={1}>
+                        {preset.label}
+                      </Text>
+                      <Text style={[styles.presetHours, { color: colors.textMuted }]}>
+                        {preset.start}–{preset.end}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
+
             {/* Type */}
             <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Type</Text>
             <View style={styles.typeRow}>
@@ -307,32 +337,6 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                 );
               })}
             </View>
-
-            {/* Presets personnalisables (Profil → Créneaux types) */}
-            {showPresets ? (
-              <View style={styles.presetRow}>
-                {presets.map((preset) => {
-                  const selected = selectedPresetId === preset.id;
-                  return (
-                    <Pressable
-                      key={preset.id}
-                      onPress={() => applyPreset(preset)}
-                      style={[
-                        styles.presetChip,
-                        { backgroundColor: selected ? colors.accent : colors.surface },
-                      ]}
-                    >
-                      <Text style={[styles.presetLabel, { color: colors.text }]} numberOfLines={1}>
-                        {preset.label}
-                      </Text>
-                      <Text style={[styles.presetHours, { color: colors.textMuted }]}>
-                        {preset.start}–{preset.end}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
 
             {/* Horaires + pause */}
             {needsTimes ? (
@@ -424,7 +428,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                   Catégorie (optionnel)
                 </Text>
                 <View style={styles.typeRow}>
-                  {(Object.keys(shiftPeriodLabels) as ShiftPeriod[]).map((id) => {
+                  {PERIOD_ORDER.map((id) => {
                     const selected = period === id;
                     return (
                       <Pressable
@@ -548,15 +552,13 @@ const styles = StyleSheet.create({
   },
   presetRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing.sm,
   },
   presetChip: {
-    flexBasis: "30%",
-    flexGrow: 1,
+    minWidth: 104,
     borderRadius: radius.md,
     paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.sm,
     alignItems: "center",
     gap: 1,
   },

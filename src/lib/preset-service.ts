@@ -10,7 +10,7 @@ const STORAGE_KEY = "clork.presets";
 export const MAX_PRESETS = 6;
 
 /** Types autorisés pour un preset (créneaux avec horaires). */
-export type PresetType = Extract<ShiftType, "work" | "training" | "opening" | "closing" | "overtime">;
+export type PresetType = Extract<ShiftType, "work" | "training" | "overtime">;
 
 export type ShiftPreset = {
   id: string;

@@ -24,8 +24,8 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Icon sf="calendar" drawable="ic_menu_my_calendar" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="scan">
-        <NativeTabs.Trigger.Label>Scanner</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="camera.viewfinder" drawable="ic_menu_camera" />
+        <NativeTabs.Trigger.Label>Ajouter</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="plus.circle.fill" drawable="ic_menu_add" />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
         <NativeTabs.Trigger.Label>Profil</NativeTabs.Trigger.Label>

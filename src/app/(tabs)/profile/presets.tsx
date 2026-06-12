@@ -26,7 +26,7 @@ import {
   type ShiftPreset,
 } from "@/lib/preset-service";
 
-const PRESET_TYPE_OPTIONS: PresetType[] = ["work", "training", "opening", "closing", "overtime"];
+const PRESET_TYPE_OPTIONS: PresetType[] = ["work", "training", "overtime"];
 
 /**
  * Créneaux types personnalisables : chaque boîte a ses horaires (ex. 7h–13h

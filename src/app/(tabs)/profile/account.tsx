@@ -282,13 +282,13 @@ export default function AccountSettingsScreen() {
                 iconBg={colors.accentMuted}
                 iconColor={colors.accent}
                 title="Code d'accès"
-                subtitle="Code fondateur ou premium reçu de l'équipe"
+                subtitle="Code VIP ou Premium reçu par l'équipe Clork"
               >
                 <TextField
                   label="Code"
                   autoCapitalize="characters"
                   autoCorrect={false}
-                  placeholder="EX : WASQUEHAL"
+                  placeholder="EX : CLORK-VIP"
                   value={promoCode}
                   onChangeText={setPromoCode}
                 />

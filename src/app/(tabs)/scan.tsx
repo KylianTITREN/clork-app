@@ -3,14 +3,16 @@ import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
+import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
+import { DatePickerField } from "@/components/ui/DatePickerField";
 import { ValidationView } from "@/components/scan/ValidationView";
 import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
-import { addDays, mondayOf, weekLabel } from "@/lib/dates";
+import { addDays, isoDate, mondayOf, weekLabel } from "@/lib/dates";
 import {
   applyWeekStart,
   createScan,
@@ -62,6 +64,9 @@ export default function ScanScreen() {
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+  // Ajout manuel : date choisie + éditeur de créneau (presets, multi-jours…).
+  const [manualDate, setManualDate] = useState<string>(isoDate(new Date()));
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
 
   const userId = session?.user.id;
 
@@ -332,10 +337,13 @@ export default function ScanScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <View style={[styles.idleContainer, { paddingBottom: insets.bottom + 64 }]}>
+      <ScrollView
+        contentContainerStyle={[styles.idleContainer, { paddingBottom: insets.bottom + 64 }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <Text style={[styles.kicker, { color: colors.textMuted }]}>Scanner</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Nouveau planning</Text>
+          <Text style={[styles.kicker, { color: colors.textMuted }]}>Ajouter</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Remplis ta semaine</Text>
         </View>
 
         {pendingScan ? (
@@ -378,9 +386,9 @@ export default function ScanScreen() {
             <Ionicons name="camera" size={32} color={colors.onAccent} />
           </View>
           <View style={styles.cameraTextBox}>
-            <Text style={[styles.cameraTitle, { color: colors.onAccent }]}>Prendre en photo</Text>
+            <Text style={[styles.cameraTitle, { color: colors.onAccent }]}>Scanner le planning</Text>
             <Text style={[styles.cameraSubtitle, { color: colors.onAccent, opacity: 0.75 }]}>
-              Cadrage et redressement autos · l'IA lit, tu valides
+              L'IA lit toute l'équipe en 30 s — tu valides ✨
             </Text>
           </View>
           <View style={styles.cameraArrow}>
@@ -408,6 +416,30 @@ export default function ScanScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
+
+        {/* Ajout manuel : un jour précis ou une plage, sans défiler le planning */}
+        <View style={[styles.rowCard, styles.joinCard, { backgroundColor: colors.surface }, softShadow]}>
+          <View style={styles.joinHeader}>
+            <View style={[styles.iconCircle, { backgroundColor: colors.accentMuted }]}>
+              <Ionicons name="create" size={22} color={colors.accent} />
+            </View>
+            <View style={styles.rowTextBox}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Ajouter un créneau</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>
+                À la main — presets, congés, plage de dates
+              </Text>
+            </View>
+          </View>
+          <View style={styles.joinRow}>
+            <DatePickerField value={manualDate} onChange={setManualDate} />
+            <Pressable
+              onPress={() => userId && setEditorTarget({ mode: "create", date: manualDate, userId })}
+              style={[styles.joinButton, { backgroundColor: colors.accent }]}
+            >
+              <Ionicons name="arrow-forward" size={20} color={colors.onAccent} />
+            </Pressable>
+          </View>
+        </View>
 
         {/* Code collègue */}
         <View style={[styles.rowCard, styles.joinCard, { backgroundColor: colors.surface }, softShadow]}>
@@ -456,7 +488,20 @@ export default function ScanScreen() {
             </View>
           ))}
         </View>
-      </View>
+      </ScrollView>
+
+      <ShiftEditorModal
+        target={editorTarget}
+        onClose={(didChange) => {
+          setEditorTarget(null);
+          if (didChange) {
+            Alert.alert("Ajouté ✅", "Retrouve le créneau dans ton Planning.", [
+              { text: "Voir", onPress: () => router.navigate("/(tabs)") },
+              { text: "OK" },
+            ]);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

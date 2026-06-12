@@ -222,13 +222,15 @@ export const shiftTypeLabel: Record<ShiftType, string> = {
   overtime: "Heures supp",
 };
 
-export type ShiftPeriod = "morning" | "day" | "evening" | "afternoon";
+export type ShiftPeriod = "morning" | "day" | "evening" | "afternoon" | "opening" | "closing";
 
 export const shiftPeriodLabels: Record<ShiftPeriod, string> = {
   morning: "Matin",
   day: "Jour",
   evening: "Soir",
   afternoon: "Après-midi",
+  opening: "Ouverture",
+  closing: "Fermeture",
 };
 
 /** Poste déduit des horaires : Matin / Après-midi / Journée. */
