@@ -11,7 +11,7 @@ import { fonts, inkOnAccent, radius, spacing, typeScale, useThemeColors } from "
 type ButtonProps = {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "ghost" | "danger";
+  variant?: "primary" | "ghost" | "danger" | "dark";
   isLoading?: boolean;
   disabled?: boolean;
   style?: ViewStyle;
@@ -33,13 +33,17 @@ export function Button({
       ? colors.accent
       : variant === "danger"
         ? colors.danger
-        : "transparent";
+        : variant === "dark"
+          ? colors.text
+          : "transparent";
   const labelColor =
     variant === "ghost"
       ? colors.text
       : variant === "danger"
         ? "#FFFFFF"
-        : inkOnAccent;
+        : variant === "dark"
+          ? colors.background
+          : inkOnAccent;
 
   return (
     <Pressable

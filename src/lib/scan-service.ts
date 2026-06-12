@@ -88,7 +88,19 @@ export async function startExtraction(scanId: string, base64: string): Promise<v
     { body: { scan_id: scanId, image_base64: base64, media_type: "image/jpeg" } },
   );
   if (error) {
-    throw new Error("Lancement de l'extraction échoué : " + error.message);
+    // L'erreur HTTP de la fonction contient notre message métier (ex: limite
+    // du mode invité) — on l'extrait au lieu du générique "non-2xx status code".
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = (await context.json()) as { error?: string };
+        if (body?.error) message = body.error;
+      } catch {
+        // corps illisible : on garde le message générique
+      }
+    }
+    throw new Error(message);
   }
   if (!data?.success) {
     throw new Error(data?.error ?? "Lancement de l'extraction échoué");

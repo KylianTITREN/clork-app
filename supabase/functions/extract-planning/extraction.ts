@@ -367,6 +367,8 @@ export async function extractPlanning(
     body: JSON.stringify({
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
+      // Lecture de document : on veut la même réponse à chaque scan.
+      temperature: 0.2,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: "tool", name: EXTRACTION_TOOL.name },
       messages: [

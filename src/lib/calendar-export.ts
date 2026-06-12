@@ -24,12 +24,27 @@ async function getOrCreateClorkCalendar(): Promise<string> {
   if (existing) return existing.id;
 
   if (Platform.OS === "ios") {
-    const defaultCalendar = await Calendar.getDefaultCalendarAsync();
+    // Source du calendrier : défaut → iCloud (CalDAV) → locale. Le défaut peut
+    // être indisponible (pas de calendrier par défaut configuré sur l'appareil).
+    let sourceId: string | undefined;
+    try {
+      sourceId = (await Calendar.getDefaultCalendarAsync()).source.id;
+    } catch {
+      const sources = await Calendar.getSourcesAsync();
+      const icloud = sources.find((s) => s.type === Calendar.SourceType.CALDAV);
+      const local = sources.find((s) => s.type === Calendar.SourceType.LOCAL);
+      sourceId = (icloud ?? local ?? sources[0])?.id;
+    }
+    if (!sourceId) {
+      throw new Error(
+        "Aucune source de calendrier disponible — active iCloud Calendrier ou un compte calendrier dans Réglages.",
+      );
+    }
     return Calendar.createCalendarAsync({
       title: CALENDAR_TITLE,
       color: CALENDAR_COLOR,
       entityType: Calendar.EntityTypes.EVENT,
-      sourceId: defaultCalendar.source.id,
+      sourceId,
       name: CALENDAR_TITLE,
       ownerAccount: "personal",
       accessLevel: Calendar.CalendarAccessLevel.OWNER,

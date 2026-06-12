@@ -139,6 +139,7 @@ export function ValidationView({
 
       <Button
         label="Ajouter à mon calendrier"
+        variant="dark"
         onPress={() => onSave(drafts, target)}
         isLoading={isSaving}
       />

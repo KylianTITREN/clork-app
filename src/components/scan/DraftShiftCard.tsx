@@ -54,7 +54,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
       <View style={styles.headerRow}>
         <View style={[styles.typeDot, { backgroundColor: typeColor }]} />
         <Text style={[styles.day, { color: inkOnAccent }]}>{dayLabel}</Text>
-        {draft.fromHandwriting ? <Text style={styles.handwriting}>✍️</Text> : null}
+
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: draft.include }}
@@ -152,6 +152,12 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
               : ""}
           </Text>
           <View style={styles.pauseLine} />
+        </View>
+      ) : null}
+
+      {draft.fromHandwriting ? (
+        <View style={styles.highlightBadge}>
+          <Text style={styles.highlightLabel}>✍️ Corrigé à la main sur le planning</Text>
         </View>
       ) : null}
 

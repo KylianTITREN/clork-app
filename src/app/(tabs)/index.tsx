@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -133,18 +133,27 @@ export default function WeekScreen() {
           <Text style={[styles.kicker, { color: colors.textMuted }]}>Mon planning</Text>
           <Text style={[styles.title, { color: colors.text }]}>Ma semaine</Text>
         </View>
-        <Pressable
-          onPress={handleExport}
-          disabled={isExporting}
-          style={[
-            styles.exportButton,
-            { backgroundColor: colors.surface, opacity: isExporting ? 0.5 : 1 },
-            softShadow,
-          ]}
-        >
-          <Ionicons name="share-outline" size={18} color={colors.accent} />
-          <Text style={[styles.exportLabel, { color: colors.text }]}>Exporter</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => router.navigate("/(tabs)/scan")}
+            style={[styles.iconPill, { backgroundColor: colors.surface }, softShadow]}
+            hitSlop={6}
+          >
+            <Ionicons name="camera-outline" size={18} color={colors.accent} />
+          </Pressable>
+          <Pressable
+            onPress={handleExport}
+            disabled={isExporting}
+            style={[
+              styles.exportButton,
+              { backgroundColor: colors.surface, opacity: isExporting ? 0.5 : 1 },
+              softShadow,
+            ]}
+          >
+            <Ionicons name="share-outline" size={18} color={colors.accent} />
+            <Text style={[styles.exportLabel, { color: colors.text }]}>Exporter</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.weekNav}>
@@ -290,7 +299,6 @@ export default function WeekScreen() {
                         />
                         <Text style={[styles.shiftType, { color: inkOnAccent }]}>
                           {shiftTypeLabel[shift.type]}
-                          {shift.is_edited ? " ✍️" : ""}
                         </Text>
                         {shift.type === "work" && period ? (
                           <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
@@ -363,6 +371,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typeScale.title,
     fontFamily: fonts.black,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  iconPill: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   exportButton: {
     flexDirection: "row",
