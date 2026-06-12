@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -90,6 +90,19 @@ export default function AccountSettingsScreen() {
 
   const [promoCode, setPromoCode] = useState("");
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [plan, setPlan] = useState<string>("free");
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    supabase
+      .from("profiles")
+      .select("plan")
+      .eq("id", session.user.id)
+      .single<{ plan: string }>()
+      .then(({ data }) => {
+        if (data) setPlan(data.plan);
+      });
+  }, [session?.user.id]);
 
   async function handleRedeemCode() {
     if (!promoCode.trim()) return;
@@ -100,11 +113,12 @@ export default function AccountSettingsScreen() {
       Alert.alert("Code refusé", "Ce code est invalide ou a déjà été utilisé au maximum.");
     } else {
       setPromoCode("");
+      setPlan(data === "founder" ? "founder" : "premium");
       Alert.alert(
         "Accès débloqué 🎉",
         data === "founder"
-          ? "Tu fais partie des fondateur·ices : scans illimités, à vie."
-          : "Accès Premium activé : scans illimités.",
+          ? "Tu fais partie des VIP : scans illimités, à vie. 💛"
+          : "Tu fais désormais partie des membres Premium : scans illimités. ⭐",
       );
     }
   }
@@ -284,22 +298,32 @@ export default function AccountSettingsScreen() {
                 title="Code d'accès"
                 subtitle="Code VIP ou Premium reçu par l'équipe Clork"
               >
-                <TextField
-                  label="Code"
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  placeholder="EX : CLORK-VIP"
-                  value={promoCode}
-                  onChangeText={setPromoCode}
-                />
-                {promoCode.trim() ? (
-                  <Button
-                    label="Activer mon accès"
-                    variant="dark"
-                    onPress={handleRedeemCode}
-                    isLoading={isRedeeming}
-                  />
-                ) : null}
+                {plan !== "free" ? (
+                  <Text style={[styles.planActive, { color: colors.text, backgroundColor: colors.surfaceMuted }]}>
+                    {plan === "founder"
+                      ? "💛 Accès VIP actif — scans illimités, à vie."
+                      : "⭐ Accès Premium actif — scans illimités."}
+                  </Text>
+                ) : (
+                  <>
+                    <TextField
+                      label="Code"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      placeholder="EX : CLORK-VIP"
+                      value={promoCode}
+                      onChangeText={setPromoCode}
+                    />
+                    {promoCode.trim() ? (
+                      <Button
+                        label="Activer mon accès"
+                        variant="dark"
+                        onPress={handleRedeemCode}
+                        isLoading={isRedeeming}
+                      />
+                    ) : null}
+                  </>
+                )}
               </Section>
 
               <Section
@@ -334,6 +358,14 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md },
   guestText: { fontSize: typeScale.caption, fontFamily: fonts.semiBold, lineHeight: 18 },
+  planActive: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    overflow: "hidden",
+  },
   emailValue: {
     fontSize: typeScale.body,
     fontFamily: fonts.bold,

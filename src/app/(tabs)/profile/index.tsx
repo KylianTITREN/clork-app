@@ -31,6 +31,7 @@ export default function ProfileHubScreen() {
   const { session } = useAuth();
 
   const [displayName, setDisplayName] = useState("");
+  const [plan, setPlan] = useState<string>("free");
   const [upgradeEmail, setUpgradeEmail] = useState("");
   const [upgradePassword, setUpgradePassword] = useState("");
   const [isUpgrading, setIsUpgrading] = useState(false);
@@ -46,11 +47,14 @@ export default function ProfileHubScreen() {
       if (!userId) return;
       supabase
         .from("profiles")
-        .select("display_name")
+        .select("display_name, plan")
         .eq("id", userId)
-        .single<{ display_name: string }>()
+        .single<{ display_name: string; plan: string }>()
         .then(({ data }) => {
-          if (data) setDisplayName(data.display_name);
+          if (data) {
+            setDisplayName(data.display_name);
+            setPlan(data.plan);
+          }
         });
     }, [userId]),
   );
@@ -90,9 +94,20 @@ export default function ProfileHubScreen() {
               <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
             </View>
             <View style={styles.headerTextBox}>
-              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-                {displayName.trim() || "Mon profil"}
-              </Text>
+              <View style={styles.titleRow}>
+                <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+                  {displayName.trim() || "Mon profil"}
+                </Text>
+                {plan === "founder" ? (
+                  <View style={[styles.planBadge, { backgroundColor: colors.accent }]}>
+                    <Text style={[styles.planBadgeLabel, { color: colors.onAccent }]}>VIP 💛</Text>
+                  </View>
+                ) : plan === "premium" ? (
+                  <View style={[styles.planBadge, { backgroundColor: colors.text }]}>
+                    <Text style={[styles.planBadgeLabel, { color: colors.background }]}>Premium ⭐</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={[styles.headerMeta, { color: colors.textMuted }]} numberOfLines={1}>
                 {isGuest ? "Mode invité · 1 scan/semaine" : (email ?? "")}
               </Text>
@@ -194,6 +209,20 @@ export default function ProfileHubScreen() {
 }
 
 const styles = StyleSheet.create({
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  planBadge: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  planBadgeLabel: {
+    fontSize: 11,
+    fontFamily: fonts.extraBold,
+  },
   safeArea: { flex: 1 },
   flex: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md },
