@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -13,7 +14,10 @@ import {
 } from "react-native";
 
 import { Button } from "@/components/ui/Button";
+import { DurationChips } from "@/components/ui/DurationChips";
+import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
+  fonts,
   radius,
   shiftTypeColor,
   shiftTypeLabel,
@@ -31,7 +35,15 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   month: "long",
 });
 const TYPES: ShiftType[] = ["work", "off", "rh", "cp", "leave", "meeting"];
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+// Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
+const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
+
+// Presets de création rapide — remplissent les horaires en un tap.
+const PRESETS: { label: string; start: string; end: string }[] = [
+  { label: "🌅 Matin", start: "09:00", end: "13:00" },
+  { label: "☀️ Journée", start: "09:00", end: "17:00" },
+  { label: "🌙 Soir", start: "14:00", end: "20:00" },
+];
 
 export type EditorTarget =
   | { mode: "edit"; shift: Shift }
@@ -42,8 +54,8 @@ type ShiftEditorModalProps = {
   onClose: (didChange: boolean) => void;
 };
 
-function toLocalTime(iso: string | null): string {
-  if (!iso) return "";
+function toLocalTime(iso: string | null): string | null {
+  if (!iso) return null;
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
@@ -51,10 +63,10 @@ function toLocalTime(iso: string | null): string {
 export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const colors = useThemeColors();
   const [type, setType] = useState<ShiftType>("work");
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
-  const [pause, setPause] = useState("0");
-  const [pauseStart, setPauseStart] = useState("");
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
+  const [pauseMinutes, setPauseMinutes] = useState(0);
+  const [pauseStart, setPauseStart] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -64,29 +76,30 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setType(target.shift.type);
       setStart(toLocalTime(target.shift.start_at));
       setEnd(toLocalTime(target.shift.end_at));
-      setPause(String(target.shift.break_minutes));
-      setPauseStart(target.shift.break_start ? target.shift.break_start.slice(0, 5) : "");
+      setPauseMinutes(target.shift.break_minutes);
+      setPauseStart(target.shift.break_start ? target.shift.break_start.slice(0, 5) : null);
       setNote(target.shift.note ?? "");
     } else {
       setType("work");
-      setStart("");
-      setEnd("");
-      setPause("0");
-      setPauseStart("");
+      setStart(null);
+      setEnd(null);
+      setPauseMinutes(0);
+      setPauseStart(null);
       setNote("");
     }
   }, [target]);
 
   if (!target) return null;
 
+  const isCreate = target.mode === "create";
   const date = target.mode === "edit" ? target.shift.date : target.date;
   const needsTimes = type === "work" || type === "meeting";
 
   async function handleSave() {
     if (!target) return;
     if (needsTimes) {
-      if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
-        Alert.alert("Horaire invalide", "Format attendu : HH:MM (ex 09:30).");
+      if (!start || !end) {
+        Alert.alert("Horaires manquants", "Choisis l'heure de début et de fin.");
         return;
       }
       if (end <= start) {
@@ -94,20 +107,14 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
         return;
       }
     }
-    const trimmedPauseStart = pauseStart.trim();
-    if (trimmedPauseStart && !TIME_RE.test(trimmedPauseStart)) {
-      Alert.alert("Pause invalide", "Heure de début de pause au format HH:MM, ou laisse vide.");
-      return;
-    }
-    const pauseMinutes = Math.min(480, Math.max(0, parseInt(pause, 10) || 0));
     setIsSaving(true);
     const payload = {
       date,
-      start_at: needsTimes ? new Date(`${date}T${start}:00`).toISOString() : null,
-      end_at: needsTimes ? new Date(`${date}T${end}:00`).toISOString() : null,
+      start_at: needsTimes && start ? new Date(`${date}T${start}:00`).toISOString() : null,
+      end_at: needsTimes && end ? new Date(`${date}T${end}:00`).toISOString() : null,
       type,
-      break_minutes: pauseMinutes,
-      break_start: needsTimes && pauseMinutes > 0 && trimmedPauseStart ? trimmedPauseStart : null,
+      break_minutes: needsTimes ? pauseMinutes : 0,
+      break_start: needsTimes && pauseMinutes > 0 ? pauseStart : null,
       note: note.trim() || null,
       is_edited: true,
     };
@@ -152,80 +159,136 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       >
         <Pressable style={styles.backdropTouch} onPress={() => onClose(false)} />
         <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+          <View style={styles.grabber} />
           <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-            <Text style={[styles.title, { color: colors.text }]}>
-              {target.mode === "edit" ? "Modifier" : "Ajouter"} ·{" "}
-              {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
-            </Text>
-
-            <View style={styles.typeRow}>
-              {TYPES.map((t) => (
-                <Pressable
-                  key={t}
-                  onPress={() => setType(t)}
-                  style={[
-                    styles.typeChip,
-                    { backgroundColor: type === t ? shiftTypeColor[t] : colors.surfaceMuted },
-                  ]}
-                >
-                  <Text style={[styles.typeLabel, { color: type === t ? "#FFF" : colors.textMuted }]}>
-                    {shiftTypeLabel[t]}
-                  </Text>
-                </Pressable>
-              ))}
+            {/* En-tête : création et édition clairement différenciées */}
+            <View style={styles.headerRow}>
+              <View style={[styles.headerIcon, { backgroundColor: colors.accentMuted }]}>
+                <Ionicons
+                  name={isCreate ? "add" : "pencil"}
+                  size={20}
+                  color={colors.text}
+                />
+              </View>
+              <View style={styles.headerTextBox}>
+                <Text style={[styles.title, { color: colors.text }]}>
+                  {isCreate ? "Nouveau créneau" : "Modifier le créneau"}
+                </Text>
+                <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+                  {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
+                </Text>
+              </View>
             </View>
 
-            {needsTimes ? (
-              <View style={styles.timesRow}>
-                <TextInput
-                  value={start}
-                  onChangeText={setStart}
-                  placeholder="09:00"
-                  placeholderTextColor={colors.textMuted}
-                  maxLength={5}
-                  style={[styles.timeInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                />
-                <Text style={{ color: colors.textMuted }}>→</Text>
-                <TextInput
-                  value={end}
-                  onChangeText={setEnd}
-                  placeholder="17:30"
-                  placeholderTextColor={colors.textMuted}
-                  maxLength={5}
-                  style={[styles.timeInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                />
-                <TextInput
-                  value={pause}
-                  onChangeText={setPause}
-                  placeholder="0"
-                  keyboardType="number-pad"
-                  placeholderTextColor={colors.textMuted}
-                  maxLength={3}
-                  style={[styles.timeInput, styles.pauseInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                />
-                <Text style={[styles.pauseSuffix, { color: colors.textMuted }]}>min de pause</Text>
-                <Text style={[styles.pauseSuffix, { color: colors.textMuted }]}>à</Text>
-                <TextInput
-                  value={pauseStart}
-                  onChangeText={setPauseStart}
-                  placeholder="12:30"
-                  placeholderTextColor={colors.textMuted}
-                  maxLength={5}
-                  style={[styles.timeInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
-                />
+            {/* Presets express en création */}
+            {isCreate ? (
+              <View style={styles.presetRow}>
+                {PRESETS.map((preset) => (
+                  <Pressable
+                    key={preset.label}
+                    onPress={() => {
+                      setType("work");
+                      setStart(preset.start);
+                      setEnd(preset.end);
+                    }}
+                    style={[
+                      styles.presetChip,
+                      {
+                        backgroundColor:
+                          start === preset.start && end === preset.end
+                            ? colors.accent
+                            : colors.surface,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.presetLabel, { color: colors.text }]}>
+                      {preset.label}
+                    </Text>
+                    <Text style={[styles.presetHours, { color: colors.textMuted }]}>
+                      {preset.start}–{preset.end}
+                    </Text>
+                  </Pressable>
+                ))}
               </View>
             ) : null}
 
+            {/* Type */}
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Type</Text>
+            <View style={styles.typeRow}>
+              {TYPES.map((t) => {
+                const selected = type === t;
+                return (
+                  <Pressable
+                    key={t}
+                    onPress={() => setType(t)}
+                    style={[
+                      styles.typeChip,
+                      { backgroundColor: selected ? shiftTypeColor[t] : colors.surface },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.typeLabel,
+                        {
+                          color: selected
+                            ? INK_CHIP_TYPES.includes(t)
+                              ? "#26210E"
+                              : "#FFF"
+                            : colors.textMuted,
+                        },
+                      ]}
+                    >
+                      {shiftTypeLabel[t]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Horaires + pause */}
+            {needsTimes ? (
+              <>
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Horaires</Text>
+                <View style={styles.timesRow}>
+                  <TimePickerField value={start} onChange={setStart} placeholder="Début" />
+                  <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
+                  <TimePickerField value={end} onChange={setEnd} placeholder="Fin" />
+                </View>
+
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Pause</Text>
+                <DurationChips value={pauseMinutes} onChange={setPauseMinutes} />
+                {pauseMinutes > 0 ? (
+                  <View style={styles.pauseStartRow}>
+                    <Text style={[styles.pauseAt, { color: colors.textMuted }]}>à</Text>
+                    <TimePickerField
+                      value={pauseStart}
+                      onChange={setPauseStart}
+                      placeholder="12:30"
+                    />
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* Note */}
             <TextInput
               value={note}
               onChangeText={setNote}
               placeholder="Note (optionnelle)"
               placeholderTextColor={colors.textMuted}
-              style={[styles.noteInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              style={[
+                styles.noteInput,
+                { backgroundColor: colors.surface, color: colors.text },
+              ]}
             />
 
-            <Button label="Enregistrer" onPress={handleSave} isLoading={isSaving} />
-            {target.mode === "edit" ? (
+            <Button
+              label={isCreate ? "Ajouter au planning" : "Enregistrer"}
+              variant="dark"
+              onPress={handleSave}
+              isLoading={isSaving}
+            />
+            {!isCreate ? (
               <Button label="Supprimer" variant="danger" onPress={handleDelete} />
             ) : null}
           </ScrollView>
@@ -247,16 +310,70 @@ const styles = StyleSheet.create({
   sheet: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    maxHeight: "80%",
+    maxHeight: "85%",
+  },
+  grabber: {
+    alignSelf: "center",
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(127,127,127,0.35)",
+    marginTop: spacing.sm,
   },
   sheetContent: {
     padding: spacing.lg,
     gap: spacing.md,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  headerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTextBox: {
+    flex: 1,
+    gap: 1,
+  },
   title: {
     fontSize: typeScale.heading,
-    fontWeight: "800",
+    fontFamily: fonts.black,
+  },
+  subtitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
     textTransform: "capitalize",
+  },
+  presetRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  presetChip: {
+    flex: 1,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm + 2,
+    alignItems: "center",
+    gap: 1,
+  },
+  presetLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
+  },
+  presetHours: {
+    fontSize: 11,
+    fontFamily: fonts.semiBold,
+  },
+  sectionLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: -spacing.xs,
   },
   typeRow: {
     flexDirection: "row",
@@ -270,35 +387,27 @@ const styles = StyleSheet.create({
   },
   typeLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
   },
   timesRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    flexWrap: "wrap",
   },
-  timeInput: {
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  pauseStartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  pauseAt: {
     fontSize: typeScale.body,
-    fontWeight: "700",
-    minWidth: 84,
-    textAlign: "center",
-  },
-  pauseInput: {
-    minWidth: 64,
-  },
-  pauseSuffix: {
-    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
   noteInput: {
-    borderWidth: 1,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
   },
 });

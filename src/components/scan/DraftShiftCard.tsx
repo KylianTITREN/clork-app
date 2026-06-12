@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   fonts,
@@ -13,7 +13,9 @@ import {
   type ShiftType,
 } from "@/constants/tokens";
 import { addMinutesToTime } from "@/lib/dates";
-import { breakMinutes, type DraftShift } from "@/lib/scan-service";
+import { DurationChips } from "@/components/ui/DurationChips";
+import { TimePickerField } from "@/components/ui/TimePickerField";
+import { breakMinutes, spanHours, type DraftShift } from "@/lib/scan-service";
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
@@ -120,38 +122,61 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
 
       {showTimes ? (
         <View style={styles.timesRow}>
-          <TextInput
-            value={draft.start ?? ""}
-            onChangeText={(start) => onChange({ ...draft, start })}
-            placeholder="09:00"
-            placeholderTextColor={INK_SOFT}
-            keyboardType="numbers-and-punctuation"
-            maxLength={5}
-            style={styles.timeInput}
+          <TimePickerField
+            compact
+            value={draft.start}
+            onChange={(start) => onChange({ ...draft, start })}
+            placeholder="Début"
           />
           <Text style={[styles.timeSeparator, { color: INK_SOFT }]}>→</Text>
-          <TextInput
-            value={draft.end ?? ""}
-            onChangeText={(end) => onChange({ ...draft, end })}
-            placeholder="17:30"
-            placeholderTextColor={INK_SOFT}
-            keyboardType="numbers-and-punctuation"
-            maxLength={5}
-            style={styles.timeInput}
+          <TimePickerField
+            compact
+            value={draft.end}
+            onChange={(end) => onChange({ ...draft, end })}
+            placeholder="Fin"
           />
         </View>
       ) : null}
 
-      {showTimes && (pause > 0 || draft.durationHours != null) ? (
-        <View style={styles.pauseRow}>
-          <View style={styles.pauseLine} />
-          <Text style={styles.pauseText}>
-            {draft.durationHours != null ? `${draft.durationHours}h payées` : ""}
-            {pause > 0
-              ? `${draft.durationHours != null ? " · " : ""}${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause${draft.breakStart ? ` (${draft.breakStart} → ${addMinutesToTime(draft.breakStart, pause)})` : ""}`
-              : ""}
-          </Text>
-          <View style={styles.pauseLine} />
+      {draft.type === "work" && draft.start && draft.end ? (
+        <View style={styles.pauseBlock}>
+          <View style={styles.pauseHeaderRow}>
+            <Text style={styles.pauseLabel}>Pause</Text>
+            {pause > 0 && draft.breakStart ? (
+              <Text style={styles.pauseText}>
+                {draft.breakStart} → {addMinutesToTime(draft.breakStart, pause)}
+              </Text>
+            ) : null}
+            {draft.durationHours != null ? (
+              <Text style={styles.pauseText}>
+                {draft.durationHours.toLocaleString("fr-FR")}h payées
+              </Text>
+            ) : null}
+          </View>
+          <DurationChips
+            compact
+            value={pause}
+            onChange={(minutes) => {
+              const span = spanHours(draft);
+              if (span == null) return;
+              onChange({
+                ...draft,
+                durationHours: Math.max(0, span - minutes / 60),
+                breakStart: minutes > 0 ? draft.breakStart : null,
+              });
+            }}
+          />
+          {pause > 0 ? (
+            <View style={styles.pauseStartRow}>
+              <Text style={styles.pauseText}>à</Text>
+              <TimePickerField
+                compact
+                value={draft.breakStart}
+                onChange={(breakStart) => onChange({ ...draft, breakStart })}
+                placeholder="12:30"
+              />
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -229,30 +254,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
   },
-  timeInput: {
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
-    minWidth: 88,
-    textAlign: "center",
-    backgroundColor: "rgba(255,255,255,0.7)",
-    color: inkOnAccent,
-  },
   timeSeparator: {
     fontSize: typeScale.body,
   },
-  pauseRow: {
+  pauseBlock: {
+    gap: spacing.xs,
+    borderTopWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "rgba(38,33,14,0.2)",
+    paddingTop: spacing.sm,
+  },
+  pauseHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
   },
-  pauseLine: {
+  pauseLabel: {
+    fontSize: 11,
+    fontFamily: fonts.extraBold,
+    color: "rgba(38,33,14,0.65)",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
     flex: 1,
-    borderBottomWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: "rgba(38,33,14,0.25)",
+  },
+  pauseStartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   pauseText: {
     fontSize: 11,
