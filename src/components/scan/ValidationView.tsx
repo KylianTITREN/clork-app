@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { DraftShiftCard } from "@/components/scan/DraftShiftCard";
 import { Button } from "@/components/ui/Button";
-import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, inkOnAccent, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import {
   applyDefaultBreak,
@@ -77,7 +77,7 @@ export function ValidationView({
           <Pressable
             key={employee.row_index}
             onPress={() => selectTarget(employee)}
-            style={[styles.employeeRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            style={[styles.employeeRow, { backgroundColor: colors.surface }, softShadow]}
           >
             <Text style={[styles.employeeName, { color: colors.text }]}>{employee.name}</Text>
             <Text style={[styles.employeeMeta, { color: colors.textMuted }]}>
@@ -111,7 +111,7 @@ export function ValidationView({
       </View>
 
       {extraction.photo_quality === "degraded" || !coherent ? (
-        <View style={[styles.warningBox, { backgroundColor: colors.surfaceMuted, borderColor: colors.shiftCp }]}>
+        <View style={[styles.warningBox, { backgroundColor: colors.shiftCpSoft }]}>
           <Ionicons name="alert-circle" size={18} color={colors.shiftCp} />
           <Text style={[styles.warningText, { color: colors.text }]}>
             {!coherent
@@ -129,9 +129,9 @@ export function ValidationView({
         />
       ))}
 
-      <View style={[styles.totalRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <Text style={[styles.totalLabel, { color: colors.textMuted }]}>Total travaillé</Text>
-        <Text style={[styles.totalValue, { color: colors.text }]}>
+      <View style={[styles.totalRow, { backgroundColor: colors.accent }, softShadow]}>
+        <Text style={[styles.totalLabel, { color: "rgba(38,33,14,0.65)" }]}>Total travaillé</Text>
+        <Text style={[styles.totalValue, { color: inkOnAccent }]}>
           {totalHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
           {target.total_hours != null ? ` / ${target.total_hours}h sur le planning` : ""}
         </Text>
@@ -158,60 +158,60 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: typeScale.title,
-    fontWeight: "800",
+    fontFamily: fonts.black,
   },
   subtitle: {
     fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
   },
   switchLine: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.extraBold,
   },
   warningBox: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
   },
   warningText: {
     flex: 1,
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
     lineHeight: 18,
   },
   employeeRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
   },
   employeeName: {
     flex: 1,
     fontSize: typeScale.body,
-    fontWeight: "600",
+    fontFamily: fonts.extraBold,
   },
   employeeMeta: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: spacing.md,
   },
   totalLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   totalValue: {
-    fontSize: typeScale.body,
-    fontWeight: "800",
+    fontSize: typeScale.heading,
+    fontFamily: fonts.black,
   },
 });

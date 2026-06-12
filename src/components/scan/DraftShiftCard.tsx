@@ -1,9 +1,12 @@
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
+  fonts,
+  inkOnAccent,
   radius,
   shiftTypeColor,
   shiftTypeLabel,
+  shiftTypeSoftColor,
   spacing,
   typeScale,
   useThemeColors,
@@ -19,6 +22,10 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
 });
 
 const EDITABLE_TYPES: ShiftType[] = ["work", "off", "rh", "cp", "meeting"];
+// Texte des chips sélectionnées : encre sur les couleurs claires, blanc sinon.
+const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
+
+const INK_SOFT = "rgba(38,33,14,0.65)";
 
 type DraftShiftCardProps = {
   draft: DraftShift;
@@ -37,15 +44,16 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
       style={[
         styles.card,
         {
-          backgroundColor: colors.surface,
-          borderColor: draft.include ? typeColor : colors.border,
-          opacity: draft.include ? 1 : 0.55,
+          backgroundColor: draft.include
+            ? shiftTypeSoftColor[draft.type]
+            : colors.surfaceMuted,
+          opacity: draft.include ? 1 : 0.6,
         },
       ]}
     >
       <View style={styles.headerRow}>
         <View style={[styles.typeDot, { backgroundColor: typeColor }]} />
-        <Text style={[styles.day, { color: colors.text }]}>{dayLabel}</Text>
+        <Text style={[styles.day, { color: inkOnAccent }]}>{dayLabel}</Text>
         {draft.fromHandwriting ? <Text style={styles.handwriting}>✍️</Text> : null}
         <Pressable
           accessibilityRole="switch"
@@ -53,49 +61,61 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
           onPress={() => onChange({ ...draft, include: !draft.include })}
           style={[
             styles.includeToggle,
-            {
-              backgroundColor: draft.include ? typeColor : colors.surfaceMuted,
-              borderColor: draft.include ? typeColor : colors.border,
-            },
+            { backgroundColor: draft.include ? inkOnAccent : "rgba(255,255,255,0.7)" },
           ]}
         >
-          <Text style={[styles.includeLabel, { color: draft.include ? "#FFF" : colors.textMuted }]}>
+          <Text
+            style={[
+              styles.includeLabel,
+              { color: draft.include ? "#FFF" : colors.textMuted },
+            ]}
+          >
             {draft.include ? "Inclus" : "Ignoré"}
           </Text>
         </Pressable>
       </View>
 
       <View style={styles.typeRow}>
-        {EDITABLE_TYPES.map((type) => (
-          <Pressable
-            key={type}
-            onPress={() =>
-              onChange({
-                ...draft,
-                type,
-                // Un type sans horaires vide les heures ; work/meeting les exige.
-                start: type === "work" || type === "meeting" ? draft.start : null,
-                end: type === "work" || type === "meeting" ? draft.end : null,
-              })
-            }
-            style={[
-              styles.typeChip,
-              {
-                backgroundColor:
-                  draft.type === type ? shiftTypeColor[type] : colors.surfaceMuted,
-              },
-            ]}
-          >
-            <Text
+        {EDITABLE_TYPES.map((type) => {
+          const selected = draft.type === type;
+          return (
+            <Pressable
+              key={type}
+              onPress={() =>
+                onChange({
+                  ...draft,
+                  type,
+                  // Un type sans horaires vide les heures ; work/meeting les exige.
+                  start: type === "work" || type === "meeting" ? draft.start : null,
+                  end: type === "work" || type === "meeting" ? draft.end : null,
+                })
+              }
               style={[
-                styles.typeChipLabel,
-                { color: draft.type === type ? "#FFF" : colors.textMuted },
+                styles.typeChip,
+                {
+                  backgroundColor: selected
+                    ? shiftTypeColor[type]
+                    : "rgba(255,255,255,0.65)",
+                },
               ]}
             >
-              {shiftTypeLabel[type]}
-            </Text>
-          </Pressable>
-        ))}
+              <Text
+                style={[
+                  styles.typeChipLabel,
+                  {
+                    color: selected
+                      ? INK_CHIP_TYPES.includes(type)
+                        ? inkOnAccent
+                        : "#FFF"
+                      : INK_SOFT,
+                  },
+                ]}
+              >
+                {shiftTypeLabel[type]}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
       {showTimes ? (
@@ -104,47 +124,45 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
             value={draft.start ?? ""}
             onChangeText={(start) => onChange({ ...draft, start })}
             placeholder="09:00"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={INK_SOFT}
             keyboardType="numbers-and-punctuation"
             maxLength={5}
-            style={[
-              styles.timeInput,
-              { backgroundColor: colors.surfaceMuted, color: colors.text },
-            ]}
+            style={styles.timeInput}
           />
-          <Text style={[styles.timeSeparator, { color: colors.textMuted }]}>→</Text>
+          <Text style={[styles.timeSeparator, { color: INK_SOFT }]}>→</Text>
           <TextInput
             value={draft.end ?? ""}
             onChangeText={(end) => onChange({ ...draft, end })}
             placeholder="17:30"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={INK_SOFT}
             keyboardType="numbers-and-punctuation"
             maxLength={5}
-            style={[
-              styles.timeInput,
-              { backgroundColor: colors.surfaceMuted, color: colors.text },
-            ]}
+            style={styles.timeInput}
           />
         </View>
       ) : null}
 
       {showTimes && (pause > 0 || draft.durationHours != null) ? (
-        <Text style={[styles.pause, { color: colors.textMuted }]}>
-          {draft.durationHours != null ? `${draft.durationHours}h payées` : ""}
-          {pause > 0
-            ? ` · ${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause${draft.breakStart ? ` (${draft.breakStart} → ${addMinutesToTime(draft.breakStart, pause)})` : ""}`
-            : ""}
-        </Text>
+        <View style={styles.pauseRow}>
+          <View style={styles.pauseLine} />
+          <Text style={styles.pauseText}>
+            {draft.durationHours != null ? `${draft.durationHours}h payées` : ""}
+            {pause > 0
+              ? `${draft.durationHours != null ? " · " : ""}${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause${draft.breakStart ? ` (${draft.breakStart} → ${addMinutesToTime(draft.breakStart, pause)})` : ""}`
+              : ""}
+          </Text>
+          <View style={styles.pauseLine} />
+        </View>
       ) : null}
 
       {draft.highlighted ? (
-        <View style={[styles.highlightBadge, { backgroundColor: colors.surfaceMuted }]}>
-          <Text style={[styles.highlightLabel, { color: colors.text }]}>🖍️ Surligné sur le planning</Text>
+        <View style={styles.highlightBadge}>
+          <Text style={styles.highlightLabel}>🖍️ Surligné sur le planning</Text>
         </View>
       ) : null}
 
       {draft.note ? (
-        <Text style={[styles.note, { color: colors.textMuted }]} numberOfLines={2}>
+        <Text style={styles.note} numberOfLines={2}>
           {draft.note}
         </Text>
       ) : null}
@@ -154,7 +172,6 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    borderWidth: 1.5,
     borderRadius: radius.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -171,7 +188,7 @@ const styles = StyleSheet.create({
   },
   day: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
     flex: 1,
     textTransform: "capitalize",
   },
@@ -179,14 +196,13 @@ const styles = StyleSheet.create({
     fontSize: typeScale.body,
   },
   includeToggle: {
-    borderWidth: 1,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
   includeLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
   },
   typeRow: {
     flexDirection: "row",
@@ -200,7 +216,7 @@ const styles = StyleSheet.create({
   },
   typeChipLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
   },
   timesRow: {
     flexDirection: "row",
@@ -212,28 +228,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
     minWidth: 88,
     textAlign: "center",
+    backgroundColor: "rgba(255,255,255,0.7)",
+    color: inkOnAccent,
   },
   timeSeparator: {
     fontSize: typeScale.body,
   },
-  note: {
-    fontSize: typeScale.caption,
+  pauseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
-  pause: {
-    fontSize: typeScale.caption,
-    fontWeight: "600",
+  pauseLine: {
+    flex: 1,
+    borderBottomWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "rgba(38,33,14,0.25)",
+  },
+  pauseText: {
+    fontSize: 11,
+    fontFamily: fonts.bold,
+    color: INK_SOFT,
   },
   highlightBadge: {
     alignSelf: "flex-start",
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
+    backgroundColor: "rgba(255,255,255,0.65)",
   },
   highlightLabel: {
     fontSize: typeScale.caption,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
+    color: inkOnAccent,
+  },
+  note: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+    color: INK_SOFT,
   },
 });

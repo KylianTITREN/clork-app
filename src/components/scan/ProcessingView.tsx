@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 export type ProcessingStep = "compress" | "upload" | "extract" | "save";
 
@@ -47,8 +47,11 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
 
   return (
     <View style={styles.container}>
+      <View style={[styles.heroCircle, { backgroundColor: colors.accentMuted }]}>
+        <Ionicons name="scan" size={40} color={colors.accent} />
+      </View>
       <ActivityIndicator size="large" color={colors.accent} />
-      <View style={styles.steps}>
+      <View style={[styles.steps, { backgroundColor: colors.surface }, softShadow]}>
         {STEPS.map((step, index) => {
           const isDone = index < currentIndex;
           const isCurrent = index === currentIndex;
@@ -86,12 +89,21 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.xl,
+    gap: spacing.lg,
     paddingHorizontal: spacing.xl,
+  },
+  heroCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   steps: {
     gap: spacing.md,
     alignSelf: "stretch",
+    borderRadius: radius.lg,
+    padding: spacing.lg,
   },
   stepRow: {
     flexDirection: "row",
@@ -100,12 +112,14 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
   },
   stepLabelCurrent: {
-    fontWeight: "700",
+    fontFamily: fonts.extraBold,
   },
   hint: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
     textAlign: "center",
     fontStyle: "italic",
   },
