@@ -11,8 +11,11 @@
       "bundleIdentifier": "com.kyks.clork",
       "supportsTablet": false,
       "entitlements": {
-        "com.apple.security.application-groups": ["group.com.kyks.clork"]
-      }
+        "com.apple.security.application-groups": [
+          "group.com.kyks.clork"
+        ]
+      },
+      "appleTeamId": "5BZVAE7XDT"
     },
     "android": {
       "package": "com.kyks.clork",

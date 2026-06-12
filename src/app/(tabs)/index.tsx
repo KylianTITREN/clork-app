@@ -21,6 +21,7 @@ import {
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
+import { refreshWidgetData } from "@/lib/widget-data";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -100,6 +101,8 @@ export default function WeekScreen() {
       .order("date")
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
+    // Alimente les widgets iOS (no-op hors device/iOS).
+    void refreshWidgetData((data as Shift[]) ?? []);
   }, [userId, monday, sunday]);
 
   useFocusEffect(
