@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, Easing, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Animated, Easing, Modal, PanResponder, Pressable, ScrollView, Share as RNShare, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
@@ -20,6 +20,7 @@ import {
 } from "@/constants/tokens";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
+import { createShare } from "@/lib/share-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { refreshWidgetData } from "@/lib/widget-data";
@@ -53,6 +54,7 @@ export default function WeekScreen() {
   const [isExporting, setIsExporting] = useState(false);
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
+  const [colleaguesScanId, setColleaguesScanId] = useState<string | null>(null);
   // Plannings suivis en lecture seule (ex: celui de sa compagne 💛).
   const [followedList, setFollowedList] = useState<FollowedUser[]>([]);
   const [viewing, setViewing] = useState<FollowedUser | null>(null);
@@ -87,12 +89,13 @@ export default function WeekScreen() {
   async function openColleagues() {
     const { data } = await supabase
       .from("scans")
-      .select("raw_extraction")
+      .select("id, raw_extraction")
       .eq("week_start", monday)
       .eq("status", "validated")
       .order("created_at", { ascending: false })
       .limit(1)
-      .maybeSingle<{ raw_extraction: PlanningExtraction | null }>();
+      .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
+    setColleaguesScanId(data?.id ?? null);
     const employees = data?.raw_extraction?.employees;
     if (!employees || employees.length === 0) {
       Alert.alert(
@@ -509,6 +512,28 @@ export default function WeekScreen() {
                 );
               })}
             </ScrollView>
+            {colleaguesScanId && !viewing ? (
+              <Pressable
+                onPress={async () => {
+                  try {
+                    const code = await createShare(colleaguesScanId);
+                    await RNShare.share({
+                      message:
+                        `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
+                        `Ouvre l'app → Scanner → « J'ai reçu un code » et saisis : ${code.toUpperCase()}`,
+                    });
+                  } catch (error) {
+                    Alert.alert("Partage impossible", error instanceof Error ? error.message : "Erreur");
+                  }
+                }}
+                style={[styles.shareTeamButton, { backgroundColor: colors.accent }]}
+              >
+                <Ionicons name="share-outline" size={18} color={colors.onAccent} />
+                <Text style={[styles.shareTeamLabel, { color: colors.onAccent }]}>
+                  Partager ce planning à l'équipe
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </Modal>
       ) : null}
@@ -788,6 +813,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingTop: spacing.xs,
+  },
+  shareTeamButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.md,
+  },
+  shareTeamLabel: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
   },
   colleagueDayLabel: {
     fontSize: typeScale.caption,
