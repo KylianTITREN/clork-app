@@ -135,7 +135,7 @@ export default function WeekScreen() {
         void rescheduleFromShifts((data as Shift[]) ?? []);
       }
     }
-  }, [userId, monday, sunday, viewing]);
+  }, [userId, monday, sunday, viewing, colors.accent, colors.onAccent]);
 
   useFocusEffect(
     useCallback(() => {

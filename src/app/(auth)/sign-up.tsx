@@ -2,6 +2,7 @@ import { Link } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -12,13 +13,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { logoByTheme } from "@/constants/logo-assets";
+import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
+import { useTheme } from "@/providers/theme-provider";
 
 const MIN_PASSWORD_LENGTH = 8;
 
 export default function SignUpScreen() {
   const colors = useThemeColors();
+  const { themeId } = useTheme();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -59,6 +63,7 @@ export default function SignUpScreen() {
       >
         <View style={styles.content}>
           <View style={styles.header}>
+            <Image source={logoByTheme[themeId]} style={styles.logo} />
             <Text style={[styles.title, { color: colors.text }]}>Créer un compte</Text>
             <Text style={[styles.subtitle, { color: colors.textMuted }]}>
               Une photo du planning, et ta semaine est dans ton calendrier.
@@ -113,20 +118,28 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: spacing.xs,
+    alignItems: "center",
+  },
+  logo: {
+    width: 84,
+    height: 84,
+    marginBottom: spacing.sm,
   },
   title: {
     fontSize: typeScale.title,
-    fontWeight: "800",
+    fontFamily: fonts.black,
   },
   subtitle: {
     fontSize: typeScale.body,
+    fontFamily: fonts.regular,
+    textAlign: "center",
   },
   form: {
     gap: spacing.md,
   },
   link: {
     fontSize: typeScale.body,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
     textAlign: "center",
   },
 });

@@ -125,6 +125,7 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: typeScale.body,
+    fontFamily: fonts.regular,
     textAlign: "center",
   },
   form: {
@@ -132,11 +133,12 @@ const styles = StyleSheet.create({
   },
   link: {
     fontSize: typeScale.body,
-    fontWeight: "600",
+    fontFamily: fonts.bold,
     textAlign: "center",
   },
   guestHint: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
     textAlign: "center",
     lineHeight: 18,
   },

@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   },
   weekOptionLabel: {
     fontSize: typeScale.body,
-    fontWeight: "700",
+    fontFamily: fonts.bold,
   },
   idleContainer: {
     flex: 1,
