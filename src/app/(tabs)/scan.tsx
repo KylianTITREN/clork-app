@@ -30,9 +30,10 @@ import {
   type DraftShift,
   type PendingScan,
 } from "@/lib/scan-service";
+import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { claimShare, createShare, recordClaimedRow } from "@/lib/share-service";
 import { supabase } from "@/lib/supabase";
-import type { Profile } from "@/lib/types";
+import type { Profile, Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 type ScanState =
@@ -223,7 +224,7 @@ export default function ScanScreen() {
     }
   }
 
-  async function handleSave(drafts: DraftShift[], target: ExtractionEmployee) {
+  async function handleSave(drafts: DraftShift[], target: ExtractionEmployee, exportToCalendar: boolean) {
     if (!userId || state.step !== "validate") return;
     const problem = drafts.map(validateDraft).find((p) => p !== null);
     if (problem) {
@@ -239,11 +240,31 @@ export default function ScanScreen() {
       if (scanRowId) {
         await recordClaimedRow(scanId, scanRowId);
       }
+      // Export calendrier optionnel : la semaine vient d'être écrite en base.
+      let exportNote = "";
+      if (exportToCalendar && drafts.length > 0) {
+        try {
+          const granted = await ensurePermission();
+          if (granted) {
+            const monday = mondayOf(new Date(`${drafts[0].date}T12:00:00`));
+            const { data: saved } = await supabase
+              .from("shifts")
+              .select("*")
+              .eq("user_id", userId)
+              .gte("date", monday)
+              .lte("date", addDays(monday, 6));
+            const exported = await exportWeek(monday, (saved as Shift[]) ?? []);
+            exportNote = `\n${exported} événement${exported > 1 ? "s" : ""} exporté${exported > 1 ? "s" : ""} vers ton calendrier.`;
+          }
+        } catch {
+          exportNote = "\nL'export calendrier a échoué — réessaie depuis le Planning.";
+        }
+      }
       setIsSaving(false);
       setState({ step: "idle" });
       Alert.alert(
-        "C'est dans ton calendrier ✅",
-        `${count} créneau${count > 1 ? "x" : ""} enregistré${count > 1 ? "s" : ""}.`,
+        "C'est enregistré ✅",
+        `${count} créneau${count > 1 ? "x" : ""} enregistré${count > 1 ? "s" : ""}.` + exportNote,
         [
           { text: "Partager aux collègues", onPress: () => handleShare(scanId) },
           { text: "Voir ma semaine", onPress: () => router.navigate("/(tabs)") },

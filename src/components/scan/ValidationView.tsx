@@ -23,7 +23,7 @@ type ValidationViewProps = {
   initialTarget: ExtractionEmployee | null;
   breakPrefs: BreakPrefs;
   isSaving: boolean;
-  onSave: (drafts: DraftShift[], target: ExtractionEmployee) => void;
+  onSave: (drafts: DraftShift[], target: ExtractionEmployee, exportToCalendar: boolean) => void;
   onRetake: () => void;
 };
 
@@ -42,6 +42,7 @@ export function ValidationView({
       [...toDraftShifts(employee), ...meetingDraftsFromNotes(extraction)],
       breakPrefs,
     );
+  const [exportToCalendar, setExportToCalendar] = useState(false);
   const [drafts, setDrafts] = useState<DraftShift[]>(() =>
     initialTarget ? buildDrafts(initialTarget) : [],
   );
@@ -137,10 +138,25 @@ export function ValidationView({
         </Text>
       </View>
 
+      {/* Option : pousser aussi la semaine vers le calendrier du téléphone */}
+      <Pressable
+        onPress={() => setExportToCalendar((value) => !value)}
+        style={[styles.exportToggle, { backgroundColor: colors.surface }]}
+      >
+        <Ionicons
+          name={exportToCalendar ? "checkbox" : "square-outline"}
+          size={20}
+          color={exportToCalendar ? colors.accent : colors.textMuted}
+        />
+        <Text style={[styles.exportToggleLabel, { color: colors.text }]}>
+          Exporter aussi vers mon calendrier
+        </Text>
+      </Pressable>
+
       <Button
-        label="Ajouter à mon calendrier"
+        label="Valider mes créneaux"
         variant="dark"
-        onPress={() => onSave(drafts, target)}
+        onPress={() => onSave(drafts, target, exportToCalendar)}
         isLoading={isSaving}
       />
       <Button label="Reprendre la photo" variant="ghost" onPress={onRetake} />
@@ -149,6 +165,18 @@ export function ValidationView({
 }
 
 const styles = StyleSheet.create({
+  exportToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  exportToggleLabel: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+  },
   content: {
     padding: spacing.lg,
     gap: spacing.md,

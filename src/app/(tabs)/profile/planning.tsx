@@ -184,14 +184,18 @@ export default function PlanningSettingsScreen() {
                 onEndEditing={() => void saveExportTarget(exportTarget.mode === "dedicated" && exportTarget.name.trim() ? exportTarget : { mode: "dedicated", name: "Clork" })}
               />
             ) : null}
-            {calendars === null ? (
-              <Pressable onPress={showCalendarList} style={[styles.calRow, { borderColor: exportTarget.mode === "existing" ? colors.text : colors.border }]}>
-                <Text style={[styles.calTitle, { color: colors.text }]}>
-                  {exportTarget.mode === "existing" ? exportTarget.title : "Utiliser un calendrier existant…"}
-                </Text>
-                <Text style={[styles.calMeta, { color: colors.textMuted }]}>Toucher pour choisir parmi tes calendriers</Text>
-              </Pressable>
-            ) : (
+            <Pressable
+              onPress={() => (calendars === null ? showCalendarList() : setCalendars(null))}
+              style={[styles.calRow, { borderColor: exportTarget.mode === "existing" ? colors.text : colors.border }]}
+            >
+              <Text style={[styles.calTitle, { color: colors.text }]}>
+                {exportTarget.mode === "existing" ? exportTarget.title : "Utiliser un calendrier existant…"}
+              </Text>
+              <Text style={[styles.calMeta, { color: colors.textMuted }]}>
+                {calendars === null ? "Toucher pour choisir parmi tes calendriers" : "Toucher pour replier la liste"}
+              </Text>
+            </Pressable>
+            {calendars !== null ? (
               calendars.map((calendar) => {
                 const selected = exportTarget.mode === "existing" && exportTarget.calendarId === calendar.id;
                 return (
@@ -207,7 +211,7 @@ export default function PlanningSettingsScreen() {
                   </Pressable>
                 );
               })
-            )}
+            ) : null}
           </Section>
         </ScrollView>
       </KeyboardAvoidingView>
