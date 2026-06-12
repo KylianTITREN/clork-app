@@ -43,7 +43,7 @@ type ScanState =
       extraction: PlanningExtraction;
       target: ExtractionEmployee | null;
       rowIds: Map<number, string>;
-      breakPrefs: { minutes: number; thresholdHours: number };
+      breakPrefs: { minutes: number; thresholdHours: number; startTime: string | null };
     };
 
 const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
@@ -96,6 +96,7 @@ export default function ScanScreen() {
       breakPrefs: {
         minutes: profile?.break_default_minutes ?? 0,
         thresholdHours: profile?.break_threshold_hours ?? 6,
+        startTime: profile?.break_start_default?.slice(0, 5) ?? null,
       },
     });
   }
@@ -407,7 +408,7 @@ export default function ScanScreen() {
               <Ionicons name="people" size={22} color={colors.shiftRh} />
             </View>
             <View style={styles.rowTextBox}>
-              <Text style={[styles.rowTitle, { color: colors.text }]}>Code d'une collègue</Text>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Code d'un·e collègue</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>
                 Récupère tes horaires sans re-scanner
               </Text>

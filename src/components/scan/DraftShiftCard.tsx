@@ -9,6 +9,7 @@ import {
   useThemeColors,
   type ShiftType,
 } from "@/constants/tokens";
+import { addMinutesToTime } from "@/lib/dates";
 import { breakMinutes, type DraftShift } from "@/lib/scan-service";
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
@@ -131,7 +132,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
         <Text style={[styles.pause, { color: colors.textMuted }]}>
           {draft.durationHours != null ? `${draft.durationHours}h payées` : ""}
           {pause > 0
-            ? ` · ${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause`
+            ? ` · ${pause >= 60 ? `${Math.floor(pause / 60)}h${pause % 60 ? String(pause % 60).padStart(2, "0") : ""}` : `${pause} min`} de pause${draft.breakStart ? ` (${draft.breakStart} → ${addMinutesToTime(draft.breakStart, pause)})` : ""}`
             : ""}
         </Text>
       ) : null}

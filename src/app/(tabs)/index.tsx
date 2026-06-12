@@ -19,7 +19,7 @@ import {
   useThemeColors,
 } from "@/constants/tokens";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
-import { addDays, mondayOf, weekLabel } from "@/lib/dates";
+import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -310,6 +310,9 @@ export default function WeekScreen() {
                         <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
                         <Text style={[styles.pauseText, { color: "rgba(38,33,14,0.6)" }]}>
                           {formatBreak(shift.break_minutes)} de pause
+                          {shift.break_start
+                            ? ` · ${toShortTime(shift.break_start)} → ${addMinutesToTime(shift.break_start, shift.break_minutes)}`
+                            : ""}
                         </Text>
                         <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
                       </View>

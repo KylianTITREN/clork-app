@@ -12,6 +12,8 @@ export type Profile = {
   // break_default_minutes appliqués dès que l'amplitude ≥ break_threshold_hours.
   break_default_minutes: number;
   break_threshold_hours: number;
+  // Heure de début de pause habituelle ("12:30"), null si non renseignée.
+  break_start_default: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +44,7 @@ export type Shift = {
   end_at: string | null;
   type: ShiftType;
   break_minutes: number;
+  break_start: string | null; // "HH:MM:SS" côté Postgres (time)
   note: string | null;
   source: "scan" | "manual";
   is_edited: boolean;

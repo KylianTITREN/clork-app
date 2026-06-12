@@ -29,3 +29,15 @@ export const WEEK_LABEL_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
 export function weekLabel(monday: string): string {
   return `${WEEK_LABEL_FORMATTER.format(new Date(`${monday}T12:00:00`))} – ${WEEK_LABEL_FORMATTER.format(new Date(`${addDays(monday, 6)}T12:00:00`))}`;
 }
+
+/** "12:30" + 60 min → "13:30". Tolère "HH:MM:SS" en entrée. */
+export function addMinutesToTime(time: string, minutes: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const total = (h * 60 + m + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Normalise "HH:MM:SS" → "HH:MM" (colonne Postgres time). */
+export function toShortTime(time: string | null): string | null {
+  return time ? time.slice(0, 5) : null;
+}

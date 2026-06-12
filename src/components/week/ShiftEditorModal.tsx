@@ -54,6 +54,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [pause, setPause] = useState("0");
+  const [pauseStart, setPauseStart] = useState("");
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -64,12 +65,14 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setStart(toLocalTime(target.shift.start_at));
       setEnd(toLocalTime(target.shift.end_at));
       setPause(String(target.shift.break_minutes));
+      setPauseStart(target.shift.break_start ? target.shift.break_start.slice(0, 5) : "");
       setNote(target.shift.note ?? "");
     } else {
       setType("work");
       setStart("");
       setEnd("");
       setPause("0");
+      setPauseStart("");
       setNote("");
     }
   }, [target]);
@@ -91,13 +94,20 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
         return;
       }
     }
+    const trimmedPauseStart = pauseStart.trim();
+    if (trimmedPauseStart && !TIME_RE.test(trimmedPauseStart)) {
+      Alert.alert("Pause invalide", "Heure de début de pause au format HH:MM, ou laisse vide.");
+      return;
+    }
+    const pauseMinutes = Math.min(480, Math.max(0, parseInt(pause, 10) || 0));
     setIsSaving(true);
     const payload = {
       date,
       start_at: needsTimes ? new Date(`${date}T${start}:00`).toISOString() : null,
       end_at: needsTimes ? new Date(`${date}T${end}:00`).toISOString() : null,
       type,
-      break_minutes: Math.min(480, Math.max(0, parseInt(pause, 10) || 0)),
+      break_minutes: pauseMinutes,
+      break_start: needsTimes && pauseMinutes > 0 && trimmedPauseStart ? trimmedPauseStart : null,
       note: note.trim() || null,
       is_edited: true,
     };
@@ -194,6 +204,15 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                   style={[styles.timeInput, styles.pauseInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
                 />
                 <Text style={[styles.pauseSuffix, { color: colors.textMuted }]}>min de pause</Text>
+                <Text style={[styles.pauseSuffix, { color: colors.textMuted }]}>à</Text>
+                <TextInput
+                  value={pauseStart}
+                  onChangeText={setPauseStart}
+                  placeholder="12:30"
+                  placeholderTextColor={colors.textMuted}
+                  maxLength={5}
+                  style={[styles.timeInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                />
               </View>
             ) : null}
 

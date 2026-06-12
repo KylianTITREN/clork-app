@@ -64,6 +64,7 @@ type FormSnapshot = {
   employeeId: string;
   breakMinutes: string;
   breakThreshold: string;
+  breakStart: string;
 };
 
 export default function ProfileScreen() {
@@ -75,6 +76,7 @@ export default function ProfileScreen() {
   const [employeeId, setEmployeeId] = useState("");
   const [breakMinutes, setBreakMinutes] = useState("0");
   const [breakThreshold, setBreakThreshold] = useState("6");
+  const [breakStart, setBreakStart] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<FormSnapshot | null>(null);
@@ -93,7 +95,8 @@ export default function ProfileScreen() {
       planningNames !== savedSnapshot.planningNames ||
       employeeId !== savedSnapshot.employeeId ||
       breakMinutes !== savedSnapshot.breakMinutes ||
-      breakThreshold !== savedSnapshot.breakThreshold);
+      breakThreshold !== savedSnapshot.breakThreshold ||
+      breakStart !== savedSnapshot.breakStart);
 
   async function handleUpgrade() {
     if (!upgradeEmail.trim() || upgradePassword.length < 8) {
@@ -131,12 +134,14 @@ export default function ProfileScreen() {
       setEmployeeId(data.employee_id ?? "");
       setBreakMinutes(String(data.break_default_minutes ?? 0));
       setBreakThreshold(String(data.break_threshold_hours ?? 6));
+      setBreakStart(data.break_start_default ? data.break_start_default.slice(0, 5) : "");
       setSavedSnapshot({
         displayName: data.display_name,
         planningNames: data.employee_aliases.join(", "),
         employeeId: data.employee_id ?? "",
         breakMinutes: String(data.break_default_minutes ?? 0),
         breakThreshold: String(data.break_threshold_hours ?? 6),
+        breakStart: data.break_start_default ? data.break_start_default.slice(0, 5) : "",
       });
     }
     setIsLoading(false);
@@ -159,6 +164,12 @@ export default function ProfileScreen() {
       .filter((name) => name.length > 0);
     const parsedBreak = Math.min(240, Math.max(0, parseInt(breakMinutes, 10) || 0));
     const parsedThreshold = Math.min(13, Math.max(0, parseFloat(breakThreshold.replace(",", ".")) || 6));
+    const trimmedStart = breakStart.trim();
+    if (trimmedStart && !/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmedStart)) {
+      setIsSaving(false);
+      Alert.alert("Heure de pause invalide", "Format attendu : HH:MM (ex 12:30), ou laisse vide.");
+      return;
+    }
     const { error } = await supabase
       .from("profiles")
       .update({
@@ -167,13 +178,14 @@ export default function ProfileScreen() {
         employee_id: employeeId.trim() || null,
         break_default_minutes: parsedBreak,
         break_threshold_hours: parsedThreshold,
+        break_start_default: trimmedStart || null,
       })
       .eq("id", userId);
     setIsSaving(false);
     if (error) {
       Alert.alert("Erreur", "Sauvegarde impossible : " + error.message);
     } else {
-      setSavedSnapshot({ displayName, planningNames, employeeId, breakMinutes, breakThreshold });
+      setSavedSnapshot({ displayName, planningNames, employeeId, breakMinutes, breakThreshold, breakStart });
       Alert.alert("Profil enregistré", "Tes infos planning sont à jour. ✅");
     }
   }
@@ -339,6 +351,14 @@ export default function ProfileScreen() {
                     />
                   </View>
                 </View>
+                <TextField
+                  label="Heure habituelle (optionnel)"
+                  placeholder="12:30"
+                  keyboardType="numbers-and-punctuation"
+                  hint="Posée sur tes pauses à l'import — modifiable jour par jour ensuite."
+                  value={breakStart}
+                  onChangeText={setBreakStart}
+                />
                 <Text style={[styles.sectionFootnote, { color: colors.textMuted }]}>
                   Ex. : 60 min déduites dès que la journée dépasse 6 h d'amplitude.
                   0 = désactivé.

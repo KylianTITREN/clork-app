@@ -232,6 +232,7 @@ export type DraftShift = {
   end: string | null;
   // Durée PAYÉE imprimée sur le planning ; l'écart avec l'amplitude = pause.
   durationHours: number | null;
+  breakStart: string | null; // début de pause ("12:30"), fin = début + pause
   note: string | null;
   fromHandwriting: boolean;
   highlighted: boolean;
@@ -262,18 +263,31 @@ export function paidHours(draft: DraftShift): number {
 
 // Pause par défaut du profil : appliquée seulement quand le planning
 // n'imprime pas de durée payée (durationHours null).
-export type BreakPrefs = { minutes: number; thresholdHours: number };
+export type BreakPrefs = {
+  minutes: number;
+  thresholdHours: number;
+  startTime: string | null; // heure habituelle de pause ("12:30")
+};
 
 export function applyDefaultBreak(
   drafts: DraftShift[],
   prefs: BreakPrefs,
 ): DraftShift[] {
-  if (prefs.minutes <= 0) return drafts;
   return drafts.map((draft) => {
-    if (draft.type !== "work" || draft.durationHours != null) return draft;
-    const span = spanHours(draft);
-    if (span == null || span < prefs.thresholdHours) return draft;
-    return { ...draft, durationHours: span - prefs.minutes / 60 };
+    if (draft.type !== "work") return draft;
+    let next = draft;
+    // Durée payée absente : applique la pause par défaut du profil.
+    if (next.durationHours == null && prefs.minutes > 0) {
+      const span = spanHours(next);
+      if (span != null && span >= prefs.thresholdHours) {
+        next = { ...next, durationHours: span - prefs.minutes / 60 };
+      }
+    }
+    // Heure habituelle de pause : posée dès qu'une pause existe.
+    if (next.breakStart == null && prefs.startTime && breakMinutes(next) > 0) {
+      next = { ...next, breakStart: prefs.startTime };
+    }
+    return next;
   });
 }
 
@@ -300,6 +314,7 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
           // En cas de coupure (2 créneaux), la durée imprimée couvre la journée
           // entière : impossible de la ventiler par créneau → pas de pause déduite.
           durationHours: day.shifts.length === 1 ? day.duration_hours : null,
+          breakStart: null,
           note: day.note,
           fromHandwriting: day.handwritten_override,
           highlighted: day.highlighted,
@@ -313,6 +328,7 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
         start: null,
         end: null,
         durationHours: null,
+        breakStart: null,
         note: day.status === "unknown" ? (day.note ?? "Illisible sur la photo") : day.note,
         fromHandwriting: day.handwritten_override,
         highlighted: day.highlighted,
@@ -336,6 +352,7 @@ export function meetingDraftsFromNotes(
       start: n.start,
       end: n.end ?? addOneHour(n.start as string),
       durationHours: null,
+      breakStart: null,
       note: n.text,
       fromHandwriting: true,
       highlighted: false,
@@ -382,6 +399,7 @@ export async function saveShifts(
       end_at: d.end ? toTimestamp(d.date, d.end) : null,
       type: d.type,
       break_minutes: breakMinutes(d),
+      break_start: breakMinutes(d) > 0 ? d.breakStart : null,
       note: d.note,
       source: "scan" as const,
       is_edited: d.fromHandwriting,

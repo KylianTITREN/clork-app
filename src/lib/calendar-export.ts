@@ -7,7 +7,7 @@ import * as Calendar from "expo-calendar";
 import { Platform } from "react-native";
 
 import { shiftTypeLabel } from "@/constants/tokens";
-import { addDays } from "@/lib/dates";
+import { addDays, addMinutesToTime, toShortTime } from "@/lib/dates";
 import type { Shift } from "@/lib/types";
 
 const CALENDAR_TITLE = "Clork";
@@ -74,7 +74,12 @@ export async function exportWeek(monday: string, shifts: Shift[]): Promise<numbe
   for (const shift of shifts) {
     if (shift.start_at && shift.end_at) {
       const notes = [
-        shift.break_minutes > 0 ? `Pause : ${formatBreak(shift.break_minutes)}` : null,
+        shift.break_minutes > 0
+          ? `Pause : ${formatBreak(shift.break_minutes)}` +
+            (shift.break_start
+              ? ` (${toShortTime(shift.break_start)} → ${addMinutesToTime(shift.break_start, shift.break_minutes)})`
+              : "")
+          : null,
         shift.note,
         "Ajouté par Clork",
       ]
