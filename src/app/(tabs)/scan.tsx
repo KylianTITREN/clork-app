@@ -339,7 +339,7 @@ export default function ScanScreen() {
             ]}
           >
             <View style={[styles.iconCircle, styles.iconCircleSmall, { backgroundColor: colors.accentMuted }]}>
-              <Ionicons name="sparkles" size={18} color={colors.text} />
+              <Ionicons name="sparkles" size={18} color={colors.accent} />
             </View>
             <View style={styles.pendingTextBox}>
               <Text style={[styles.pendingTitle, { color: colors.text }]}>
@@ -352,7 +352,7 @@ export default function ScanScreen() {
                 appuie pour le valider
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.text} />
+            <Ionicons name="chevron-forward" size={18} color={colors.accent} />
           </Pressable>
         ) : null}
 
@@ -375,7 +375,7 @@ export default function ScanScreen() {
             </Text>
           </View>
           <View style={styles.cameraArrow}>
-            <Ionicons name="arrow-forward" size={20} color={colors.text} />
+            <Ionicons name="arrow-forward" size={20} color={colors.accent} />
           </View>
         </Pressable>
 

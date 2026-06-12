@@ -142,7 +142,7 @@ export default function WeekScreen() {
             softShadow,
           ]}
         >
-          <Ionicons name="share-outline" size={18} color={colors.text} />
+          <Ionicons name="share-outline" size={18} color={colors.accent} />
           <Text style={[styles.exportLabel, { color: colors.text }]}>Exporter</Text>
         </Pressable>
       </View>
@@ -153,7 +153,7 @@ export default function WeekScreen() {
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
-          <Ionicons name="chevron-back" size={18} color={colors.text} />
+          <Ionicons name="chevron-back" size={18} color={colors.accent} />
         </Pressable>
         <Pressable onPress={() => setMonday(mondayOf(new Date()))}>
           <Text style={[styles.weekLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
@@ -163,7 +163,7 @@ export default function WeekScreen() {
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
-          <Ionicons name="chevron-forward" size={18} color={colors.text} />
+          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
         </Pressable>
       </View>
 
@@ -206,7 +206,7 @@ export default function WeekScreen() {
               <View
                 style={[
                   styles.dayChipDot,
-                  { backgroundColor: hasWork ? colors.text : "transparent" },
+                  { backgroundColor: hasWork ? colors.accent : "transparent" },
                 ]}
               />
             </Pressable>
@@ -255,7 +255,7 @@ export default function WeekScreen() {
                 onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
                 hitSlop={8}
               >
-                <Ionicons name="add-circle" size={24} color={colors.text} />
+                <Ionicons name="add-circle" size={24} color={colors.accent} />
               </Pressable>
             </View>
 
