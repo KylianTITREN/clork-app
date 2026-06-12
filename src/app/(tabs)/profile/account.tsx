@@ -88,6 +88,27 @@ export default function AccountSettingsScreen() {
   const canSubmitPassword = isPasswordValid && doPasswordsMatch && confirmPassword.length > 0;
   const canSubmitEmail = newEmail.trim().length > 0 && newEmail.trim() !== email;
 
+  const [promoCode, setPromoCode] = useState("");
+  const [isRedeeming, setIsRedeeming] = useState(false);
+
+  async function handleRedeemCode() {
+    if (!promoCode.trim()) return;
+    setIsRedeeming(true);
+    const { data, error } = await supabase.rpc("redeem_promo_code", { p_code: promoCode });
+    setIsRedeeming(false);
+    if (error) {
+      Alert.alert("Code refusé", "Ce code est invalide ou a déjà été utilisé au maximum.");
+    } else {
+      setPromoCode("");
+      Alert.alert(
+        "Accès débloqué 🎉",
+        data === "founder"
+          ? "Tu fais partie des fondateur·ices : scans illimités, à vie."
+          : "Accès Premium activé : scans illimités.",
+      );
+    }
+  }
+
   async function handleChangePassword() {
     if (!canSubmitPassword) return;
     setIsChangingPassword(true);
@@ -252,6 +273,31 @@ export default function AccountSettingsScreen() {
                     onPress={handleChangePassword}
                     disabled={!canSubmitPassword}
                     isLoading={isChangingPassword}
+                  />
+                ) : null}
+              </Section>
+
+              <Section
+                icon="sparkles"
+                iconBg={colors.accentMuted}
+                iconColor={colors.accent}
+                title="Code d'accès"
+                subtitle="Code fondateur ou premium reçu de l'équipe"
+              >
+                <TextField
+                  label="Code"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  placeholder="EX : WASQUEHAL"
+                  value={promoCode}
+                  onChangeText={setPromoCode}
+                />
+                {promoCode.trim() ? (
+                  <Button
+                    label="Activer mon accès"
+                    variant="dark"
+                    onPress={handleRedeemCode}
+                    isLoading={isRedeeming}
                   />
                 ) : null}
               </Section>

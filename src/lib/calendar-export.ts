@@ -5,6 +5,7 @@
 
 // Entrée /legacy obligatoire depuis SDK 56 : les mêmes fonctions importées
 // depuis "expo-calendar" sont des stubs dépréciés qui throwent à l'exécution.
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Calendar from "expo-calendar/legacy";
 import { Platform } from "react-native";
 
@@ -14,15 +15,50 @@ import type { Shift } from "@/lib/types";
 
 const CALENDAR_TITLE = "Clork";
 const CALENDAR_COLOR = "#FFC233";
+const PREF_KEY = "clork.exportCalendar";
 
 export async function ensurePermission(): Promise<boolean> {
   const { granted } = await Calendar.requestCalendarPermissionsAsync();
   return granted;
 }
 
-async function getOrCreateClorkCalendar(): Promise<string> {
+// Préférence d'export : calendrier dédié (nom au choix) ou calendrier existant.
+export type ExportTarget =
+  | { mode: "dedicated"; name: string }
+  | { mode: "existing"; calendarId: string; title: string };
+
+const DEFAULT_TARGET: ExportTarget = { mode: "dedicated", name: CALENDAR_TITLE };
+
+export async function loadExportTarget(): Promise<ExportTarget> {
+  try {
+    const raw = await AsyncStorage.getItem(PREF_KEY);
+    return raw ? (JSON.parse(raw) as ExportTarget) : DEFAULT_TARGET;
+  } catch {
+    return DEFAULT_TARGET;
+  }
+}
+
+export async function saveExportTarget(target: ExportTarget): Promise<void> {
+  await AsyncStorage.setItem(PREF_KEY, JSON.stringify(target));
+}
+
+export type WritableCalendar = { id: string; title: string; sourceName: string };
+
+/** Calendriers modifiables du téléphone (pour le choix dans Profil). */
+export async function listWritableCalendars(): Promise<WritableCalendar[]> {
   const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-  const existing = calendars.find((c) => c.title === CALENDAR_TITLE && c.allowsModifications);
+  return calendars
+    .filter((calendar) => calendar.allowsModifications)
+    .map((calendar) => ({
+      id: calendar.id,
+      title: calendar.title,
+      sourceName: calendar.source?.name ?? "",
+    }));
+}
+
+async function getOrCreateClorkCalendar(title: string): Promise<string> {
+  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+  const existing = calendars.find((c) => c.title === title && c.allowsModifications);
   if (existing) return existing.id;
 
   if (Platform.OS === "ios") {
@@ -43,21 +79,21 @@ async function getOrCreateClorkCalendar(): Promise<string> {
       );
     }
     return Calendar.createCalendarAsync({
-      title: CALENDAR_TITLE,
+      title,
       color: CALENDAR_COLOR,
       entityType: Calendar.EntityTypes.EVENT,
       sourceId,
-      name: CALENDAR_TITLE,
+      name: title,
       ownerAccount: "personal",
       accessLevel: Calendar.CalendarAccessLevel.OWNER,
     });
   }
   return Calendar.createCalendarAsync({
-    title: CALENDAR_TITLE,
+    title,
     color: CALENDAR_COLOR,
     entityType: Calendar.EntityTypes.EVENT,
-    source: { isLocalAccount: true, name: CALENDAR_TITLE, type: Calendar.SourceType.LOCAL },
-    name: CALENDAR_TITLE,
+    source: { isLocalAccount: true, name: title, type: Calendar.SourceType.LOCAL },
+    name: title,
     ownerAccount: "personal",
     accessLevel: Calendar.CalendarAccessLevel.OWNER,
   });
@@ -85,9 +121,22 @@ const CLORK_MARKER = "Ajouté par Clork";
  * défaut du téléphone — seuls les événements marqués Clork y sont purgés.
  */
 export async function exportWeek(monday: string, shifts: Shift[]): Promise<number> {
+  const target = await loadExportTarget();
   let calendarId: string;
+  if (target.mode === "existing") {
+    // Le calendrier choisi peut avoir été supprimé depuis : on vérifie.
+    const writable = await listWritableCalendars();
+    const found = writable.find((calendar) => calendar.id === target.calendarId);
+    if (!found) {
+      throw new Error(
+        `Le calendrier « ${target.title} » n'existe plus — choisis-en un autre dans Profil → Mon planning.`,
+      );
+    }
+    calendarId = found.id;
+    return writeWeek(calendarId, monday, shifts);
+  }
   try {
-    calendarId = await getOrCreateClorkCalendar();
+    calendarId = await getOrCreateClorkCalendar(target.name || CALENDAR_TITLE);
   } catch (creationError) {
     const fallback = await Calendar.getDefaultCalendarAsync().catch(() => null);
     if (!fallback?.allowsModifications) {
@@ -98,7 +147,10 @@ export async function exportWeek(monday: string, shifts: Shift[]): Promise<numbe
     }
     calendarId = fallback.id;
   }
+  return writeWeek(calendarId, monday, shifts);
+}
 
+async function writeWeek(calendarId: string, monday: string, shifts: Shift[]): Promise<number> {
   const rangeStart = new Date(`${monday}T00:00:00`);
   const rangeEnd = new Date(`${addDays(monday, 7)}T00:00:00`);
   const previous = await Calendar.getEventsAsync([calendarId], rangeStart, rangeEnd);
@@ -129,7 +181,9 @@ export async function exportWeek(monday: string, shifts: Shift[]): Promise<numbe
         notes,
       });
       count += 1;
-    } else if (shift.type === "rh" || shift.type === "cp" || shift.type === "leave") {
+    } else if (
+      ["rh", "cp", "leave", "rtt", "sick", "absent", "unpaid"].includes(shift.type)
+    ) {
       await Calendar.createEventAsync(calendarId, {
         title: eventTitle(shift),
         startDate: new Date(`${shift.date}T00:00:00`),

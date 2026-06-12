@@ -3,8 +3,10 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
+  Text,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -12,7 +14,15 @@ import { SavePill } from "@/components/profile/SavePill";
 import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { TextField } from "@/components/ui/TextField";
-import { spacing, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import {
+  ensurePermission,
+  listWritableCalendars,
+  loadExportTarget,
+  saveExportTarget,
+  type ExportTarget,
+  type WritableCalendar,
+} from "@/lib/calendar-export";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -96,6 +106,25 @@ export default function PlanningSettingsScreen() {
     }
   }
 
+  // --- Export calendrier : dédié (nom au choix) ou calendrier existant ---
+  const [exportTarget, setExportTarget] = useState<ExportTarget>({ mode: "dedicated", name: "Clork" });
+  const [calendars, setCalendars] = useState<WritableCalendar[] | null>(null);
+
+  useEffect(() => {
+    loadExportTarget().then(setExportTarget);
+  }, []);
+
+  async function pickTarget(target: ExportTarget) {
+    setExportTarget(target);
+    await saveExportTarget(target);
+  }
+
+  async function showCalendarList() {
+    const granted = await ensurePermission();
+    if (!granted) return;
+    setCalendars(await listWritableCalendars());
+  }
+
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
@@ -131,6 +160,55 @@ export default function PlanningSettingsScreen() {
             />
             <TextField label="ID employé (optionnel)" placeholder="ex: 10684512" value={employeeId} onChangeText={setEmployeeId} />
           </Section>
+
+          <Section
+            icon="calendar"
+            iconBg={colors.accentMuted}
+            iconColor={colors.accent}
+            title="Export calendrier"
+            subtitle="Où envoyer tes semaines"
+          >
+            <Pressable
+              onPress={() => pickTarget({ mode: "dedicated", name: exportTarget.mode === "dedicated" ? exportTarget.name : "Clork" })}
+              style={[styles.calRow, { borderColor: exportTarget.mode === "dedicated" ? colors.text : colors.border }]}
+            >
+              <Text style={[styles.calTitle, { color: colors.text }]}>Calendrier dédié</Text>
+              <Text style={[styles.calMeta, { color: colors.textMuted }]}>Créé pour toi, nom au choix</Text>
+            </Pressable>
+            {exportTarget.mode === "dedicated" ? (
+              <TextField
+                label="Nom du calendrier"
+                placeholder="Clork"
+                value={exportTarget.name}
+                onChangeText={(name) => setExportTarget({ mode: "dedicated", name })}
+                onEndEditing={() => void saveExportTarget(exportTarget.mode === "dedicated" && exportTarget.name.trim() ? exportTarget : { mode: "dedicated", name: "Clork" })}
+              />
+            ) : null}
+            {calendars === null ? (
+              <Pressable onPress={showCalendarList} style={[styles.calRow, { borderColor: exportTarget.mode === "existing" ? colors.text : colors.border }]}>
+                <Text style={[styles.calTitle, { color: colors.text }]}>
+                  {exportTarget.mode === "existing" ? exportTarget.title : "Utiliser un calendrier existant…"}
+                </Text>
+                <Text style={[styles.calMeta, { color: colors.textMuted }]}>Toucher pour choisir parmi tes calendriers</Text>
+              </Pressable>
+            ) : (
+              calendars.map((calendar) => {
+                const selected = exportTarget.mode === "existing" && exportTarget.calendarId === calendar.id;
+                return (
+                  <Pressable
+                    key={calendar.id}
+                    onPress={() => pickTarget({ mode: "existing", calendarId: calendar.id, title: calendar.title })}
+                    style={[styles.calRow, { borderColor: selected ? colors.text : colors.border }]}
+                  >
+                    <Text style={[styles.calTitle, { color: colors.text }]}>{calendar.title}</Text>
+                    {calendar.sourceName ? (
+                      <Text style={[styles.calMeta, { color: colors.textMuted }]}>{calendar.sourceName}</Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })
+            )}
+          </Section>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -141,4 +219,13 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md },
+  calRow: {
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 1,
+  },
+  calTitle: { fontSize: typeScale.body, fontFamily: fonts.extraBold },
+  calMeta: { fontSize: typeScale.caption, fontFamily: fonts.regular },
 });

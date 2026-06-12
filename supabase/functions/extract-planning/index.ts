@@ -222,7 +222,7 @@ Deno.serve(async (req) => {
       max: 1,
       windowDays: 30,
       message:
-        "Limite du plan gratuit atteinte (1 scan/mois). Récupère les plannings via le code d'un·e collègue, ou passe en Premium.",
+        "Limite du plan gratuit atteinte (1 scan/mois). Récupère les plannings via le code d'un·e collègue — ou saisis un code d'accès dans Profil → Compte.",
     },
     premium: null,
     founder: null,

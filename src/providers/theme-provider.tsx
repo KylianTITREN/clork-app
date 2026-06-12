@@ -36,14 +36,18 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
     // require synchrone plutôt qu'import() : les requires asynchrones cassent
     // au hot reload de Metro (« Requiring unknown module »).
     const icons = require("expo-alternate-app-icons") as typeof import("expo-alternate-app-icons");
-    if (!icons.supportsAlternateIcons) return;
+    if (!icons.supportsAlternateIcons) {
+      console.warn("[theme] alternate icons unsupported on this build");
+      return;
+    }
     const iconName =
       themeId === DEFAULT_THEME_ID
         ? null
         : themeId.charAt(0).toUpperCase() + themeId.slice(1); // catalogues en PascalCase
     await icons.setAlternateAppIcon(iconName);
-  } catch {
-    // Module natif indisponible : on ignore, le thème in-app reste appliqué.
+  } catch (error) {
+    // Module natif indisponible : le thème in-app reste appliqué.
+    console.warn("[theme] setAlternateAppIcon failed:", error);
   }
 }
 
