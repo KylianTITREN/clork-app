@@ -37,7 +37,10 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
     // au hot reload de Metro (« Requiring unknown module »).
     const icons = require("expo-alternate-app-icons") as typeof import("expo-alternate-app-icons");
     if (!icons.supportsAlternateIcons) {
-      console.warn("[theme] alternate icons unsupported on this build");
+      if (__DEV__) {
+        const { Alert } = require("react-native") as typeof import("react-native");
+        Alert.alert("[dev] Icône", "supportsAlternateIcons = false sur cette build");
+      }
       return;
     }
     const iconName =
@@ -45,9 +48,17 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
         ? null
         : themeId.charAt(0).toUpperCase() + themeId.slice(1); // catalogues en PascalCase
     await icons.setAlternateAppIcon(iconName);
+    if (__DEV__) {
+      const { Alert } = require("react-native") as typeof import("react-native");
+      Alert.alert("[dev] Icône", `setAlternateAppIcon(${iconName ?? "null"}) OK → active : ${icons.getAppIconName() ?? "défaut"}`);
+    }
   } catch (error) {
     // Module natif indisponible : le thème in-app reste appliqué.
     console.warn("[theme] setAlternateAppIcon failed:", error);
+    if (__DEV__) {
+      const { Alert } = require("react-native") as typeof import("react-native");
+      Alert.alert("[dev] Icône — échec", String(error));
+    }
   }
 }
 

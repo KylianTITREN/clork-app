@@ -439,6 +439,8 @@ export default function ScanScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
 
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
         {/* Ajout manuel : un jour précis ou une plage, sans défiler le planning */}
         <View style={[styles.rowCard, styles.joinCard, { backgroundColor: colors.surface }, softShadow]}>
           <View style={styles.joinHeader}>
@@ -465,7 +467,7 @@ export default function ScanScreen() {
                 <DatePickerField
                   value={manualEndDate}
                   onChange={setManualEndDate}
-                  placeholder="Un seul jour"
+                  placeholder="--/--"
                   minimumDate={addDays(manualDate, 1)}
                 />
                 {manualEndDate ? (
@@ -534,14 +536,6 @@ export default function ScanScreen() {
           </View>
         </View>
 
-        {/* Conseils de cadrage */}
-        <View style={styles.tipsRow}>
-          {["📐  Bien à plat", "💡  Sans reflet", "🖼️  Tout le tableau"].map((tip) => (
-            <View key={tip} style={[styles.tipChip, { backgroundColor: colors.surfaceMuted }]}>
-              <Text style={[styles.tipText, { color: colors.textMuted }]}>{tip}</Text>
-            </View>
-          ))}
-        </View>
       </ScrollView>
 
       <ShiftEditorModal
@@ -561,6 +555,12 @@ export default function ScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  divider: {
+    height: 1,
+    borderRadius: 1,
+    marginHorizontal: spacing.xl,
+    marginVertical: spacing.xs,
+  },
   manualDatesRow: {
     flexDirection: "row",
     gap: spacing.sm,
