@@ -46,6 +46,35 @@
         }
       ],
       [
+        "expo-alternate-app-icons",
+        [
+          {
+            "name": "honey",
+            "ios": "./assets/icons/icon-honey.png"
+          },
+          {
+            "name": "blossom",
+            "ios": "./assets/icons/icon-blossom.png"
+          },
+          {
+            "name": "plum",
+            "ios": "./assets/icons/icon-plum.png"
+          },
+          {
+            "name": "water",
+            "ios": "./assets/icons/icon-water.png"
+          },
+          {
+            "name": "sage",
+            "ios": "./assets/icons/icon-sage.png"
+          },
+          {
+            "name": "graphite",
+            "ios": "./assets/icons/icon-graphite.png"
+          }
+        ]
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#FFC233",

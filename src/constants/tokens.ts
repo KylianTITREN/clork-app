@@ -5,21 +5,34 @@
 
 import { useColorScheme } from "react-native";
 
-// Encre posée sur les surfaces jaunes/pastel (jamais de blanc sur jaune).
-export const inkOnAccent = "#26210E";
+import {
+  DEFAULT_THEME_ID,
+  getActiveAccentFamily,
+  themes,
+  type ThemeId,
+} from "@/constants/themes";
+import { useTheme } from "@/providers/theme-provider";
+
+/**
+ * @deprecated Encre posée sur l'accent du thème PAR DÉFAUT (miel) uniquement.
+ * Utiliser `useThemeColors().onAccent` qui suit le thème actif (les thèmes
+ * prune/anthracite ont une encre CLAIRE). Conservé pour compatibilité.
+ */
+export const inkOnAccent = themes[DEFAULT_THEME_ID].onAccent;
 
 export const palette = {
-  // Accent : jaune Clork (décision Kylian 2026-06-12). accentDeep = déclinaison
-  // dorée lisible pour textes/icônes sur fond clair.
-  accent: "#FFC233",
-  accentDeep: "#A87900",
-  accentSoft: "#FFD877",
-  accentMuted: "#FFF3D6",
+  // Famille d'accent du thème PAR DÉFAUT (miel). Pour une UI thémée,
+  // passer par useThemeColors() — ces clés statiques ne suivent pas le thème.
+  accent: themes[DEFAULT_THEME_ID].accent,
+  accentDeep: themes[DEFAULT_THEME_ID].accentDeep,
+  accentSoft: themes[DEFAULT_THEME_ID].accentSoft,
+  accentMuted: themes[DEFAULT_THEME_ID].accentMuted,
 
   // Types de créneau : couleur forte (dots) + fond pastel (cartes),
-  // texte toujours en encre — signature Timezy.
-  shiftWork: "#E8A800",
-  shiftWorkSoft: "#FCEFC7",
+  // texte toujours en encre — signature Timezy. work/workSoft suivent
+  // le thème via shiftTypeColor/shiftTypeSoftColor (getters plus bas).
+  shiftWork: themes[DEFAULT_THEME_ID].shiftWork,
+  shiftWorkSoft: themes[DEFAULT_THEME_ID].shiftWorkSoft,
   shiftOff: "#9BA1A0",
   shiftOffSoft: "#F0EFEA",
   shiftRh: "#2FA877",
@@ -42,6 +55,7 @@ export type ThemeColors = Record<
   | "border"
   | "text"
   | "textMuted"
+  | "onAccent"
   | keyof typeof palette,
   string
 >;
@@ -53,6 +67,7 @@ export const lightColors: ThemeColors = {
   border: "#E6E2D4",
   text: "#221F15", // encre chaude
   textMuted: "#75705F",
+  onAccent: themes[DEFAULT_THEME_ID].onAccent,
   ...palette,
 };
 
@@ -63,11 +78,30 @@ export const darkColors: ThemeColors = {
   border: "#3C382B",
   text: "#F4F2E8",
   textMuted: "#A8A493",
+  onAccent: themes[DEFAULT_THEME_ID].onAccent,
   ...palette,
 };
 
+// Cache des fusions base × thème : identité stable pour éviter de casser
+// d'éventuelles dépendances (useMemo/useEffect) sur l'objet retourné.
+const mergedColorsCache = new Map<string, ThemeColors>();
+
+function resolveColors(isDark: boolean, themeId: ThemeId): ThemeColors {
+  const cacheKey = `${isDark ? "dark" : "light"}:${themeId}`;
+  const cached = mergedColorsCache.get(cacheKey);
+  if (cached) return cached;
+  const merged: ThemeColors = {
+    ...(isDark ? darkColors : lightColors),
+    ...themes[themeId],
+  };
+  mergedColorsCache.set(cacheKey, merged);
+  return merged;
+}
+
 export function useThemeColors(): ThemeColors {
-  return useColorScheme() === "dark" ? darkColors : lightColors;
+  const isDark = useColorScheme() === "dark";
+  const { themeId } = useTheme();
+  return resolveColors(isDark, themeId);
 }
 
 export const spacing = {
@@ -116,8 +150,13 @@ export const softShadow = {
 
 export type ShiftType = "work" | "off" | "rh" | "cp" | "leave" | "meeting";
 
+// `work` suit le thème actif via un getter (pont module-level, voir themes.ts) :
+// les écrans qui lisent ces maps à chaque rendu récupèrent la bonne couleur
+// après un changement de thème, sans migration.
 export const shiftTypeColor: Record<ShiftType, string> = {
-  work: palette.shiftWork,
+  get work() {
+    return getActiveAccentFamily().shiftWork;
+  },
   off: palette.shiftOff,
   rh: palette.shiftRh,
   cp: palette.shiftCp,
@@ -126,7 +165,9 @@ export const shiftTypeColor: Record<ShiftType, string> = {
 };
 
 export const shiftTypeSoftColor: Record<ShiftType, string> = {
-  work: palette.shiftWorkSoft,
+  get work() {
+    return getActiveAccentFamily().shiftWorkSoft;
+  },
   off: palette.shiftOffSoft,
   rh: palette.shiftRhSoft,
   cp: palette.shiftCpSoft,
