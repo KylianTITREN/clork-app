@@ -285,7 +285,7 @@ export default function WeekScreen() {
         </Pressable>
       </View>
 
-      <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
+      <Animated.View style={{ flex: 1, transform: [{ translateX: slideAnim }] }}>
       <View style={styles.dayStrip} {...swipeResponder.panHandlers}>
         {days.map(({ date, shifts: dayShifts }, i) => {
           const isToday = date === todayIso;
@@ -463,9 +463,19 @@ export default function WeekScreen() {
         <Modal visible transparent animationType="slide" onRequestClose={() => setColleagues(null)}>
           <Pressable style={styles.colleaguesBackdrop} onPress={() => setColleagues(null)} />
           <View style={[styles.colleaguesSheet, { backgroundColor: colors.background }]}>
-            <Text style={[styles.colleaguesTitle, { color: colors.text }]}>
-              L'équipe · {weekLabel(monday)}
-            </Text>
+            <View style={styles.colleaguesHeader}>
+              <Text style={[styles.colleaguesTitle, { color: colors.text }]}>
+                L'équipe · {weekLabel(monday)}
+              </Text>
+              <Pressable
+                onPress={() => setColleagues(null)}
+                hitSlop={10}
+                accessibilityLabel="Fermer"
+                style={[styles.colleaguesClose, { backgroundColor: colors.surface }]}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
             <ScrollView contentContainerStyle={styles.colleaguesList}>
               {colleagues.map((employee) => {
                 const isExpanded = expandedColleague === employee.row_index;
@@ -781,9 +791,23 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
   },
+  colleaguesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
   colleaguesTitle: {
+    flex: 1,
     fontSize: typeScale.heading,
     fontFamily: fonts.black,
+  },
+  colleaguesClose: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   colleaguesList: {
     gap: spacing.sm,

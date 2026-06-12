@@ -200,10 +200,10 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                   <Pressable
                     key={preset.label}
                     onPress={() => {
-                      setType("work");
+                      // Remplit horaires + catégorie SANS toucher au type choisi.
                       setStart(preset.start);
                       setEnd(preset.end);
-                      setPeriod(preset.period); // la catégorie suit le preset
+                      setPeriod(preset.period);
                     }}
                     style={[
                       styles.presetChip,

@@ -151,6 +151,14 @@ export default function ProfileHubScreen() {
             onPress={() => router.push("/profile/theme")}
           />
           <NavRow
+            icon="grid"
+            iconBg={colors.shiftWorkSoft}
+            iconColor={colors.text}
+            title="Widgets"
+            subtitle="Ton planning sur l'écran d'accueil"
+            onPress={() => router.push("/profile/widgets")}
+          />
+          <NavRow
             icon="notifications"
             iconBg={colors.shiftRhSoft}
             iconColor={colors.shiftRh}

@@ -67,7 +67,10 @@ export async function refreshWidgetData(
 ): Promise<void> {
   if (Platform.OS !== "ios") return;
   try {
-    const { ExtensionStorage } = await import("@bacons/apple-targets");
+    // require synchrone plutôt qu'import() : les requires asynchrones cassent
+    // au hot reload de Metro (« Requiring unknown module »).
+    const { ExtensionStorage } =
+      require("@bacons/apple-targets") as typeof import("@bacons/apple-targets");
     const storage = new ExtensionStorage(APP_GROUP);
     storage.set(STORAGE_KEY, JSON.stringify(buildWidgetPayload(shifts)));
     if (theme) {

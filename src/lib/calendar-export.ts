@@ -73,17 +73,37 @@ function formatBreak(minutes: number): string {
     : `${minutes} min`;
 }
 
+const CLORK_MARKER = "Ajouté par Clork";
+
 /**
  * Exporte les créneaux d'une semaine (lundi → dimanche) : purge les anciens
  * événements Clork de la période puis recrée tout. Retourne le nombre exporté.
+ * Si la création du calendrier « Clork » est refusée par l'OS (source iCloud
+ * indisponible, compte par défaut restreint…), repli sur le calendrier par
+ * défaut du téléphone — seuls les événements marqués Clork y sont purgés.
  */
 export async function exportWeek(monday: string, shifts: Shift[]): Promise<number> {
-  const calendarId = await getOrCreateClorkCalendar();
+  let calendarId: string;
+  try {
+    calendarId = await getOrCreateClorkCalendar();
+  } catch (creationError) {
+    const fallback = await Calendar.getDefaultCalendarAsync().catch(() => null);
+    if (!fallback?.allowsModifications) {
+      throw new Error(
+        "Impossible de créer le calendrier « Clork » et aucun calendrier par défaut modifiable. " +
+          (creationError instanceof Error ? creationError.message : ""),
+      );
+    }
+    calendarId = fallback.id;
+  }
 
   const rangeStart = new Date(`${monday}T00:00:00`);
   const rangeEnd = new Date(`${addDays(monday, 7)}T00:00:00`);
   const previous = await Calendar.getEventsAsync([calendarId], rangeStart, rangeEnd);
-  await Promise.all(previous.map((event) => Calendar.deleteEventAsync(event.id)));
+  // Marqueur obligatoire : en repli sur le calendrier par défaut, on ne doit
+  // JAMAIS supprimer les événements personnels de l'utilisateur.
+  const ours = previous.filter((event) => event.notes?.includes(CLORK_MARKER));
+  await Promise.all(ours.map((event) => Calendar.deleteEventAsync(event.id)));
 
   let count = 0;
   for (const shift of shifts) {
@@ -96,7 +116,7 @@ export async function exportWeek(monday: string, shifts: Shift[]): Promise<numbe
               : "")
           : null,
         shift.note,
-        "Ajouté par Clork",
+        CLORK_MARKER,
       ]
         .filter(Boolean)
         .join("\n");
@@ -113,7 +133,7 @@ export async function exportWeek(monday: string, shifts: Shift[]): Promise<numbe
         startDate: new Date(`${shift.date}T00:00:00`),
         endDate: new Date(`${addDays(shift.date, 1)}T00:00:00`),
         allDay: true,
-        notes: [shift.note, "Ajouté par Clork"].filter(Boolean).join("\n"),
+        notes: [shift.note, CLORK_MARKER].filter(Boolean).join("\n"),
       });
       count += 1;
     }

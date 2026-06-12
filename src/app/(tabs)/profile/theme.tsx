@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
+import { appIconByTheme } from "@/constants/logo-assets";
 import { themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
 import { fonts, radius, spacing, useThemeColors } from "@/constants/tokens";
 import { useTheme } from "@/providers/theme-provider";
@@ -33,12 +34,14 @@ export default function ThemeSettingsScreen() {
               const isSelected = id === themeId;
               return (
                 <Pressable key={id} onPress={() => setThemeId(id as ThemeId)} style={styles.themeItem}>
+                  {/* L'icône d'app réelle : ce que l'écran d'accueil affichera. */}
                   <View style={[styles.themeSwatchRing, { borderColor: isSelected ? colors.text : "transparent" }]}>
-                    <View style={[styles.themeSwatch, { backgroundColor: themes[id as ThemeId].accent }]}>
-                      {isSelected ? (
-                        <Ionicons name="checkmark" size={16} color={themes[id as ThemeId].onAccent} />
-                      ) : null}
-                    </View>
+                    <Image source={appIconByTheme[id as ThemeId]} style={styles.themeIcon} />
+                    {isSelected ? (
+                      <View style={[styles.themeCheck, { backgroundColor: colors.text }]}>
+                        <Ionicons name="checkmark" size={12} color={themes[id as ThemeId].accent} />
+                      </View>
+                    ) : null}
                   </View>
                   <Text
                     style={[
@@ -66,7 +69,18 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md },
   themeGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   themeItem: { alignItems: "center", gap: spacing.xs, width: 72 },
-  themeSwatchRing: { borderWidth: 2, borderRadius: radius.pill, padding: 3 },
-  themeSwatch: { width: 44, height: 44, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
+  themeSwatchRing: { borderWidth: 2, borderRadius: 17, padding: 3 },
+  // Arrondi « squircle » iOS (~22 % de la taille).
+  themeIcon: { width: 52, height: 52, borderRadius: 12 },
+  themeCheck: {
+    position: "absolute",
+    right: -2,
+    top: -2,
+    width: 20,
+    height: 20,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   themeLabel: { fontSize: 11 },
 });
