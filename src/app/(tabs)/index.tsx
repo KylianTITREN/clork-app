@@ -213,7 +213,11 @@ export default function WeekScreen() {
         })}
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="automatic"
+      >
         {shifts.length > 0 ? (
           <View style={[styles.heroCard, { backgroundColor: colors.accent }, softShadow]}>
             <View style={styles.heroTextBox}>

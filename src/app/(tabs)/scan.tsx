@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { ValidationView } from "@/components/scan/ValidationView";
@@ -54,6 +54,7 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
 
 export default function ScanScreen() {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [state, setState] = useState<ScanState>({ step: "idle" });
   const [isSaving, setIsSaving] = useState(false);
@@ -322,7 +323,7 @@ export default function ScanScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <View style={styles.idleContainer}>
+      <View style={[styles.idleContainer, { paddingBottom: insets.bottom + 64 }]}>
         <View style={styles.header}>
           <Text style={[styles.kicker, { color: colors.textMuted }]}>Scanner</Text>
           <Text style={[styles.title, { color: colors.text }]}>Nouveau planning</Text>

@@ -125,6 +125,7 @@ export default function ProfileScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
+          contentInsetAdjustmentBehavior="automatic"
         >
           <Text style={[styles.title, { color: colors.text }]}>Profil</Text>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>

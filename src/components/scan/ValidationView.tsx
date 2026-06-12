@@ -67,7 +67,7 @@ export function ValidationView({
   // --- Pas de ligne ciblée : choisir parmi les lignes extraites ---------------
   if (!target) {
     return (
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
         <Text style={[styles.title, { color: colors.text }]}>Qui es-tu sur ce planning ?</Text>
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
           Je n'ai pas reconnu ton nom automatiquement. Choisis ta ligne (et pense à
@@ -94,7 +94,7 @@ export function ValidationView({
   const coherent = isRowCoherent(target);
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>{target.name}</Text>
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
