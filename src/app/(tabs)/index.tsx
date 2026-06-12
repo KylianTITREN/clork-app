@@ -653,4 +653,46 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
+  colleaguesBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  colleaguesSheet: {
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    maxHeight: "70%",
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  colleaguesTitle: {
+    fontSize: typeScale.heading,
+    fontFamily: fonts.black,
+  },
+  colleaguesList: {
+    gap: spacing.sm,
+    paddingBottom: spacing.lg,
+  },
+  colleagueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  colleagueText: {
+    flex: 1,
+    gap: 1,
+  },
+  colleagueName: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
+  },
+  colleagueMeta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  colleagueDay: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
+  },
 });
