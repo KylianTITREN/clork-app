@@ -14,6 +14,8 @@ export type Profile = {
   break_threshold_hours: number;
   // Heure de début de pause habituelle ("12:30"), null si non renseignée.
   break_start_default: string | null;
+  follow_code: string;
+  plan: "free" | "premium" | "founder";
   created_at: string;
   updated_at: string;
 };

@@ -101,7 +101,7 @@ enum ClorkDates {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.dateFormat = "dd/MM"
         return formatter.string(from: date)
     }
 
@@ -109,7 +109,7 @@ enum ClorkDates {
     static func shortDayLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = french
-        formatter.dateFormat = "EEE d MMMM"
+        formatter.dateFormat = "dd/MM"
         return formatter.string(from: date)
     }
 

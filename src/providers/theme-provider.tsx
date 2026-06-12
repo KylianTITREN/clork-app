@@ -35,7 +35,11 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
   try {
     const icons = await import("expo-alternate-app-icons");
     if (!icons.supportsAlternateIcons) return;
-    await icons.setAlternateAppIcon(themeId === DEFAULT_THEME_ID ? null : themeId);
+    const iconName =
+      themeId === DEFAULT_THEME_ID
+        ? null
+        : themeId.charAt(0).toUpperCase() + themeId.slice(1); // catalogues en PascalCase
+    await icons.setAlternateAppIcon(iconName);
   } catch {
     // Module natif indisponible : on ignore, le thème in-app reste appliqué.
   }

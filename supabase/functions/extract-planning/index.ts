@@ -203,21 +203,44 @@ Deno.serve(async (req) => {
     return errorResponse(409, "Scan already processed");
   }
 
-  // Mode invité : 1 scan par semaine glissante (le compte lève la limite).
-  if (userData.user.is_anonymous) {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  // Quotas par plan — garde-fou serveur du coût IA (modèle économique V1) :
+  // invité 1/semaine, gratuit 1/mois, premium & fondatrices illimités.
+  const { data: planRow } = await service
+    .from("profiles")
+    .select("plan")
+    .eq("id", userData.user.id)
+    .single();
+  const plan = userData.user.is_anonymous ? "guest" : (planRow?.plan ?? "free");
+  const QUOTAS: Record<string, { max: number; windowDays: number; message: string } | null> = {
+    guest: {
+      max: 1,
+      windowDays: 7,
+      message:
+        "Limite du mode invité atteinte (1 scan/semaine). Crée un compte gratuit dans Profil pour continuer.",
+    },
+    free: {
+      max: 1,
+      windowDays: 30,
+      message:
+        "Limite du plan gratuit atteinte (1 scan/mois). Récupère les plannings via le code d'un·e collègue, ou passe en Premium.",
+    },
+    premium: null,
+    founder: null,
+  };
+  const quota = QUOTAS[plan] ?? QUOTAS.free;
+  if (quota) {
+    const windowStart = new Date(
+      Date.now() - quota.windowDays * 24 * 3600 * 1000,
+    ).toISOString();
     const { count } = await service
       .from("scans")
       .select("id", { count: "exact", head: true })
       .eq("uploader_id", userData.user.id)
       .neq("id", scanId)
-      .gte("created_at", weekAgo);
-    if ((count ?? 0) >= 1) {
+      .gte("created_at", windowStart);
+    if ((count ?? 0) >= quota.max) {
       await service.from("scans").delete().eq("id", scanId);
-      return errorResponse(
-        403,
-        "Limite du mode invité atteinte (1 scan/semaine). Crée un compte gratuit dans Profil pour continuer.",
-      );
+      return errorResponse(403, quota.message);
     }
   }
 

@@ -63,13 +63,13 @@ export default function SignInScreen() {
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
-              placeholder="typhanie@exemple.fr"
+              placeholder="capucine@exemple.fr"
               value={email}
               onChangeText={setEmail}
             />
             <TextField
               label="Mot de passe"
-              secureTextEntry
+              secureToggle
               autoComplete="password"
               placeholder="••••••••"
               value={password}

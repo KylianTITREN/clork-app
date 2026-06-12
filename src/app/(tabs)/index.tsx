@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Alert, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Animated, Easing, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
@@ -19,6 +19,7 @@ import {
   useThemeColors,
 } from "@/constants/tokens";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
+import { listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { refreshWidgetData } from "@/lib/widget-data";
@@ -51,17 +52,34 @@ export default function WeekScreen() {
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
+  const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
+  // Plannings suivis en lecture seule (ex: celui de sa compagne 💛).
+  const [followedList, setFollowedList] = useState<FollowedUser[]>([]);
+  const [viewing, setViewing] = useState<FollowedUser | null>(null);
+  // Glissement « cranté » d'une semaine à l'autre.
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const changeWeekRef = useRef<(deltaDays: number) => void>(() => {});
+
+  function changeWeek(deltaDays: number) {
+    setMonday((current) => addDays(current, deltaDays));
+    slideAnim.setValue(deltaDays > 0 ? 90 : -90);
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }
+  changeWeekRef.current = changeWeek;
 
   // Swipe horizontal sur le bandeau de jours = changer de semaine.
-  const mondayRef = useRef(monday);
-  mondayRef.current = monday;
   const swipeResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
         Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
       onPanResponderRelease: (_, g) => {
-        if (g.dx <= -48) setMonday(addDays(mondayRef.current, 7));
-        else if (g.dx >= 48) setMonday(addDays(mondayRef.current, -7));
+        if (g.dx <= -48) changeWeekRef.current(7);
+        else if (g.dx >= 48) changeWeekRef.current(-7);
       },
     }),
   ).current;
@@ -91,23 +109,25 @@ export default function WeekScreen() {
   const todayIso = new Date().toISOString().slice(0, 10);
 
   const loadShifts = useCallback(async () => {
-    if (!userId) return;
+    const targetId = viewing?.id ?? userId;
+    if (!targetId) return;
     const { data } = await supabase
       .from("shifts")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", targetId)
       .gte("date", monday)
       .lte("date", sunday)
       .order("date")
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
-    // Alimente les widgets iOS (no-op hors device/iOS).
-    void refreshWidgetData((data as Shift[]) ?? []);
-  }, [userId, monday, sunday]);
+    // Widgets : uniquement MON planning.
+    if (!viewing) void refreshWidgetData((data as Shift[]) ?? []);
+  }, [userId, monday, sunday, viewing]);
 
   useFocusEffect(
     useCallback(() => {
       loadShifts();
+      listFollowed().then(setFollowedList);
     }, [loadShifts]),
   );
 
@@ -204,9 +224,37 @@ export default function WeekScreen() {
         </View>
       </View>
 
+      {followedList.length > 0 ? (
+        <View style={styles.personRow}>
+          {[null, ...followedList].map((person) => {
+            const selected = (person?.id ?? null) === (viewing?.id ?? null);
+            return (
+              <Pressable
+                key={person?.id ?? "me"}
+                onPress={() => setViewing(person)}
+                style={[
+                  styles.personChip,
+                  { backgroundColor: selected ? colors.accent : colors.surface },
+                  !selected && softShadow,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.personLabel,
+                    { color: selected ? colors.onAccent : colors.textMuted },
+                  ]}
+                >
+                  {person ? `💛 ${person.displayName}` : "Moi"}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
       <View style={styles.weekNav}>
         <Pressable
-          onPress={() => setMonday(addDays(monday, -7))}
+          onPress={() => changeWeek(-7)}
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
@@ -216,7 +264,7 @@ export default function WeekScreen() {
           <Text style={[styles.weekLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
         </Pressable>
         <Pressable
-          onPress={() => setMonday(addDays(monday, 7))}
+          onPress={() => changeWeek(7)}
           hitSlop={12}
           style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
         >
@@ -224,6 +272,7 @@ export default function WeekScreen() {
         </Pressable>
       </View>
 
+      <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
       <View style={styles.dayStrip} {...swipeResponder.panHandlers}>
         {days.map(({ date, shifts: dayShifts }, i) => {
           const isToday = date === todayIso;
@@ -308,12 +357,14 @@ export default function WeekScreen() {
                 {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
                 {date === todayIso ? "  ·  aujourd'hui" : ""}
               </Text>
-              <Pressable
-                onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
-                hitSlop={8}
-              >
-                <Ionicons name="add-circle" size={24} color={colors.accent} />
-              </Pressable>
+              {!viewing ? (
+                <Pressable
+                  onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
+                  hitSlop={8}
+                >
+                  <Ionicons name="add-circle" size={24} color={colors.accent} />
+                </Pressable>
+              ) : null}
             </View>
 
             {dayShifts.length === 0 ? (
@@ -333,6 +384,7 @@ export default function WeekScreen() {
                 return (
                   <Pressable
                     key={shift.id}
+                    disabled={!!viewing}
                     onPress={() => setEditorTarget({ mode: "edit", shift })}
                     style={({ pressed }) => [
                       styles.shiftCard,
@@ -392,6 +444,8 @@ export default function WeekScreen() {
         ))}
       </ScrollView>
 
+      </Animated.View>
+
       {colleagues ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setColleagues(null)}>
           <Pressable style={styles.colleaguesBackdrop} onPress={() => setColleagues(null)} />
@@ -401,31 +455,53 @@ export default function WeekScreen() {
             </Text>
             <ScrollView contentContainerStyle={styles.colleaguesList}>
               {colleagues.map((employee) => {
-                const day = focusedDay ?? todayIso;
-                const dayEntry = employee.days.find((d) => d.date === day);
-                const summary =
-                  dayEntry?.status === "work" && dayEntry.shifts.length > 0
-                    ? dayEntry.shifts.map((sl) => `${sl.start}–${sl.end}`).join(" / ")
-                    : dayEntry?.status === "rh"
-                      ? "RH"
-                      : dayEntry?.status === "cp"
-                        ? "CP"
-                        : "Repos";
+                const isExpanded = expandedColleague === employee.row_index;
                 return (
-                  <View
+                  <Pressable
                     key={employee.row_index}
+                    onPress={() =>
+                      setExpandedColleague(isExpanded ? null : employee.row_index)
+                    }
                     style={[styles.colleagueRow, { backgroundColor: colors.surface }, softShadow]}
                   >
-                    <View style={styles.colleagueText}>
-                      <Text style={[styles.colleagueName, { color: colors.text }]} numberOfLines={1}>
-                        {employee.name}
-                      </Text>
-                      <Text style={[styles.colleagueMeta, { color: colors.textMuted }]}>
-                        {employee.total_hours != null ? `${employee.total_hours}h cette semaine` : "—"}
-                      </Text>
+                    <View style={styles.colleagueHeader}>
+                      <View style={styles.colleagueText}>
+                        <Text style={[styles.colleagueName, { color: colors.text }]} numberOfLines={1}>
+                          {employee.name}
+                        </Text>
+                        <Text style={[styles.colleagueMeta, { color: colors.textMuted }]}>
+                          {employee.total_hours != null ? `${employee.total_hours}h cette semaine` : "—"}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={18}
+                        color={colors.textMuted}
+                      />
                     </View>
-                    <Text style={[styles.colleagueDay, { color: colors.text }]}>{summary}</Text>
-                  </View>
+                    {isExpanded
+                      ? employee.days.map((day) => {
+                          const summary =
+                            day.status === "work" && day.shifts.length > 0
+                              ? day.shifts.map((sl) => `${sl.start}–${sl.end}`).join(" / ")
+                              : day.status === "rh"
+                                ? "RH"
+                                : day.status === "cp"
+                                  ? "CP"
+                                  : "Repos";
+                          return (
+                            <View key={day.day_index} style={styles.colleagueDayRow}>
+                              <Text style={[styles.colleagueDayLabel, { color: colors.textMuted }]}>
+                                {day.date
+                                  ? new Date(`${day.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })
+                                  : `Jour ${day.day_index + 1}`}
+                              </Text>
+                              <Text style={[styles.colleagueDay, { color: colors.text }]}>{summary}</Text>
+                            </View>
+                          );
+                        })
+                      : null}
+                  </Pressable>
                 );
               })}
             </ScrollView>
@@ -679,11 +755,40 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
   },
   colleagueRow: {
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  personRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    flexWrap: "wrap",
+  },
+  personChip: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+  },
+  personLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
+  },
+  colleagueHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    borderRadius: radius.md,
-    padding: spacing.md,
+  },
+  colleagueDayRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingTop: spacing.xs,
+  },
+  colleagueDayLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+    textTransform: "capitalize",
   },
   colleagueText: {
     flex: 1,

@@ -69,7 +69,7 @@ export default function SignUpScreen() {
             <TextField
               label="Prénom (ou pseudo)"
               autoComplete="name"
-              placeholder="Typhanie"
+              placeholder="Capucine"
               value={displayName}
               onChangeText={setDisplayName}
             />
@@ -78,13 +78,13 @@ export default function SignUpScreen() {
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
-              placeholder="typhanie@exemple.fr"
+              placeholder="capucine@exemple.fr"
               value={email}
               onChangeText={setEmail}
             />
             <TextField
               label="Mot de passe"
-              secureTextEntry
+              secureToggle
               autoComplete="new-password"
               placeholder="8 caractères minimum"
               value={password}

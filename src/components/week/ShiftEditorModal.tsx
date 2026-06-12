@@ -41,10 +41,10 @@ const TYPES: ShiftType[] = ["work", "training", "off", "rh", "cp", "leave", "mee
 const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
 
 // Presets de création rapide — remplissent les horaires en un tap.
-const PRESETS: { label: string; start: string; end: string }[] = [
-  { label: "🌅 Matin", start: "09:00", end: "13:00" },
-  { label: "☀️ Journée", start: "09:00", end: "17:00" },
-  { label: "🌙 Soir", start: "14:00", end: "20:00" },
+const PRESETS: { label: string; start: string; end: string; period: ShiftPeriod }[] = [
+  { label: "🌅 Matin", start: "09:00", end: "13:00", period: "morning" },
+  { label: "☀️ Journée", start: "09:00", end: "17:00", period: "day" },
+  { label: "🌙 Soir", start: "14:00", end: "20:00", period: "evening" },
 ];
 
 export type EditorTarget =
@@ -184,6 +184,13 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                   {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
                 </Text>
               </View>
+              <Pressable
+                onPress={() => onClose(false)}
+                hitSlop={10}
+                style={[styles.closeButton, { backgroundColor: colors.surfaceMuted }]}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </Pressable>
             </View>
 
             {/* Presets express en création */}
@@ -196,6 +203,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                       setType("work");
                       setStart(preset.start);
                       setEnd(preset.end);
+                      setPeriod(preset.period); // la catégorie suit le preset
                     }}
                     style={[
                       styles.presetChip,
@@ -378,6 +386,13 @@ const styles = StyleSheet.create({
   headerTextBox: {
     flex: 1,
     gap: 1,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: {
     fontSize: typeScale.heading,
