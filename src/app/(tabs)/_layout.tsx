@@ -17,7 +17,7 @@ export default function TabsLayout() {
   }, [session?.user.id]);
 
   return (
-    <NativeTabs tintColor={palette.accentDeep} minimizeBehavior="onScrollDown">
+    <NativeTabs tintColor={palette.accent} minimizeBehavior="onScrollDown">
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>Semaine</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="calendar" drawable="ic_menu_my_calendar" />

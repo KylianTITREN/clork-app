@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -170,7 +172,7 @@ export default function ProfileScreen() {
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
         >
-          {/* En-tête identité */}
+          {/* En-tête identité + action d'enregistrement */}
           <View style={styles.headerRow}>
             <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
               <Text style={styles.avatarLetter}>{initial}</Text>
@@ -183,6 +185,26 @@ export default function ProfileScreen() {
                 {isGuest ? "Mode invité · 1 scan/semaine" : (email ?? "")}
               </Text>
             </View>
+            {!isLoading ? (
+              <Pressable
+                onPress={handleSave}
+                disabled={isSaving}
+                style={({ pressed }) => [
+                  styles.savePill,
+                  { backgroundColor: colors.accent, opacity: isSaving ? 0.5 : pressed ? 0.85 : 1 },
+                  softShadow,
+                ]}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={inkOnAccent} />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={16} color={inkOnAccent} />
+                    <Text style={styles.savePillLabel}>Enregistrer</Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
           </View>
 
           {isGuest ? (
@@ -284,8 +306,12 @@ export default function ProfileScreen() {
                 </Text>
               </Section>
 
-              <Button label="Enregistrer" onPress={handleSave} isLoading={isSaving} />
-              <Button label="Se déconnecter" variant="ghost" onPress={handleSignOut} />
+              <Pressable onPress={handleSignOut} style={styles.signOutRow} hitSlop={8}>
+                <Ionicons name="log-out-outline" size={16} color={colors.textMuted} />
+                <Text style={[styles.signOutLabel, { color: colors.textMuted }]}>
+                  Se déconnecter
+                </Text>
+              </Pressable>
             </>
           )}
         </ScrollView>
@@ -371,5 +397,31 @@ const styles = StyleSheet.create({
   },
   fieldHalf: {
     flex: 1,
+  },
+  savePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minWidth: 110,
+    justifyContent: "center",
+  },
+  savePillLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
+    color: inkOnAccent,
+  },
+  signOutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  signOutLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
 });
