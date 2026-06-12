@@ -111,6 +111,7 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: spacing.xs,
+    alignItems: "center",
   },
   logo: {
     width: 110,
@@ -124,6 +125,7 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: typeScale.body,
+    textAlign: "center",
   },
   form: {
     gap: spacing.md,
