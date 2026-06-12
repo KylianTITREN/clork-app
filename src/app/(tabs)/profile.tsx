@@ -15,9 +15,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
+import { themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
 import {
   fonts,
-  inkOnAccent,
   radius,
   softShadow,
   spacing,
@@ -28,6 +28,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+import { useTheme } from "@/providers/theme-provider";
 
 type SectionProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -58,6 +59,59 @@ function Section({ icon, iconBg, iconColor, title, subtitle, colors, children }:
   );
 }
 
+type ThemePickerProps = {
+  colors: ThemeColors;
+  selectedId: ThemeId;
+  onSelect: (themeId: ThemeId) => void;
+};
+
+// Pastilles rondes : l'accent de chaque thème, anneau sur la sélection.
+function ThemePicker({ colors, selectedId, onSelect }: ThemePickerProps) {
+  return (
+    <View style={styles.themeGrid}>
+      {themeOrder.map((themeId) => {
+        const isSelected = themeId === selectedId;
+        return (
+          <Pressable
+            key={themeId}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            accessibilityLabel={`Thème ${themeLabels[themeId]}`}
+            onPress={() => onSelect(themeId)}
+            style={({ pressed }) => [styles.themeItem, pressed && { opacity: 0.75 }]}
+          >
+            <View
+              style={[
+                styles.themeSwatchRing,
+                { borderColor: isSelected ? colors.text : "transparent" },
+              ]}
+            >
+              <View
+                style={[styles.themeSwatch, { backgroundColor: themes[themeId].accent }]}
+              >
+                {isSelected ? (
+                  <Ionicons name="checkmark" size={18} color={themes[themeId].onAccent} />
+                ) : null}
+              </View>
+            </View>
+            <Text
+              style={[
+                styles.themeLabel,
+                {
+                  color: isSelected ? colors.text : colors.textMuted,
+                  fontFamily: isSelected ? fonts.extraBold : fonts.semiBold,
+                },
+              ]}
+            >
+              {themeLabels[themeId]}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 type FormSnapshot = {
   displayName: string;
   planningNames: string;
@@ -70,6 +124,7 @@ type FormSnapshot = {
 export default function ProfileScreen() {
   const colors = useThemeColors();
   const { session } = useAuth();
+  const { themeId, setThemeId } = useTheme();
 
   const [displayName, setDisplayName] = useState("");
   const [planningNames, setPlanningNames] = useState("");
@@ -212,7 +267,7 @@ export default function ProfileScreen() {
           {/* En-tête identité + action d'enregistrement */}
           <View style={styles.headerRow}>
             <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
-              <Text style={styles.avatarLetter}>{initial}</Text>
+              <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
             </View>
             <View style={styles.headerTextBox}>
               <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
@@ -236,18 +291,18 @@ export default function ProfileScreen() {
                 ]}
               >
                 {isSaving ? (
-                  <ActivityIndicator size="small" color={inkOnAccent} />
+                  <ActivityIndicator size="small" color={colors.onAccent} />
                 ) : (
                   <>
                     <Ionicons
                       name={isDirty ? "checkmark" : "checkmark-done"}
                       size={16}
-                      color={isDirty ? inkOnAccent : colors.textMuted}
+                      color={isDirty ? colors.onAccent : colors.textMuted}
                     />
                     <Text
                       style={[
                         styles.savePillLabel,
-                        { color: isDirty ? inkOnAccent : colors.textMuted },
+                        { color: isDirty ? colors.onAccent : colors.textMuted },
                       ]}
                     >
                       {isDirty ? "Enregistrer" : "À jour"}
@@ -262,7 +317,7 @@ export default function ProfileScreen() {
             <View style={[styles.section, { backgroundColor: colors.accentMuted }]}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIcon, { backgroundColor: colors.accent }]}>
-                  <Ionicons name="rocket" size={18} color={inkOnAccent} />
+                  <Ionicons name="rocket" size={18} color={colors.onAccent} />
                 </View>
                 <View style={styles.sectionTitleBox}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -294,6 +349,8 @@ export default function ProfileScreen() {
 
           {isLoading ? null : (
             <>
+              <Text style={[styles.groupTitle, { color: colors.textMuted }]}>Profil</Text>
+
               <Section
                 icon="finger-print"
                 iconBg={colors.accentMuted}
@@ -365,6 +422,19 @@ export default function ProfileScreen() {
                 </Text>
               </Section>
 
+              <Text style={[styles.groupTitle, { color: colors.textMuted }]}>Réglages</Text>
+
+              <Section
+                icon="color-palette"
+                iconBg={colors.accentMuted}
+                iconColor={colors.accentDeep}
+                title="Thème"
+                subtitle="Couleur d'accent de l'app — et son icône"
+                colors={colors}
+              >
+                <ThemePicker colors={colors} selectedId={themeId} onSelect={setThemeId} />
+              </Section>
+
               <Pressable onPress={handleSignOut} style={styles.signOutRow} hitSlop={8}>
                 <Ionicons name="log-out-outline" size={16} color={colors.textMuted} />
                 <Text style={[styles.signOutLabel, { color: colors.textMuted }]}>
@@ -402,7 +472,14 @@ const styles = StyleSheet.create({
   avatarLetter: {
     fontSize: typeScale.title,
     fontFamily: fonts.black,
-    color: inkOnAccent,
+  },
+  groupTitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    marginTop: spacing.sm,
+    marginLeft: spacing.xs,
   },
   headerTextBox: {
     flex: 1,
@@ -470,6 +547,31 @@ const styles = StyleSheet.create({
   savePillLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.extraBold,
+  },
+  themeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    rowGap: spacing.md,
+  },
+  themeItem: {
+    width: "33.33%",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  themeSwatchRing: {
+    borderWidth: 2,
+    borderRadius: radius.pill,
+    padding: 3,
+  },
+  themeSwatch: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  themeLabel: {
+    fontSize: typeScale.caption,
   },
   signOutRow: {
     flexDirection: "row",
