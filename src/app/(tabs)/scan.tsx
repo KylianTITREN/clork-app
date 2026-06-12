@@ -9,11 +9,14 @@ import { ProcessingView, type ProcessingStep } from "@/components/scan/Processin
 import { ValidationView } from "@/components/scan/ValidationView";
 import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
+import { addDays, mondayOf, weekLabel } from "@/lib/dates";
 import {
+  applyWeekStart,
   createScan,
   fetchScanRowIds,
   findPendingValidation,
   findTargetEmployee,
+  hasResolvedDates,
   markScanValidated,
   prepareImage,
   saveShifts,
@@ -31,12 +34,15 @@ import { useAuth } from "@/providers/auth-provider";
 type ScanState =
   | { step: "idle" }
   | { step: "processing"; processingStep: ProcessingStep }
+  // Le planning n'imprime pas ses dates : on demande le lundi de la semaine.
+  | { step: "pickWeek"; scanId: string; extraction: PlanningExtraction }
   | {
       step: "validate";
       scanId: string;
       extraction: PlanningExtraction;
       target: ExtractionEmployee | null;
       rowIds: Map<number, string>;
+      breakPrefs: { minutes: number; thresholdHours: number };
     };
 
 const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
@@ -62,24 +68,38 @@ export default function ScanScreen() {
     }, [userId, state.step]),
   );
 
-  async function resumePendingScan(pending: PendingScan) {
+  // Entrée commune vers la validation (scan frais ou repris) ; passe par le
+  // choix du lundi si le planning n'imprime pas ses dates.
+  async function enterValidation(scanId: string, extraction: PlanningExtraction) {
     if (!userId) return;
+    if (!hasResolvedDates(extraction)) {
+      setState({ step: "pickWeek", scanId, extraction });
+      return;
+    }
+    const rowIds = await fetchScanRowIds(scanId);
+    const profile = await loadProfile(userId);
+    const target = findTargetEmployee(
+      extraction.employees,
+      profile?.employee_aliases ?? [],
+      profile?.display_name ?? "",
+    );
+    setState({
+      step: "validate",
+      scanId,
+      extraction,
+      target,
+      rowIds,
+      breakPrefs: {
+        minutes: profile?.break_default_minutes ?? 0,
+        thresholdHours: profile?.break_threshold_hours ?? 6,
+      },
+    });
+  }
+
+  async function resumePendingScan(pending: PendingScan) {
     try {
-      const rowIds = await fetchScanRowIds(pending.id);
-      const profile = await loadProfile(userId);
-      const target = findTargetEmployee(
-        pending.raw_extraction.employees,
-        profile?.employee_aliases ?? [],
-        profile?.display_name ?? "",
-      );
       setPendingScan(null);
-      setState({
-        step: "validate",
-        scanId: pending.id,
-        extraction: pending.raw_extraction,
-        target,
-        rowIds,
-      });
+      await enterValidation(pending.id, pending.raw_extraction);
     } catch (error) {
       Alert.alert(
         "Reprise impossible",
@@ -133,16 +153,7 @@ export default function ScanScreen() {
       }
 
       setState({ step: "processing", processingStep: "save" });
-      const rowIds = await fetchScanRowIds(scanId);
-
-      const profile = await loadProfile(userId);
-      const target = findTargetEmployee(
-        extraction.employees,
-        profile?.employee_aliases ?? [],
-        profile?.display_name ?? "",
-      );
-
-      setState({ step: "validate", scanId, extraction, target, rowIds });
+      await enterValidation(scanId, extraction);
     } catch (error) {
       setState({ step: "idle" });
       Alert.alert(
@@ -197,12 +208,67 @@ export default function ScanScreen() {
     );
   }
 
+  if (state.step === "pickWeek") {
+    const thisMonday = mondayOf(new Date());
+    const candidates = [-7, 0, 7, 14].map((offset) => addDays(thisMonday, offset));
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+        <View style={styles.pickWeek}>
+          <Text style={[styles.title, { color: colors.text }]}>
+            Ce planning commence quand ?
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            La période n'est pas imprimée sur la photo. Choisis le lundi de la
+            semaine concernée :
+          </Text>
+          {candidates.map((monday, index) => (
+            <Pressable
+              key={monday}
+              onPress={async () => {
+                const resolved = applyWeekStart(state.extraction, monday);
+                await supabase
+                  .from("scans")
+                  .update({
+                    week_start: monday,
+                    week_end: addDays(monday, 6),
+                    raw_extraction: resolved,
+                  })
+                  .eq("id", state.scanId);
+                await enterValidation(state.scanId, resolved);
+              }}
+              style={({ pressed }) => [
+                styles.weekOption,
+                {
+                  backgroundColor: index === 1 ? colors.accent : colors.surface,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.weekOptionLabel,
+                  { color: index === 1 ? "#FFF" : colors.text },
+                ]}
+              >
+                {index === 0 ? "Semaine dernière" : index === 1 ? "Cette semaine" : index === 2 ? "Semaine prochaine" : "Dans 2 semaines"}
+                {"  ·  "}
+                {weekLabel(monday)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (state.step === "validate") {
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <ValidationView
           extraction={state.extraction}
           initialTarget={state.target}
+          breakPrefs={state.breakPrefs}
           isSaving={isSaving}
           onSave={handleSave}
           onRetake={() => setState({ step: "idle" })}
@@ -284,6 +350,21 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: typeScale.body,
+  },
+  pickWeek: {
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  weekOption: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  weekOptionLabel: {
+    fontSize: typeScale.body,
+    fontWeight: "700",
   },
   pendingBanner: {
     flexDirection: "row",

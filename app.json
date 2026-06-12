@@ -28,6 +28,12 @@
     "plugins": [
       "expo-router",
       [
+        "expo-calendar",
+        {
+          "calendarPermission": "Clork ajoute tes horaires de travail dans ton calendrier."
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "cameraPermission": "Clork utilise l'appareil photo pour scanner le planning affiché en magasin.",

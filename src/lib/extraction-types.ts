@@ -9,7 +9,8 @@ export type ShiftSlot = {
 export type ExtractionDayStatus = "work" | "off" | "rh" | "cp" | "unknown";
 
 export type ExtractionDay = {
-  date: string; // "YYYY-MM-DD"
+  day_index: number; // 0 = première colonne du tableau
+  date: string | null; // null si la période n'est pas imprimée sur le planning
   status: ExtractionDayStatus;
   shifts: ShiftSlot[];
   duration_hours: number | null;
@@ -37,8 +38,8 @@ export type PlanningExtraction = {
   photo_quality: "good" | "degraded" | "unusable";
   store_label: string | null;
   week_number: number | null;
-  week_start: string;
-  week_end: string;
+  week_start: string | null;
+  week_end: string | null;
   employees: ExtractionEmployee[];
   global_notes: ExtractionGlobalNote[];
   warnings: string[];

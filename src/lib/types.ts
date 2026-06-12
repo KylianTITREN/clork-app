@@ -8,6 +8,10 @@ export type Profile = {
   display_name: string;
   employee_aliases: string[];
   employee_id: string | null;
+  // Pause par défaut quand le planning n'imprime pas la durée payée :
+  // break_default_minutes appliqués dès que l'amplitude ≥ break_threshold_hours.
+  break_default_minutes: number;
+  break_threshold_hours: number;
   created_at: string;
   updated_at: string;
 };

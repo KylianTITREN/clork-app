@@ -148,6 +148,34 @@ export async function findPendingValidation(userId: string): Promise<PendingScan
   return data?.raw_extraction ? data : null;
 }
 
+// --- Plannings sans en-tête : résolution des dates ----------------------------
+
+import { addDays } from "@/lib/dates";
+
+export function hasResolvedDates(extraction: PlanningExtraction): boolean {
+  return extraction.week_start != null;
+}
+
+/** Recalcule toutes les dates depuis le lundi fourni par l'utilisateur. */
+export function applyWeekStart(
+  extraction: PlanningExtraction,
+  mondayISO: string,
+): PlanningExtraction {
+  return {
+    ...extraction,
+    week_start: mondayISO,
+    week_end: addDays(mondayISO, 6),
+    employees: extraction.employees.map((employee) => ({
+      ...employee,
+      days: employee.days.map((day) => ({
+        ...day,
+        date: addDays(mondayISO, day.day_index),
+      })),
+    })),
+    global_notes: extraction.global_notes, // leurs dates restent telles quelles
+  };
+}
+
 // --- Ciblage de SA ligne -----------------------------------------------------
 
 function normalizeName(value: string): string {
@@ -232,6 +260,23 @@ export function paidHours(draft: DraftShift): number {
   return draft.durationHours ?? spanHours(draft) ?? 0;
 }
 
+// Pause par défaut du profil : appliquée seulement quand le planning
+// n'imprime pas de durée payée (durationHours null).
+export type BreakPrefs = { minutes: number; thresholdHours: number };
+
+export function applyDefaultBreak(
+  drafts: DraftShift[],
+  prefs: BreakPrefs,
+): DraftShift[] {
+  if (prefs.minutes <= 0) return drafts;
+  return drafts.map((draft) => {
+    if (draft.type !== "work" || draft.durationHours != null) return draft;
+    const span = spanHours(draft);
+    if (span == null || span < prefs.thresholdHours) return draft;
+    return { ...draft, durationHours: span - prefs.minutes / 60 };
+  });
+}
+
 const STATUS_TO_TYPE: Record<ExtractionDay["status"], ShiftType> = {
   work: "work",
   off: "off",
@@ -243,6 +288,8 @@ const STATUS_TO_TYPE: Record<ExtractionDay["status"], ShiftType> = {
 export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
   const drafts: DraftShift[] = [];
   for (const day of employee.days) {
+    // Dates résolues en amont (applyWeekStart si le planning n'en imprime pas).
+    if (!day.date) continue;
     if (day.status === "work" && day.shifts.length > 0) {
       for (const slot of day.shifts) {
         drafts.push({

@@ -17,7 +17,8 @@ export type ShiftSlot = {
 export type DayStatus = "work" | "off" | "rh" | "cp" | "unknown";
 
 export type DayEntry = {
-  date: string; // "YYYY-MM-DD"
+  day_index: number; // 0 = première colonne du tableau (généralement lundi)
+  date: string | null; // "YYYY-MM-DD", null si la période n'est pas imprimée
   status: DayStatus;
   shifts: ShiftSlot[];
   duration_hours: number | null;
@@ -47,8 +48,8 @@ export type PlanningExtraction = {
   photo_quality: PhotoQuality;
   store_label: string | null;
   week_number: number | null;
-  week_start: string;
-  week_end: string;
+  week_start: string | null; // null si la période n'est pas lisible/imprimée
+  week_end: string | null;
   employees: EmployeeRow[];
   global_notes: GlobalNote[];
   warnings: string[];
@@ -115,12 +116,14 @@ const EXTRACTION_TOOL = {
         description: "Numéro de semaine si imprimé sur le planning.",
       },
       week_start: {
-        type: "string",
-        description: "Date du lundi de la semaine, format YYYY-MM-DD, déduite de l'en-tête.",
+        type: ["string", "null"],
+        description:
+          "Date du premier jour de la semaine (YYYY-MM-DD), déduite de l'en-tête. " +
+          "null si la période n'est PAS imprimée ou illisible — n'invente JAMAIS de dates.",
       },
       week_end: {
-        type: "string",
-        description: "Date du dimanche de la semaine, format YYYY-MM-DD.",
+        type: ["string", "null"],
+        description: "Date du dernier jour (YYYY-MM-DD), null si non imprimée.",
       },
       employees: {
         type: "array",
@@ -145,6 +148,7 @@ const EXTRACTION_TOOL = {
                 type: "object",
                 additionalProperties: false,
                 required: [
+                  "day_index",
                   "date",
                   "status",
                   "shifts",
@@ -154,7 +158,14 @@ const EXTRACTION_TOOL = {
                   "note",
                 ],
                 properties: {
-                  date: { type: "string", description: "YYYY-MM-DD" },
+                  day_index: {
+                    type: "integer",
+                    description: "Position de la colonne jour, 0 = première colonne (généralement lundi).",
+                  },
+                  date: {
+                    type: ["string", "null"],
+                    description: "YYYY-MM-DD si déductible de l'en-tête, sinon null (n'invente pas).",
+                  },
                   status: {
                     type: "string",
                     enum: ["work", "off", "rh", "cp", "unknown"],
@@ -262,8 +273,13 @@ Règles de lecture, dans l'ordre de priorité :
    tableau. N'ignore personne.
 4. Les heures au format 24h "HH:MM" (ex: "9h" → "09:00", "13h30" → "13:30").
    Si un employé a une coupure (matin + après-midi), mets deux entrées dans shifts.
-5. Dates : déduis la date exacte de chaque jour à partir de la période de l'en-tête
-   (le premier jour du tableau est le lundi = week_start).
+5. Dates : déduis la date exacte de chaque jour à partir de la période de
+   l'en-tête (le premier jour du tableau est le lundi = week_start). Si la
+   période n'est PAS imprimée (pas d'en-tête de dates, pas de noms de jours
+   datés) : week_start, week_end et toutes les dates = null, et ajoute un
+   warning « période non imprimée » — l'application demandera la date à
+   l'utilisateur. N'INVENTE JAMAIS de dates. day_index reste toujours rempli
+   (0 = première colonne).
 6. Notes hors tableau : post-its, mentions en marge ou en bas de page vont dans
    global_notes. Si une note concerne toute l'équipe (ex: "réunion équipe le
    vendredi à 8h", "heure supp pour tous vendredi"), applies_to="all" et renseigne

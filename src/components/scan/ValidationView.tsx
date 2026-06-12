@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/Button";
 import { radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import {
+  applyDefaultBreak,
   isRowCoherent,
   meetingDraftsFromNotes,
   paidHours,
   toDraftShifts,
+  type BreakPrefs,
   type DraftShift,
 } from "@/lib/scan-service";
 
@@ -19,6 +21,7 @@ const WEEK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month:
 type ValidationViewProps = {
   extraction: PlanningExtraction;
   initialTarget: ExtractionEmployee | null;
+  breakPrefs: BreakPrefs;
   isSaving: boolean;
   onSave: (drafts: DraftShift[], target: ExtractionEmployee) => void;
   onRetake: () => void;
@@ -27,16 +30,20 @@ type ValidationViewProps = {
 export function ValidationView({
   extraction,
   initialTarget,
+  breakPrefs,
   isSaving,
   onSave,
   onRetake,
 }: ValidationViewProps) {
   const colors = useThemeColors();
   const [target, setTarget] = useState<ExtractionEmployee | null>(initialTarget);
+  const buildDrafts = (employee: ExtractionEmployee) =>
+    applyDefaultBreak(
+      [...toDraftShifts(employee), ...meetingDraftsFromNotes(extraction)],
+      breakPrefs,
+    );
   const [drafts, setDrafts] = useState<DraftShift[]>(() =>
-    initialTarget
-      ? [...toDraftShifts(initialTarget), ...meetingDraftsFromNotes(extraction)]
-      : [],
+    initialTarget ? buildDrafts(initialTarget) : [],
   );
 
   // Heures PAYÉES (durée imprimée, pause déduite) — comparables au total du planning.
@@ -50,7 +57,7 @@ export function ValidationView({
 
   function selectTarget(employee: ExtractionEmployee) {
     setTarget(employee);
-    setDrafts([...toDraftShifts(employee), ...meetingDraftsFromNotes(extraction)]);
+    setDrafts(buildDrafts(employee));
   }
 
   function updateDraft(index: number, next: DraftShift) {
@@ -91,7 +98,9 @@ export function ValidationView({
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>{target.name}</Text>
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          Semaine du {WEEK_FORMATTER.format(new Date(`${extraction.week_start}T12:00:00`))}
+          {extraction.week_start
+            ? `Semaine du ${WEEK_FORMATTER.format(new Date(`${extraction.week_start}T12:00:00`))}`
+            : "Semaine à confirmer"}
           {extraction.store_label ? ` · ${extraction.store_label}` : ""}
         </Text>
         <Pressable onPress={() => setTarget(null)}>

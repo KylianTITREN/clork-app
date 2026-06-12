@@ -23,6 +23,8 @@ export default function ProfileScreen() {
   const [displayName, setDisplayName] = useState("");
   const [planningNames, setPlanningNames] = useState("");
   const [employeeId, setEmployeeId] = useState("");
+  const [breakMinutes, setBreakMinutes] = useState("0");
+  const [breakThreshold, setBreakThreshold] = useState("6");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -41,6 +43,8 @@ export default function ProfileScreen() {
       setDisplayName(data.display_name);
       setPlanningNames(data.employee_aliases.join(", "));
       setEmployeeId(data.employee_id ?? "");
+      setBreakMinutes(String(data.break_default_minutes ?? 0));
+      setBreakThreshold(String(data.break_threshold_hours ?? 6));
     }
     setIsLoading(false);
   }, [userId]);
@@ -60,12 +64,16 @@ export default function ProfileScreen() {
       .split(",")
       .map((name) => name.trim())
       .filter((name) => name.length > 0);
+    const parsedBreak = Math.min(240, Math.max(0, parseInt(breakMinutes, 10) || 0));
+    const parsedThreshold = Math.min(13, Math.max(0, parseFloat(breakThreshold.replace(",", ".")) || 6));
     const { error } = await supabase
       .from("profiles")
       .update({
         display_name: displayName.trim(),
         employee_aliases: aliases,
         employee_id: employeeId.trim() || null,
+        break_default_minutes: parsedBreak,
+        break_threshold_hours: parsedThreshold,
       })
       .eq("id", userId);
     setIsSaving(false);
@@ -119,6 +127,22 @@ export default function ProfileScreen() {
                 hint="Utile si le planning affiche des matricules."
                 value={employeeId}
                 onChangeText={setEmployeeId}
+              />
+              <TextField
+                label="Pause par défaut (minutes)"
+                placeholder="60"
+                keyboardType="number-pad"
+                hint="Utilisée seulement si le planning n'imprime pas la durée payée. 0 = désactivé."
+                value={breakMinutes}
+                onChangeText={setBreakMinutes}
+              />
+              <TextField
+                label="À partir de combien d'heures ?"
+                placeholder="6"
+                keyboardType="decimal-pad"
+                hint="La pause s'applique dès que la journée atteint cette amplitude."
+                value={breakThreshold}
+                onChangeText={setBreakThreshold}
               />
               <Button label="Enregistrer" onPress={handleSave} isLoading={isSaving} />
               <Button label="Se déconnecter" variant="ghost" onPress={handleSignOut} />
