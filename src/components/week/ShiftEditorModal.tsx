@@ -76,7 +76,7 @@ const HALF_DAY_OPTIONS: { id: HalfDay; label: string }[] = [
 
 export type EditorTarget =
   | { mode: "edit"; shift: Shift }
-  | { mode: "create"; date: string; userId: string };
+  | { mode: "create"; date: string; userId: string; endDate?: string };
 
 type ShiftEditorModalProps = {
   target: EditorTarget | null;
@@ -143,7 +143,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
       setPeriod(null);
       setHalfDay("day");
     }
-    setEndDate(null);
+    setEndDate(target.mode === "create" ? (target.endDate ?? null) : null);
     setSelectedPresetId(null);
   }, [target]);
 

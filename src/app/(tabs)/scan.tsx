@@ -67,6 +67,7 @@ export default function ScanScreen() {
   const [isJoining, setIsJoining] = useState(false);
   // Ajout manuel : date choisie + éditeur de créneau (presets, multi-jours…).
   const [manualDate, setManualDate] = useState<string>(isoDate(new Date()));
+  const [manualEndDate, setManualEndDate] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
 
   const userId = session?.user.id;
@@ -451,15 +452,47 @@ export default function ScanScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.joinRow}>
-            <DatePickerField value={manualDate} onChange={setManualDate} />
-            <Pressable
-              onPress={() => userId && setEditorTarget({ mode: "create", date: manualDate, userId })}
-              style={[styles.joinButton, { backgroundColor: colors.accent }]}
-            >
-              <Ionicons name="arrow-forward" size={20} color={colors.onAccent} />
-            </Pressable>
+          <View style={styles.manualDatesRow}>
+            <View style={styles.manualDateBox}>
+              <Text style={[styles.manualDateLabel, { color: colors.textMuted }]}>Du</Text>
+              <DatePickerField value={manualDate} onChange={setManualDate} />
+            </View>
+            <View style={styles.manualDateBox}>
+              <Text style={[styles.manualDateLabel, { color: colors.textMuted }]}>
+                Au (optionnel)
+              </Text>
+              <View style={styles.manualEndRow}>
+                <DatePickerField
+                  value={manualEndDate}
+                  onChange={setManualEndDate}
+                  placeholder="Un seul jour"
+                  minimumDate={addDays(manualDate, 1)}
+                />
+                {manualEndDate ? (
+                  <Pressable onPress={() => setManualEndDate(null)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
           </View>
+          <Pressable
+            onPress={() =>
+              userId &&
+              setEditorTarget({
+                mode: "create",
+                date: manualDate,
+                userId,
+                endDate: manualEndDate && manualEndDate > manualDate ? manualEndDate : undefined,
+              })
+            }
+            style={[styles.manualButton, { backgroundColor: colors.accent }]}
+          >
+            <Ionicons name="add" size={18} color={colors.onAccent} />
+            <Text style={[styles.manualButtonLabel, { color: colors.onAccent }]}>
+              Ajouter manuellement
+            </Text>
+          </Pressable>
         </View>
 
         {/* Code collègue */}
@@ -528,6 +561,38 @@ export default function ScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  manualDatesRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  manualDateBox: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  manualDateLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  manualEndRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  manualButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm + 2,
+    marginTop: spacing.sm,
+  },
+  manualButtonLabel: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.extraBold,
+  },
   safeArea: { flex: 1 },
   header: {
     paddingHorizontal: spacing.lg,
