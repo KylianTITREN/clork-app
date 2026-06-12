@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   fonts,
-  inkOnAccent,
   radius,
   shiftTypeColor,
   shiftTypeLabel,
@@ -27,6 +26,7 @@ const EDITABLE_TYPES: ShiftType[] = ["work", "off", "rh", "cp", "meeting"];
 // Texte des chips sélectionnées : encre sur les couleurs claires, blanc sinon.
 const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
 
+const INK = "#26210E";
 const INK_SOFT = "rgba(38,33,14,0.65)";
 
 type DraftShiftCardProps = {
@@ -55,7 +55,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
     >
       <View style={styles.headerRow}>
         <View style={[styles.typeDot, { backgroundColor: typeColor }]} />
-        <Text style={[styles.day, { color: inkOnAccent }]}>{dayLabel}</Text>
+        <Text style={[styles.day, { color: INK }]}>{dayLabel}</Text>
 
         <Pressable
           accessibilityRole="switch"
@@ -63,7 +63,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
           onPress={() => onChange({ ...draft, include: !draft.include })}
           style={[
             styles.includeToggle,
-            { backgroundColor: draft.include ? inkOnAccent : "rgba(255,255,255,0.7)" },
+            { backgroundColor: draft.include ? INK : "rgba(255,255,255,0.7)" },
           ]}
         >
           <Text
@@ -107,7 +107,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
                   {
                     color: selected
                       ? INK_CHIP_TYPES.includes(type)
-                        ? inkOnAccent
+                        ? INK
                         : "#FFF"
                       : INK_SOFT,
                   },
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
   highlightLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.bold,
-    color: inkOnAccent,
+    color: INK,
   },
   note: {
     fontSize: typeScale.caption,

@@ -83,7 +83,7 @@ export function TimePickerField({
                 locale="fr-FR"
               />
               <Pressable onPress={confirm} style={[styles.confirm, { backgroundColor: colors.accent }]}>
-                <Text style={[styles.confirmLabel, { color: colors.text }]}>Valider</Text>
+                <Text style={[styles.confirmLabel, { color: colors.onAccent }]}>Valider</Text>
               </Pressable>
             </View>
           </Modal>

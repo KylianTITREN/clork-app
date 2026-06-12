@@ -7,7 +7,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import {
   fonts,
-  inkOnAccent,
   radius,
   shiftPeriodLabel,
   shiftTypeColor,
@@ -28,6 +27,8 @@ import { useAuth } from "@/providers/auth-provider";
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric" });
 const TIME_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const CHIP_LETTERS = ["L", "M", "M", "J", "V", "S", "D"];
+// Encre des cartes pastel (fonds clairs dans tous les thèmes).
+const INK = "#26210E";
 
 function formatBreak(minutes: number): string {
   return minutes >= 60
@@ -249,7 +250,7 @@ export default function WeekScreen() {
                 <Text
                   style={[
                     styles.dayChipNumber,
-                    { color: isFocused ? inkOnAccent : colors.text },
+                    { color: isFocused ? colors.onAccent : colors.text },
                   ]}
                 >
                   {date.slice(8)}
@@ -274,13 +275,13 @@ export default function WeekScreen() {
         {shifts.length > 0 ? (
           <View style={[styles.heroCard, { backgroundColor: colors.accent }, softShadow]}>
             <View style={styles.heroTextBox}>
-              <Text style={styles.heroLabel}>Heures payées cette semaine</Text>
-              <Text style={styles.heroValue}>
+              <Text style={[styles.heroLabel, { color: colors.onAccent, opacity: 0.75 }]}>Heures payées cette semaine</Text>
+              <Text style={[styles.heroValue, { color: colors.onAccent }]}>
                 {weekHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
               </Text>
             </View>
             <View style={styles.heroBadge}>
-              <Ionicons name="time-outline" size={28} color={inkOnAccent} />
+              <Ionicons name="time-outline" size={28} color={colors.onAccent} />
             </View>
           </View>
         ) : (
@@ -340,17 +341,17 @@ export default function WeekScreen() {
                         <View
                           style={[styles.shiftDot, { backgroundColor: shiftTypeColor[shift.type] }]}
                         />
-                        <Text style={[styles.shiftType, { color: inkOnAccent }]}>
+                        <Text style={[styles.shiftType, { color: INK }]}>
                           {shiftTypeLabel[shift.type]}
                         </Text>
                         {shift.type === "work" && period ? (
                           <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
-                            <Text style={[styles.periodLabel, { color: inkOnAccent }]}>{period}</Text>
+                            <Text style={[styles.periodLabel, { color: INK }]}>{period}</Text>
                           </View>
                         ) : null}
                       </View>
                       {shift.start_at && shift.end_at ? (
-                        <Text style={[styles.shiftTime, { color: inkOnAccent }]}>
+                        <Text style={[styles.shiftTime, { color: INK }]}>
                           {toLocalTime(shift.start_at)} – {toLocalTime(shift.end_at)}
                         </Text>
                       ) : null}
@@ -551,7 +552,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   heroValue: {
-    color: inkOnAccent,
     fontSize: typeScale.hero,
     fontFamily: fonts.black,
   },

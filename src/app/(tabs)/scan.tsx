@@ -8,7 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { ValidationView } from "@/components/scan/ValidationView";
-import { fonts, inkOnAccent, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, mondayOf, weekLabel } from "@/lib/dates";
 import {
@@ -375,11 +375,11 @@ export default function ScanScreen() {
           ]}
         >
           <View style={styles.cameraIconCircle}>
-            <Ionicons name="camera" size={32} color={inkOnAccent} />
+            <Ionicons name="camera" size={32} color={colors.onAccent} />
           </View>
           <View style={styles.cameraTextBox}>
-            <Text style={styles.cameraTitle}>Prendre en photo</Text>
-            <Text style={styles.cameraSubtitle}>
+            <Text style={[styles.cameraTitle, { color: colors.onAccent }]}>Prendre en photo</Text>
+            <Text style={[styles.cameraSubtitle, { color: colors.onAccent, opacity: 0.75 }]}>
               Cadrage et redressement autos · l'IA lit, tu valides
             </Text>
           </View>
@@ -443,7 +443,7 @@ export default function ScanScreen() {
                 { backgroundColor: colors.accent, opacity: isJoining || !joinCode.trim() ? 0.4 : 1 },
               ]}
             >
-              <Ionicons name="arrow-forward" size={20} color={inkOnAccent} />
+              <Ionicons name="arrow-forward" size={20} color={colors.onAccent} />
             </Pressable>
           </View>
         </View>
@@ -553,12 +553,10 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   cameraTitle: {
-    color: inkOnAccent,
     fontSize: typeScale.heading,
     fontFamily: fonts.black,
   },
   cameraSubtitle: {
-    color: "rgba(38,33,14,0.65)",
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },

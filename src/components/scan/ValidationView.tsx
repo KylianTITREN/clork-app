@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { DraftShiftCard } from "@/components/scan/DraftShiftCard";
 import { Button } from "@/components/ui/Button";
-import { fonts, inkOnAccent, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import {
   applyDefaultBreak,
@@ -130,8 +130,8 @@ export function ValidationView({
       ))}
 
       <View style={[styles.totalRow, { backgroundColor: colors.accent }, softShadow]}>
-        <Text style={[styles.totalLabel, { color: "rgba(38,33,14,0.65)" }]}>Total travaillé</Text>
-        <Text style={[styles.totalValue, { color: inkOnAccent }]}>
+        <Text style={[styles.totalLabel, { color: colors.onAccent, opacity: 0.75 }]}>Total travaillé</Text>
+        <Text style={[styles.totalValue, { color: colors.onAccent }]}>
           {totalHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
           {target.total_hours != null ? ` / ${target.total_hours}h sur le planning` : ""}
         </Text>
