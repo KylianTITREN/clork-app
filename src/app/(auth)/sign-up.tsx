@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Link, router } from "expo-router";
+import { Link, router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
@@ -26,8 +26,11 @@ const MIN_PASSWORD_LENGTH = 8;
 export default function SignUpScreen() {
   const colors = useThemeColors();
   const { themeId } = useTheme();
+  // Email transmis depuis l'écran de connexion (« Créer un compte » pré-rempli).
+  const params = useLocalSearchParams<{ email?: string }>();
+  const prefilledEmail = typeof params.email === "string" ? params.email : "";
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefilledEmail);
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,6 +87,7 @@ export default function SignUpScreen() {
           <View style={styles.form}>
             <TextField
               label="Prénom (ou pseudo)"
+              autoFocus
               autoComplete="name"
               textContentType="givenName"
               placeholder="Capucine"
