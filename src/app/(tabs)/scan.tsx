@@ -31,6 +31,7 @@ import {
   type PendingScan,
 } from "@/lib/scan-service";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
+import { fetchPlan, isPremiumPlan, showPremiumGate } from "@/lib/plan-service";
 import { claimShare, createShare, recordClaimedRow } from "@/lib/share-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile, Shift } from "@/lib/types";
@@ -193,6 +194,10 @@ export default function ScanScreen() {
   }
 
   async function handleShare(scanId: string) {
+    if (!isPremiumPlan(await fetchPlan())) {
+      showPremiumGate("Le partage de planning par code");
+      return;
+    }
     try {
       const code = await createShare(scanId);
       await Share.share({
@@ -243,7 +248,9 @@ export default function ScanScreen() {
       }
       // Export calendrier optionnel : la semaine vient d'être écrite en base.
       let exportNote = "";
-      if (exportToCalendar && drafts.length > 0) {
+      if (exportToCalendar && !isPremiumPlan(await fetchPlan())) {
+        exportNote = "\nL'export calendrier est une fonction Premium (code : Profil → Compte).";
+      } else if (exportToCalendar && drafts.length > 0) {
         try {
           const granted = await ensurePermission();
           if (granted) {

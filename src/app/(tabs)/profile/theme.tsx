@@ -9,6 +9,7 @@ import { SavePill } from "@/components/profile/SavePill";
 import { appIconByTheme } from "@/constants/logo-assets";
 import { themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
 import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { useTheme } from "@/providers/theme-provider";
 
 /**
@@ -18,6 +19,7 @@ import { useTheme } from "@/providers/theme-provider";
 export default function ThemeSettingsScreen() {
   const colors = useThemeColors();
   const { themeId, setThemeId } = useTheme();
+  const plan = usePlan();
   const [selected, setSelected] = useState<ThemeId>(themeId);
 
   const isDirty = selected !== themeId;
@@ -32,7 +34,17 @@ export default function ThemeSettingsScreen() {
         <SubPageHeader
           title="Thème"
           right={
-            <SavePill isDirty={isDirty} isSaving={false} onPress={() => setThemeId(selected)} />
+            <SavePill
+              isDirty={isDirty}
+              isSaving={false}
+              onPress={() => {
+                if (!isPremiumPlan(plan) && selected !== "honey") {
+                  showPremiumGate("Le changement de thème");
+                  return;
+                }
+                setThemeId(selected);
+              }}
+            />
           }
         />
 

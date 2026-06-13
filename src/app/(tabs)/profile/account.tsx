@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { authErrorMessage } from "@/lib/auth-errors";
+import { setCachedPlan } from "@/lib/plan-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -114,6 +115,7 @@ export default function AccountSettingsScreen() {
     } else {
       setPromoCode("");
       setPlan(data === "founder" ? "founder" : "premium");
+      setCachedPlan(data === "founder" ? "founder" : "premium");
       Alert.alert(
         "Accès débloqué 🎉",
         data === "founder"

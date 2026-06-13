@@ -16,6 +16,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
   DEFAULT_PRESETS,
   MAX_PRESETS,
@@ -34,6 +35,7 @@ const PRESET_TYPE_OPTIONS: PresetType[] = ["work", "training", "overtime"];
  */
 export default function PresetsScreen() {
   const colors = useThemeColors();
+  const plan = usePlan();
   const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -55,6 +57,10 @@ export default function PresetsScreen() {
   }
 
   function addPreset() {
+    if (!isPremiumPlan(plan) && presets.length >= 3) {
+      showPremiumGate("Plus de 3 créneaux types");
+      return;
+    }
     setPresets((current) => [
       ...current,
       {

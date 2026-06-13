@@ -19,6 +19,7 @@ import {
   useThemeColors,
 } from "@/constants/tokens";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
+import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { rescheduleFromShifts } from "@/lib/reminder-service";
 import { createShare } from "@/lib/share-service";
@@ -53,6 +54,7 @@ export default function WeekScreen() {
   const [focusedDay, setFocusedDay] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const plan = usePlan();
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
   const [colleaguesScanId, setColleaguesScanId] = useState<string | null>(null);
@@ -103,6 +105,10 @@ export default function WeekScreen() {
         "Pas de planning d'équipe",
         "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues.",
       );
+      return;
+    }
+    if (!isPremiumPlan(plan)) {
+      showPremiumGate("Le planning de toute l'équipe");
       return;
     }
     setColleagues(employees);
@@ -173,6 +179,10 @@ export default function WeekScreen() {
   );
 
   async function handleExport() {
+    if (!isPremiumPlan(plan)) {
+      showPremiumGate("L'export vers ton calendrier");
+      return;
+    }
     if (shifts.length === 0) {
       Alert.alert("Rien à exporter", "Cette semaine ne contient aucun créneau.");
       return;
