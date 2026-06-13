@@ -50,11 +50,24 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
     try {
       await icons.setAlternateAppIcon(iconName);
     } catch (firstError) {
-      // « Resource temporarily unavailable » : le springboard refuse juste
-      // après un lancement par débogueur ou un retour au premier plan —
-      // une seconde tentative différée suffit en général.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await icons.setAlternateAppIcon(iconName);
+      // « Resource temporarily unavailable » (EAGAIN) : le démon d'icônes
+      // refuse parfois pendant que l'app est active. On retente une fois
+      // tout de suite, puis au prochain passage app → premier plan (moment
+      // où le springboard accepte le plus fiablement).
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await icons.setAlternateAppIcon(iconName);
+      } catch {
+        const { AppState } = require("react-native") as typeof import("react-native");
+        const subscription = AppState.addEventListener("change", (state) => {
+          if (state !== "active") return;
+          subscription.remove();
+          icons.setAlternateAppIcon(iconName).catch((retryError: unknown) => {
+            console.warn("[theme] icon retry on foreground failed:", retryError);
+          });
+        });
+        throw firstError;
+      }
     }
     if (__DEV__) {
       const { Alert } = require("react-native") as typeof import("react-native");
