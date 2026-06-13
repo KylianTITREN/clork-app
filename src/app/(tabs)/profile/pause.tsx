@@ -118,7 +118,7 @@ export default function PauseSettingsScreen() {
         >
           <View style={styles.fieldBlock}>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>DURÉE PAR DÉFAUT</Text>
-            <DurationChips value={breakMinutes} onChange={setBreakMinutes} />
+            <DurationChips value={breakMinutes} onChange={setBreakMinutes} allowCustom />
           </View>
 
           <View style={styles.fieldBlock}>

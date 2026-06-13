@@ -87,6 +87,9 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
                 onChange({
                   ...draft,
                   type,
+                  // Choisir un type = vouloir garder ce jour : on le ré-inclut
+                  // (les jours repos/illisibles arrivent « Ignoré » par défaut).
+                  include: true,
                   // Un type sans horaires vide les heures ; work/meeting les exige.
                   start: type === "work" || type === "meeting" || type === "training" ? draft.start : null,
                   end: type === "work" || type === "meeting" || type === "training" ? draft.end : null,
@@ -155,6 +158,7 @@ export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
           </View>
           <DurationChips
             compact
+            allowCustom
             value={pause}
             onChange={(minutes) => {
               const span = spanHours(draft);

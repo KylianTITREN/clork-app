@@ -115,11 +115,10 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    loadPresets().then(setPresets);
-  }, []);
-
-  useEffect(() => {
     if (!target) return;
+    // Rechargé à CHAQUE ouverture : le composant reste monté, sinon une modif
+    // de preset (Profil → Créneaux types) ne serait jamais reflétée ici.
+    loadPresets().then(setPresets);
     if (target.mode === "edit") {
       setType(target.shift.type);
       setStart(toLocalTime(target.shift.start_at));
@@ -349,7 +348,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
                 </View>
 
                 <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Pause</Text>
-                <DurationChips value={pauseMinutes} onChange={setPauseMinutes} />
+                <DurationChips value={pauseMinutes} onChange={setPauseMinutes} allowCustom />
                 {pauseMinutes > 0 ? (
                   <View style={styles.pauseStartRow}>
                     <Text style={[styles.pauseAt, { color: colors.textMuted }]}>à</Text>

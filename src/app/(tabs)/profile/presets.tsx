@@ -175,6 +175,7 @@ export default function PresetsScreen() {
             <DurationChips
               value={preset.breakMinutes}
               onChange={(breakMinutes) => patch(preset.id, { breakMinutes })}
+              allowCustom
             />
           </View>
         ))}

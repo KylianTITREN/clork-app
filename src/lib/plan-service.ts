@@ -2,8 +2,9 @@
 // Les limites qui coûtent (scans, codes, suivis) sont appliquées CÔTÉ SERVEUR ;
 // ici on gate l'UI (thème, export, presets, vue équipe) avec un message clair.
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert } from "react-native";
+import { useFocusEffect } from "expo-router";
 
 import { supabase } from "./supabase";
 
@@ -32,16 +33,22 @@ export function setCachedPlan(plan: Plan): void {
   cachedPlan = plan;
 }
 
-/** Plan courant : valeur en cache tout de suite, rafraîchie en arrière-plan. */
+/**
+ * Plan courant : valeur en cache tout de suite, rafraîchie À CHAQUE focus de
+ * l'écran. Indispensable après l'activation d'un code VIP/Premium sur un autre
+ * onglet : sans ça l'onglet Scan (qui reste monté) garderait l'ancien plan.
+ */
 export function usePlan(): Plan {
   const [plan, setPlan] = useState<Plan>(cachedPlan);
-  useEffect(() => {
-    let mounted = true;
-    fetchPlan().then((fresh) => mounted && setPlan(fresh));
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      fetchPlan().then((fresh) => mounted && setPlan(fresh));
+      return () => {
+        mounted = false;
+      };
+    }, []),
+  );
   return plan;
 }
 

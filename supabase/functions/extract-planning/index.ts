@@ -227,7 +227,9 @@ Deno.serve(async (req) => {
     premium: null,
     founder: null,
   };
-  const quota = QUOTAS[plan] ?? QUOTAS.free;
+  // `null` est intentionnel (premium/founder = aucun quota) : on NE doit PAS
+  // le remplacer par le quota gratuit. Seul un plan inconnu retombe sur `free`.
+  const quota = plan in QUOTAS ? QUOTAS[plan] : QUOTAS.free;
   if (quota) {
     const windowStart = new Date(
       Date.now() - quota.windowDays * 24 * 3600 * 1000,

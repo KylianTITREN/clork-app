@@ -406,7 +406,7 @@ export async function saveShifts(
   userId: string,
   drafts: DraftShift[],
   scanRowId: string | null,
-): Promise<number> {
+): Promise<string[]> {
   const rows = drafts
     .filter((d) => d.include)
     .map((d) => ({
@@ -422,13 +422,25 @@ export async function saveShifts(
       source: "scan" as const,
       is_edited: d.fromHandwriting,
     }));
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) return [];
 
-  const { error } = await supabase
+  // `select()` renvoie les lignes écrites : leurs IDs permettent d'annuler
+  // l'import en bloc juste après (« Annuler l'import »).
+  const { data, error } = await supabase
     .from("shifts")
-    .upsert(rows, { onConflict: "user_id,date,start_at" });
+    .upsert(rows, { onConflict: "user_id,date,start_at" })
+    .select("id");
   if (error) {
     throw new Error("Enregistrement des créneaux impossible : " + error.message);
   }
-  return rows.length;
+  return ((data as { id: string }[]) ?? []).map((row) => row.id);
+}
+
+/** Annule un import : supprime les créneaux fraîchement enregistrés. */
+export async function undoImport(shiftIds: string[]): Promise<void> {
+  if (shiftIds.length === 0) return;
+  const { error } = await supabase.from("shifts").delete().in("id", shiftIds);
+  if (error) {
+    throw new Error("Annulation impossible : " + error.message);
+  }
 }

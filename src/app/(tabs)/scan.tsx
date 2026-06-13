@@ -24,6 +24,7 @@ import {
   prepareImage,
   saveShifts,
   startExtraction,
+  undoImport,
   uploadScanPhoto,
   validateDraft,
   waitForExtraction,
@@ -232,6 +233,33 @@ export default function ScanScreen() {
     }
   }
 
+  function confirmUndoImport(shiftIds: string[]) {
+    if (shiftIds.length === 0) return;
+    Alert.alert(
+      "Annuler cet import ?",
+      `Les ${shiftIds.length} créneau${shiftIds.length > 1 ? "x" : ""} qui viennent d'être ajoutés seront retirés de ton planning. ` +
+        "Un éventuel export vers ton calendrier n'est pas annulé.",
+      [
+        { text: "Garder", style: "cancel" },
+        {
+          text: "Annuler l'import",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await undoImport(shiftIds);
+              Alert.alert("Import annulé", "Les créneaux ont été retirés. Tu peux re-scanner le planning.");
+            } catch (error) {
+              Alert.alert(
+                "Annulation impossible",
+                error instanceof Error ? error.message : "Erreur inconnue",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }
+
   async function handleSave(drafts: DraftShift[], target: ExtractionEmployee, exportToCalendar: boolean) {
     if (!userId || state.step !== "validate") return;
     const problem = drafts.map(validateDraft).find((p) => p !== null);
@@ -243,7 +271,8 @@ export default function ScanScreen() {
     try {
       const scanId = state.scanId;
       const scanRowId = state.rowIds.get(target.row_index) ?? null;
-      const count = await saveShifts(userId, drafts, scanRowId);
+      const savedIds = await saveShifts(userId, drafts, scanRowId);
+      const count = savedIds.length;
       await markScanValidated(scanId); // sans effet (RLS) sur un scan partagé, voulu
       if (scanRowId) {
         await recordClaimedRow(scanId, scanRowId);
@@ -276,6 +305,7 @@ export default function ScanScreen() {
         "C'est enregistré ✅",
         `${count} créneau${count > 1 ? "x" : ""} enregistré${count > 1 ? "s" : ""}.` + exportNote,
         [
+          { text: "Annuler l'import", style: "destructive", onPress: () => confirmUndoImport(savedIds) },
           { text: "Partager aux collègues", onPress: () => handleShare(scanId) },
           { text: "Voir ma semaine", onPress: () => router.navigate("/(tabs)") },
         ],
@@ -660,7 +690,10 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
   },
   idleContainer: {
-    flex: 1,
+    // flexGrow (et non flex:1) : remplit l'écran mais laisse le contenu
+    // grandir au-delà — sinon le ScrollView se fige dès que ça dépasse
+    // (ex : bannière « scan à valider » en haut).
+    flexGrow: 1,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
   },
