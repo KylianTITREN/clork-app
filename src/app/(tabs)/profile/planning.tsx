@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -15,6 +16,7 @@ import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { TextField } from "@/components/ui/TextField";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
   ensurePermission,
   listWritableCalendars,
@@ -106,6 +108,7 @@ export default function PlanningSettingsScreen() {
     }
   }
 
+  const plan = usePlan();
   // --- Export calendrier : dédié (nom au choix) ou calendrier existant ---
   const [exportTarget, setExportTarget] = useState<ExportTarget>({ mode: "dedicated", name: "Clork" });
   const [calendars, setCalendars] = useState<WritableCalendar[] | null>(null);
@@ -168,6 +171,19 @@ export default function PlanningSettingsScreen() {
             title="Export calendrier"
             subtitle="Où envoyer tes semaines"
           >
+            {!isPremiumPlan(plan) ? (
+              <Pressable
+                onPress={() => showPremiumGate("L'export vers ton calendrier")}
+                style={[styles.lockedCard, { backgroundColor: colors.surfaceMuted }]}
+              >
+                <Ionicons name="lock-closed" size={16} color={colors.textMuted} />
+                <Text style={[styles.lockedCardText, { color: colors.textMuted }]}>
+                  L'export calendrier (et son paramétrage) est réservé à Clork
+                  Premium ⭐ — touche pour en savoir plus.
+                </Text>
+              </Pressable>
+            ) : (
+            <>
             <Pressable
               onPress={() => pickTarget({ mode: "dedicated", name: exportTarget.mode === "dedicated" ? exportTarget.name : "Clork" })}
               style={[styles.calRow, { borderColor: exportTarget.mode === "dedicated" ? colors.text : colors.border }]}
@@ -212,6 +228,8 @@ export default function PlanningSettingsScreen() {
                 );
               })
             ) : null}
+            </>
+            )}
           </Section>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -231,5 +249,19 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   calTitle: { fontSize: typeScale.body, fontFamily: fonts.extraBold },
+  lockedCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  lockedCardText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+    lineHeight: 17,
+  },
   calMeta: { fontSize: typeScale.caption, fontFamily: fonts.regular },
 });

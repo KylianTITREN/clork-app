@@ -20,6 +20,7 @@ export default function ThemeSettingsScreen() {
   const colors = useThemeColors();
   const { themeId, setThemeId } = useTheme();
   const plan = usePlan();
+  const isPremium = isPremiumPlan(plan);
   const [selected, setSelected] = useState<ThemeId>(themeId);
 
   const isDirty = selected !== themeId;
@@ -55,14 +56,25 @@ export default function ThemeSettingsScreen() {
           title="Couleur de l'app"
           subtitle="L'icône sur l'écran d'accueil suit le thème"
         >
+          {!isPremium ? (
+            <View style={[styles.lockBanner, { backgroundColor: colors.surfaceMuted }]}>
+              <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
+              <Text style={[styles.lockBannerText, { color: colors.textMuted }]}>
+                Les thèmes sont réservés à Clork Premium ⭐
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.list}>
             {themeOrder.map((idRaw) => {
               const id = idRaw as ThemeId;
               const isSelected = id === selected;
+              const isLocked = !isPremium && id !== "honey";
               return (
                 <Pressable
                   key={id}
-                  onPress={() => setSelected(id)}
+                  onPress={() =>
+                    isLocked ? showPremiumGate("Le changement de thème") : setSelected(id)
+                  }
                   accessibilityRole="radio"
                   accessibilityState={{ selected: isSelected }}
                   style={[
@@ -70,6 +82,7 @@ export default function ThemeSettingsScreen() {
                     {
                       backgroundColor: colors.background,
                       borderColor: isSelected ? colors.text : colors.border,
+                      opacity: isLocked ? 0.55 : 1,
                     },
                     isSelected && softShadow,
                   ]}
@@ -88,9 +101,9 @@ export default function ThemeSettingsScreen() {
                   </Text>
                   <View style={[styles.rowSwatch, { backgroundColor: themes[id].accent }]} />
                   <Ionicons
-                    name={isSelected ? "radio-button-on" : "radio-button-off"}
-                    size={20}
-                    color={isSelected ? colors.text : colors.border}
+                    name={isLocked ? "lock-closed" : isSelected ? "radio-button-on" : "radio-button-off"}
+                    size={isLocked ? 17 : 20}
+                    color={isLocked ? colors.textMuted : isSelected ? colors.text : colors.border}
                   />
                 </Pressable>
               );
@@ -126,5 +139,18 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.regular,
     lineHeight: 17,
+  },
+  lockBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+  },
+  lockBannerText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
 });

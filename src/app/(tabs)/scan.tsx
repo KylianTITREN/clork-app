@@ -31,7 +31,7 @@ import {
   type PendingScan,
 } from "@/lib/scan-service";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
-import { fetchPlan, isPremiumPlan, showPremiumGate } from "@/lib/plan-service";
+import { fetchPlan, isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { claimShare, createShare, recordClaimedRow } from "@/lib/share-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile, Shift } from "@/lib/types";
@@ -72,6 +72,8 @@ export default function ScanScreen() {
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
 
   const userId = session?.user.id;
+  const plan = usePlan();
+  const isGuest = session?.user.is_anonymous ?? false;
 
   // Un scan extrait pendant que l'app était fermée attend d'être validé.
   useFocusEffect(
@@ -372,7 +374,17 @@ export default function ScanScreen() {
       >
         <View style={styles.header}>
           <Text style={[styles.kicker, { color: colors.textMuted }]}>Ajouter</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Remplis ta semaine</Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, { color: colors.text }]}>Remplis ta semaine</Text>
+            {!isPremiumPlan(plan) ? (
+              <View style={[styles.quotaPill, { backgroundColor: colors.surfaceMuted }]}>
+                <Ionicons name="flash-outline" size={12} color={colors.textMuted} />
+                <Text style={[styles.quotaPillText, { color: colors.textMuted }]}>
+                  {isGuest ? "1 scan/semaine" : "1 scan/mois"}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         {pendingScan ? (
@@ -562,6 +574,24 @@ export default function ScanScreen() {
 }
 
 const styles = StyleSheet.create({
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    flexWrap: "wrap",
+  },
+  quotaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  quotaPillText: {
+    fontSize: 11,
+    fontFamily: fonts.extraBold,
+  },
   divider: {
     height: 1,
     borderRadius: 1,
