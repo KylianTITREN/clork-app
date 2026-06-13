@@ -1,10 +1,12 @@
-import { Link } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { Link, router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -62,6 +64,14 @@ export default function SignUpScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
       >
+        <Pressable
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/sign-in"))}
+          hitSlop={12}
+          accessibilityLabel="Retour"
+          style={[styles.backButton, { backgroundColor: colors.surface }]}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.text} />
+        </Pressable>
         <View style={styles.content}>
           <View style={styles.header}>
             <Image source={logoByTheme[themeId]} style={styles.logo} />
@@ -75,6 +85,7 @@ export default function SignUpScreen() {
             <TextField
               label="Prénom (ou pseudo)"
               autoComplete="name"
+              textContentType="givenName"
               placeholder="Capucine"
               value={displayName}
               onChangeText={setDisplayName}
@@ -83,6 +94,7 @@ export default function SignUpScreen() {
               label="Email"
               autoCapitalize="none"
               autoComplete="email"
+              textContentType="emailAddress"
               keyboardType="email-address"
               placeholder="capucine@exemple.fr"
               value={email}
@@ -92,6 +104,7 @@ export default function SignUpScreen() {
               label="Mot de passe"
               secureToggle
               autoComplete="new-password"
+              textContentType="newPassword"
               placeholder="8 caractères minimum"
               value={password}
               onChangeText={setPassword}
@@ -111,6 +124,17 @@ export default function SignUpScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
+  backButton: {
+    position: "absolute",
+    top: spacing.sm,
+    left: spacing.lg,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   content: {
     flex: 1,
     justifyContent: "center",

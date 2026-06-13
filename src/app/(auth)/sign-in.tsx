@@ -63,6 +63,7 @@ export default function SignInScreen() {
               label="Email"
               autoCapitalize="none"
               autoComplete="email"
+              textContentType="emailAddress"
               keyboardType="email-address"
               placeholder="capucine@exemple.fr"
               value={email}
@@ -72,6 +73,7 @@ export default function SignInScreen() {
               label="Mot de passe"
               secureToggle
               autoComplete="password"
+              textContentType="password"
               placeholder="••••••••"
               value={password}
               onChangeText={setPassword}
