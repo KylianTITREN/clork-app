@@ -15,7 +15,10 @@
           "group.com.kyks.clork"
         ]
       },
-      "appleTeamId": "VA859P9KT5"
+      "appleTeamId": "VA859P9KT5",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.kyks.clork",
