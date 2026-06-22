@@ -202,6 +202,8 @@ export default function ProfileHubScreen() {
             <Ionicons name="log-out-outline" size={16} color={colors.textMuted} />
             <Text style={[styles.signOutLabel, { color: colors.textMuted }]}>Se déconnecter</Text>
           </Pressable>
+
+          <Text style={[styles.poweredBy, { color: colors.textMuted }]}>Propulsé par KYKS 🚀</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -240,4 +242,11 @@ const styles = StyleSheet.create({
   upgradeSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
   signOutRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs, paddingVertical: spacing.sm },
   signOutLabel: { fontSize: typeScale.caption, fontFamily: fonts.bold },
+  poweredBy: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+    textAlign: "center",
+    opacity: 0.7,
+    marginTop: spacing.md,
+  },
 });
