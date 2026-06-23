@@ -12,7 +12,8 @@
       "supportsTablet": false,
       "entitlements": {
         "com.apple.security.application-groups": [
-          "group.com.kyks.clork"
+          "group.com.kyks.clork.shared",
+          "group.com.kyks.clork.shared"
         ]
       },
       "appleTeamId": "VA859P9KT5",
@@ -30,6 +31,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.RECORD_AUDIO",
         "android.permission.READ_CALENDAR",
         "android.permission.WRITE_CALENDAR",
         "android.permission.RECORD_AUDIO"
@@ -103,10 +107,33 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a43416c5-1c32-4e33-8d72-3a54e8e0c1f3"
+        "projectId": "a43416c5-1c32-4e33-8d72-3a54e8e0c1f3",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "com.kyks.clork.widgets",
+                  "targetName": "ClorkWidgets",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.kyks.clork.shared"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
       },
       "pushEnabled": false
     },
-    "owner": "kyksio"
+    "owner": "kyksio",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a43416c5-1c32-4e33-8d72-3a54e8e0c1f3"
+    }
   }
 }

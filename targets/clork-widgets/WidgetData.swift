@@ -64,7 +64,7 @@ struct WidgetPayload: Decodable {
 // MARK: - Shared storage (App Group UserDefaults)
 
 enum WidgetStore {
-    static let appGroup = "group.com.kyks.clork"
+    static let appGroup = "group.com.kyks.clork.shared"
     static let storageKey = "widget-data"
 
     /// Returns nil when the App Group is unavailable (e.g. free Apple account

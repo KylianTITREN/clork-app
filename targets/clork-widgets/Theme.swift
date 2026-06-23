@@ -4,7 +4,7 @@ import SwiftUI
 /// Mirrors `src/constants/tokens.ts`. The accent follows the in-app theme:
 /// the app writes hex values in the shared App Group (see widget-data.ts).
 enum ClorkTheme {
-    private static let suite = UserDefaults(suiteName: "group.com.kyks.clork")
+    private static let suite = UserDefaults(suiteName: "group.com.kyks.clork.shared")
 
     static let cream = Color(red: 0xF7 / 255, green: 0xF5 / 255, blue: 0xEE / 255)
     static let ink = Color(red: 0x22 / 255, green: 0x1F / 255, blue: 0x15 / 255)

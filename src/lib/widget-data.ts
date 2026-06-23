@@ -8,7 +8,7 @@ import { Platform } from "react-native";
 import { addDays, mondayOf } from "./dates";
 import type { Shift } from "./types";
 
-const APP_GROUP = "group.com.kyks.clork";
+const APP_GROUP = "group.com.kyks.clork.shared";
 const STORAGE_KEY = "widget-data";
 /** Fenêtre glissante : semaine courante + semaine suivante. */
 const WINDOW_DAYS = 14;
