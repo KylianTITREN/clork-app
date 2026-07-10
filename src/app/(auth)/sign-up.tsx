@@ -47,7 +47,7 @@ export default function SignUpScreen() {
       return;
     }
     setIsSubmitting(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
@@ -58,6 +58,12 @@ export default function SignUpScreen() {
     setIsSubmitting(false);
     if (error) {
       Alert.alert("Inscription impossible", authErrorMessage(error));
+      return;
+    }
+    // Confirmation e-mail activée : pas de session tant que le code n'est pas
+    // validé → direction l'écran de vérification (code OTP à 6 chiffres).
+    if (!data.session) {
+      router.push({ pathname: "/verify-otp", params: { email: email.trim() } });
     }
   }
 
