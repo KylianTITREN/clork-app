@@ -130,6 +130,15 @@ async function processInBackground(
       "Scan échoué",
       "La lecture du planning a échoué — réessaie dans Clork.",
     );
+  } finally {
+    // RGPD : la photo contient des données de tiers (noms + horaires des
+    // collègues) et n'a plus aucune utilité une fois les horaires extraits
+    // (on conserve le résultat structuré, pas l'image). Suppression immédiate.
+    try {
+      await service.storage.from("scans").remove([`${uploaderId}/${scanId}.jpg`]);
+    } catch (cleanupError) {
+      console.error(`photo cleanup failed for scan ${scanId}:`, cleanupError);
+    }
   }
 }
 
