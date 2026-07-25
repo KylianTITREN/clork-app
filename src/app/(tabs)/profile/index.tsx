@@ -74,9 +74,28 @@ export default function ProfileHubScreen() {
     else Alert.alert("Compte créé ✅", "Toutes tes données sont conservées.");
   }
 
-  async function handleSignOut() {
+  async function doSignOut() {
     const { error } = await supabase.auth.signOut();
     if (error) Alert.alert("Erreur", error.message);
+  }
+
+  function handleSignOut() {
+    // Compte d'essai : aucune donnée n'est rattachée à un e-mail/mot de passe.
+    // Se déconnecter détruit la session anonyme → perte définitive des plannings.
+    // On avertit et on renvoie vers la carte « Créer un compte » (déjà en haut).
+    if (isGuest) {
+      Alert.alert(
+        "Mode invité — tes données seront perdues",
+        "Tu n'as pas encore de compte : te déconnecter effacera définitivement tes plannings et tes horaires sur cet appareil. Crée un compte (gratuit, tout est conservé) pour les garder.",
+        [
+          { text: "Annuler", style: "cancel" },
+          { text: "Créer un compte", style: "default" },
+          { text: "Se déconnecter quand même", style: "destructive", onPress: doSignOut },
+        ],
+      );
+      return;
+    }
+    void doSignOut();
   }
 
   return (

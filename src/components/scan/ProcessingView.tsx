@@ -76,9 +76,20 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
         })}
       </View>
       {currentStep === "extract" ? (
-        <Text style={[styles.hint, { color: colors.textMuted }]}>
-          {EXTRACT_HINTS[hintIndex]}
-        </Text>
+        <>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>
+            {EXTRACT_HINTS[hintIndex]}
+          </Text>
+          {/* La lecture tourne côté serveur : l'app peut être fermée, la reprise
+              proposera le scan à valider (bannière d'accueil). */}
+          <View style={[styles.backgroundNote, { backgroundColor: colors.surface }, softShadow]}>
+            <Ionicons name="cafe-outline" size={18} color={colors.accent} />
+            <Text style={[styles.backgroundNoteText, { color: colors.textMuted }]}>
+              Pas besoin d'attendre ici : la lecture continue même si tu fermes
+              l'app. À ton retour, ton planning sera prêt à valider.
+            </Text>
+          </View>
+        </>
       ) : null}
     </View>
   );
@@ -122,5 +133,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     textAlign: "center",
     fontStyle: "italic",
+  },
+  backgroundNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    alignSelf: "stretch",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  backgroundNoteText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
 });
