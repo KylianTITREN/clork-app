@@ -2,7 +2,7 @@
   "expo": {
     "name": "Clork",
     "slug": "clork",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "clork",
@@ -12,9 +12,9 @@
       "supportsTablet": false,
       "entitlements": {
         "com.apple.security.application-groups": [
-          "group.com.kyks.clork.shared",
           "group.com.kyks.clork.shared"
-        ]
+        ],
+        "aps-environment": "production"
       },
       "appleTeamId": "VA859P9KT5",
       "infoPlist": {
@@ -126,7 +126,7 @@
           }
         }
       },
-      "pushEnabled": false
+      "pushEnabled": true
     },
     "owner": "kyksio",
     "runtimeVersion": {

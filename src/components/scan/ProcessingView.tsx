@@ -80,13 +80,14 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
           <Text style={[styles.hint, { color: colors.textMuted }]}>
             {EXTRACT_HINTS[hintIndex]}
           </Text>
-          {/* La lecture tourne côté serveur : l'app peut être fermée, la reprise
-              proposera le scan à valider (bannière d'accueil). */}
+          {/* La lecture tourne côté serveur : l'app peut être fermée, une
+              notification push signale la fin (sendPushNotification), et la
+              reprise propose le scan à valider (bannière d'accueil). */}
           <View style={[styles.backgroundNote, { backgroundColor: colors.surface }, softShadow]}>
-            <Ionicons name="cafe-outline" size={18} color={colors.accent} />
+            <Ionicons name="notifications-outline" size={18} color={colors.accent} />
             <Text style={[styles.backgroundNoteText, { color: colors.textMuted }]}>
-              Pas besoin d'attendre ici : la lecture continue même si tu fermes
-              l'app. À ton retour, ton planning sera prêt à valider.
+              Pas besoin d'attendre ici : tu peux fermer l'app, on t'envoie une
+              notification dès que ton planning est prêt à valider.
             </Text>
           </View>
         </>
