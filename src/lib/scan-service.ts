@@ -16,6 +16,9 @@ import type { ShiftType } from "@/constants/tokens";
 // En dessous de ~2000 px de grand côté, l'extraction hallucine (testé phase 1).
 const TARGET_LONG_EDGE = 2400;
 const JPEG_QUALITY = 0.8;
+// Vignette pour la détection d'orientation : l'orientation est évidente même
+// en basse résolution, ça garde l'appel Haiku rapide et peu coûteux.
+const ORIENT_THUMB_EDGE = 768;
 
 export type PreparedImage = {
   base64: string;
@@ -23,10 +26,53 @@ export type PreparedImage = {
   height: number;
 };
 
+// Angle horaire (degrés) à appliquer pour redresser l'image ; cohérent avec
+// ImageManipulator.rotate() (positif = sens horaire) et avec le prompt Haiku.
+type Rotation = 0 | 90 | 180 | 270;
+
+// Détecte de combien redresser une photo de planning (import galerie : la photo
+// d'un tableau paysage prise en portrait arrive tournée de 90°, ce qui fait
+// décaler les colonnes à l'extraction). Best-effort : renvoie 0 sur toute
+// défaillance — jamais bloquant. Le scanner caméra (VisionKit) redresse déjà,
+// donc on n'appelle ceci que sur le chemin galerie.
+async function detectRotation(
+  uri: string,
+  width: number,
+  height: number,
+): Promise<Rotation> {
+  try {
+    const context = ImageManipulator.ImageManipulator.manipulate(uri);
+    if (Math.max(width, height) > ORIENT_THUMB_EDGE) {
+      context.resize(
+        width >= height ? { width: ORIENT_THUMB_EDGE } : { height: ORIENT_THUMB_EDGE },
+      );
+    }
+    const rendered = await context.renderAsync();
+    const thumb = await rendered.saveAsync({
+      format: ImageManipulator.SaveFormat.JPEG,
+      compress: 0.6,
+      base64: true,
+    });
+    if (!thumb.base64) return 0;
+    const { data, error } = await supabase.functions.invoke<{
+      success: boolean;
+      data: { angle: number } | null;
+    }>("detect-orientation", {
+      body: { image_base64: thumb.base64, media_type: "image/jpeg" },
+    });
+    if (error || !data?.data) return 0;
+    const angle = data.data.angle;
+    return angle === 90 || angle === 180 || angle === 270 ? angle : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function prepareImage(
   uri: string,
   width?: number,
   height?: number,
+  autoOrient = false,
 ): Promise<PreparedImage> {
   // Dimensions inconnues (scanner de documents) : un premier rendu les donne.
   if (width == null || height == null) {
@@ -34,11 +80,17 @@ export async function prepareImage(
     width = probe.width;
     height = probe.height;
   }
+  const rotation = autoOrient ? await detectRotation(uri, width, height) : 0;
   const context = ImageManipulator.ImageManipulator.manipulate(uri);
   if (Math.max(width, height) > TARGET_LONG_EDGE) {
     context.resize(
       width >= height ? { width: TARGET_LONG_EDGE } : { height: TARGET_LONG_EDGE },
     );
+  }
+  // Redressement avant le rendu final : la même passe produit une image droite,
+  // sans ré-encodage supplémentaire.
+  if (rotation !== 0) {
+    context.rotate(rotation);
   }
   const rendered = await context.renderAsync();
   const result = await rendered.saveAsync({

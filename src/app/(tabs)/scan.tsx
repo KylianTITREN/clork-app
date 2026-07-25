@@ -140,6 +140,7 @@ export default function ScanScreen() {
         croppedImageQuality: 95,
       });
       if (status !== "success" || !scannedImages || scannedImages.length === 0) return;
+      // Scanner caméra : VisionKit redresse déjà l'orientation → pas d'auto-redressement.
       await processPhoto(scannedImages[0]);
       return;
     }
@@ -147,14 +148,21 @@ export default function ScanScreen() {
     if (result.canceled || result.assets.length === 0) return;
 
     const asset = result.assets[0];
-    await processPhoto(asset.uri, asset.width, asset.height);
+    // Import galerie : une photo de planning paysage prise en portrait arrive
+    // tournée → auto-redressement (détection serveur + rotation locale).
+    await processPhoto(asset.uri, asset.width, asset.height, true);
   }
 
-  async function processPhoto(uri: string, width?: number, height?: number) {
+  async function processPhoto(
+    uri: string,
+    width?: number,
+    height?: number,
+    autoOrient = false,
+  ) {
     if (!userId) return;
     try {
       setState({ step: "processing", processingStep: "compress" });
-      const image = await prepareImage(uri, width, height);
+      const image = await prepareImage(uri, width, height, autoOrient);
 
       setState({ step: "processing", processingStep: "upload" });
       const scanId = await createScan(userId);
