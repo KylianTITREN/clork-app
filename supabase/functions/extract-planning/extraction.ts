@@ -326,60 +326,6 @@ Règles de lecture, dans l'ordre de priorité :
 
 Rapporte tout via l'outil report_planning.`;
 
-// Modèle léger pour la seule détection d'orientation (tâche triviale, ~0 coût).
-const ORIENTATION_MODEL = "claude-haiku-4-5";
-
-export type Rotation = 0 | 90 | 180 | 270;
-
-// Détecte de combien de degrés (sens horaire) l'image doit être pivotée pour que
-// le tableau soit droit. Passe légère exécutée AVANT l'extraction, pour redresser
-// côté serveur les photos prises de travers. Best-effort : tout échec renvoie 0
-// (aucune rotation), l'extraction se fait alors sur l'image telle quelle.
-export async function detectOrientation(
-  imageBase64: string,
-  mediaType: SupportedMediaType,
-  apiKey: string,
-): Promise<Rotation> {
-  try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: ORIENTATION_MODEL,
-        max_tokens: 8,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-              {
-                type: "text",
-                text:
-                  "Cette image est un planning papier (un tableau avec du texte). De combien de " +
-                  "degrés dans le SENS HORAIRE faut-il la faire pivoter pour que le texte soit " +
-                  "parfaitement horizontal et lisible dans le bon sens de lecture ? Réponds " +
-                  "UNIQUEMENT par l'un de ces quatre nombres, sans aucun autre mot : 0, 90, 180, 270.",
-              },
-            ],
-          },
-        ],
-      }),
-    });
-    if (!response.ok) return 0;
-    const data = await response.json();
-    const text: string = data?.content?.[0]?.text ?? "";
-    const match = text.match(/\b(90|180|270|0)\b/);
-    const angle = match ? Number(match[1]) : 0;
-    return angle === 90 || angle === 180 || angle === 270 ? angle : 0;
-  } catch {
-    return 0;
-  }
-}
-
 export type ExtractPlanningInput = {
   imageBase64: string;
   mediaType: SupportedMediaType;
