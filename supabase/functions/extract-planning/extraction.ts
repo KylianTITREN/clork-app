@@ -2,10 +2,13 @@
 // and the local CLI test harness (Node 24+). Keep this file runtime-agnostic:
 // only `fetch` and plain TypeScript types (no enums — Node type-stripping).
 
-// Sonnet est nécessaire : Haiku décale les lignes du tableau (testé le 2026-06-11
-// sur planning-exemple-2.jpg — Haiku attribue à un employé les horaires de ses
-// voisins ; Sonnet lit la ligne cible parfaitement). ~0,16 $/scan, acceptable.
-export const ANTHROPIC_MODEL = "claude-sonnet-4-6";
+// Opus 5 : lecture de tableaux denses nettement plus fiable que Sonnet 4.6.
+// Testé le 2026-07-25 : sur une photo dégradée (tableau de travers, flou), Sonnet
+// INVENTAIT des horaires décalés (dangereux — l'utilisateur pouvait les enregistrer
+// sans voir l'erreur) là où Opus 5 détecte correctement « photo illisible » et
+// demande de reprendre ; sur une photo nette il lit la ligne cible parfaitement.
+// ~0,7 $/scan — acceptable vu le faible volume et le fait que c'est le cœur produit.
+export const ANTHROPIC_MODEL = "claude-opus-5";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MAX_OUTPUT_TOKENS = 16_000;
 
@@ -367,8 +370,9 @@ export async function extractPlanning(
     body: JSON.stringify({
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
-      // Lecture de document : on veut la même réponse à chaque scan.
-      temperature: 0.2,
+      // Déterminisme (lecture de document) : `temperature` n'est accepté que
+      // par les modèles 4.x ; les modèles Claude 5 le rejettent (déprécié).
+      ...(model.includes("-4-") ? { temperature: 0.2 } : {}),
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: "tool", name: EXTRACTION_TOOL.name },
       messages: [
