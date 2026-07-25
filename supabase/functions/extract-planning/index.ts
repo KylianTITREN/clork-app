@@ -7,8 +7,10 @@
 // La clé Anthropic ne vit QUE dans les secrets de la fonction.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 
 import {
+  detectOrientation,
   extractPlanning,
   SUPPORTED_MEDIA_TYPES,
   type PlanningExtraction,
@@ -16,6 +18,26 @@ import {
 } from "./extraction.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
+// Encode des octets en base64 par blocs (String.fromCharCode(...huge) explose la pile).
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// Pivote une image JPEG (base64) de `clockwise` degrés dans le sens horaire et
+// renvoie le nouveau base64 JPEG.
+async function rotateJpeg(base64: string, clockwise: number): Promise<string> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const image = await Image.decode(bytes);
+  image.rotate(clockwise); // ImageScript : angle positif = sens horaire
+  const out = await image.encodeJPEG(85);
+  return bytesToBase64(out);
+}
 
 // ~8 MB of base64 ≈ 6 MB image, well above what the app sends after compression.
 const MAX_BASE64_LENGTH = 8_000_000;
@@ -78,7 +100,23 @@ async function processInBackground(
   apiKey: string,
 ): Promise<void> {
   try {
-    const result = await extractPlanning({ imageBase64, mediaType, apiKey });
+    // Auto-orientation : beaucoup de plannings sont photographiés de travers
+    // (tableau large, tel tenu en portrait). On détecte l'angle (passe légère
+    // Haiku) et on redresse l'image AVANT l'extraction — sinon même Opus lit mal.
+    let workImage = imageBase64;
+    let workMedia = mediaType;
+    try {
+      const rotation = await detectOrientation(imageBase64, mediaType, apiKey);
+      if (rotation !== 0) {
+        workImage = await rotateJpeg(imageBase64, rotation);
+        workMedia = "image/jpeg";
+        console.log(`scan ${scanId}: image auto-redressée de ${rotation}°`);
+      }
+    } catch (orientError) {
+      console.error(`scan ${scanId}: auto-orientation ignorée:`, orientError);
+    }
+
+    const result = await extractPlanning({ imageBase64: workImage, mediaType: workMedia, apiKey });
     const extraction: PlanningExtraction = result.data;
 
     const { error: updateError } = await service
