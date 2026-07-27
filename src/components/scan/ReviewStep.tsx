@@ -66,7 +66,6 @@ export function ReviewStep({
   const colors = useThemeColors();
   const currentDate = queue[queueIndex];
   const day = days.find((d) => d.date === currentDate);
-  const slots = (day?.draftIndexes ?? []).filter((i) => drafts[i]?.include !== false || true);
   const validated = queueIndex;
   const remaining = queue.length - queueIndex;
   const isTodo = day?.status === "todo" && (day?.draftIndexes.length ?? 0) === 0;
