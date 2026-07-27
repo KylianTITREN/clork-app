@@ -10,7 +10,7 @@ import {
 
 import {
   DEFAULT_THEME_ID,
-  isThemeId,
+  migrateThemeId,
   setActiveAccentFamily,
   type ThemeId,
 } from "@/constants/themes";
@@ -37,10 +37,10 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
     // au hot reload de Metro (« Requiring unknown module »).
     const icons = require("expo-alternate-app-icons") as typeof import("expo-alternate-app-icons");
     if (!icons.supportsAlternateIcons) return;
-    const iconName =
-      themeId === DEFAULT_THEME_ID
-        ? null
-        : themeId.charAt(0).toUpperCase() + themeId.slice(1); // catalogues en PascalCase
+    // TODO(logo v2) : pas encore de catalogue « Forest » — le thème forêt
+    // utilise l'icône Sage (v1) en attendant les icônes « cadran mordu ».
+    const catalogName = themeId === "forest" ? "Sage" : themeId.charAt(0).toUpperCase() + themeId.slice(1);
+    const iconName = themeId === DEFAULT_THEME_ID ? "Sage" : catalogName;
     try {
       await icons.setAlternateAppIcon(iconName);
     } catch (firstError) {
@@ -78,10 +78,15 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
-        if (stored && isThemeId(stored)) {
+        // migrateThemeId : « sage » (v1) → « forest » (v2), IDs inconnus ignorés.
+        const migrated = stored ? migrateThemeId(stored) : null;
+        if (migrated) {
           // Pont module-level mis à jour avant le re-rendu (voir themes.ts).
-          setActiveAccentFamily(stored);
-          setThemeIdState(stored);
+          setActiveAccentFamily(migrated);
+          setThemeIdState(migrated);
+          if (migrated !== stored) {
+            AsyncStorage.setItem(STORAGE_KEY, migrated).catch(() => {});
+          }
         }
       })
       .catch(() => {
