@@ -17,7 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
@@ -93,6 +93,7 @@ function toDayRowSlots(dayShifts: Shift[]): DayRowSlot[] {
 
 export default function HomeScreen() {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [view, setView] = useState<"today" | "week">("today");
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
@@ -352,12 +353,12 @@ export default function HomeScreen() {
     return () => scrollY.removeListener(id);
   }, [scrollY]);
   const collapsedStyle = {
-    opacity: scrollY.interpolate({ inputRange: [56, 96], outputRange: [0, 1], extrapolate: "clamp" as const }),
+    opacity: scrollY.interpolate({ inputRange: [36, 104], outputRange: [0, 1], extrapolate: "clamp" as const }),
     transform: [
       {
         translateY: scrollY.interpolate({
-          inputRange: [56, 96],
-          outputRange: [-10, 0],
+          inputRange: [36, 104],
+          outputRange: [-28, 0],
           extrapolate: "clamp" as const,
         }),
       },
@@ -744,7 +745,11 @@ export default function HomeScreen() {
         pointerEvents={isCollapsed ? "auto" : "none"}
         style={[
           styles.collapsedBar,
-          { backgroundColor: colors.background, borderBottomColor: colors.separator },
+          {
+            backgroundColor: colors.background,
+            borderBottomColor: colors.separator,
+            paddingTop: insets.top + 6,
+          },
           collapsedStyle,
         ]}
       >
@@ -871,9 +876,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.sm + 2,
     borderBottomWidth: 1,
+    shadowColor: "#17150E",
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   collapsedInfo: {
     fontSize: typeScale.body,
