@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { fonts, radius, spacing, useThemeColors } from "@/constants/tokens";
+import { fonts, typeScale, useThemeColors } from "@/constants/tokens";
 
 type ChoiceChipsProps<T extends string | number> = {
   options: readonly { value: T; label: string }[];
@@ -9,7 +9,10 @@ type ChoiceChipsProps<T extends string | number> = {
   onChange: (value: T) => void;
 };
 
-/** Rangée de chips à choix unique — même langage visuel que DurationChips. */
+/**
+ * Rangée de chips à choix unique — langage v2 : sélection = fond primaire
+ * texte blanc, sinon carte blanche bordée texte #55524A. Cibles ≥ 44px.
+ */
 export function ChoiceChips<T extends string | number>({
   options,
   value,
@@ -24,16 +27,22 @@ export function ChoiceChips<T extends string | number>({
         return (
           <Pressable
             key={String(option)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
             onPress={() => onChange(option)}
             style={[
               styles.chip,
-              { backgroundColor: selected ? colors.text : colors.surfaceMuted },
+              selected
+                ? { backgroundColor: colors.accent, borderColor: colors.accent }
+                : { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
             <Text
               style={[
                 styles.label,
-                { color: selected ? colors.background : colors.textMuted },
+                selected
+                  ? [styles.labelSelected, { color: colors.onAccent }]
+                  : { color: colors.textSoft },
               ]}
             >
               {label}
@@ -49,15 +58,21 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: spacing.xs,
+    gap: 8,
   },
   chip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    minHeight: 44,
+    justifyContent: "center",
   },
   label: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+  },
+  labelSelected: {
+    fontFamily: fonts.semiBold,
   },
 });

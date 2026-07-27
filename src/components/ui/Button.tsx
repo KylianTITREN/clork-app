@@ -8,10 +8,13 @@ import {
 
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
+// Boutons v2 : primaire = fond primaire texte blanc r12 ; secondaire = blanc
+// bordé #E8E6DE ; ink = encre (ex-« dark ») ; ghost = texte seul ; danger.
+// Désactivé = fond #EBE9E2 texte #8B877A (spec), pas d'opacité fantôme.
 type ButtonProps = {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "ghost" | "danger" | "dark";
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "dark";
   isLoading?: boolean;
   disabled?: boolean;
   style?: ViewStyle;
@@ -28,22 +31,29 @@ export function Button({
   const colors = useThemeColors();
   const isBlocked = disabled || isLoading;
 
-  const background =
-    variant === "primary"
+  const background = isBlocked
+    ? colors.surfaceMuted
+    : variant === "primary"
       ? colors.accent
-      : variant === "danger"
-        ? colors.danger
-        : variant === "dark"
-          ? colors.text
-          : "transparent";
-  const labelColor =
-    variant === "ghost"
+      : variant === "secondary"
+        ? colors.surface
+        : variant === "danger"
+          ? colors.danger
+          : variant === "dark"
+            ? colors.ink
+            : "transparent";
+  const labelColor = isBlocked
+    ? colors.textMuted
+    : variant === "ghost"
       ? colors.text
-      : variant === "danger"
-        ? "#FFFFFF"
-        : variant === "dark"
-          ? colors.background
-          : colors.onAccent;
+      : variant === "secondary"
+        ? colors.text
+        : variant === "danger"
+          ? "#FFFFFF"
+          : variant === "dark"
+            ? colors.onInk
+            : colors.onAccent;
+  const borderColor = variant === "secondary" && !isBlocked ? colors.border : "transparent";
 
   return (
     <Pressable
@@ -52,7 +62,7 @@ export function Button({
       disabled={isBlocked}
       style={({ pressed }) => [
         styles.base,
-        { backgroundColor: background, opacity: isBlocked ? 0.5 : pressed ? 0.85 : 1 },
+        { backgroundColor: background, borderColor, opacity: pressed && !isBlocked ? 0.88 : 1 },
         pressed && !isBlocked && styles.pressed,
         style,
       ]}
@@ -70,16 +80,18 @@ const styles = StyleSheet.create({
   base: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.md + 2,
+    paddingVertical: 15,
     paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
-    minHeight: 58,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    // Cibles tactiles v2 : ≥ 44px, souvent ≥ 52px.
+    minHeight: 52,
   },
   pressed: {
-    transform: [{ scale: 0.97 }],
+    transform: [{ scale: 0.98 }],
   },
   label: {
-    fontSize: typeScale.body + 1,
-    fontFamily: fonts.extraBold,
+    fontSize: typeScale.body,
+    fontFamily: fonts.semiBold,
   },
 });
