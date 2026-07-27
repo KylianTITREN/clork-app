@@ -26,7 +26,7 @@ import { findShiftMates, findTargetEmployee } from "@/lib/scan-service";
 import { createShare } from "@/lib/share-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
-import { refreshWidgetData } from "@/lib/widget-data";
+import { refreshWidgetSnapshot } from "@/lib/widget-data";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -133,12 +133,15 @@ export default function WeekScreen() {
       .order("date")
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
-    // Widgets : uniquement MON planning.
     if (!viewing) {
-      void refreshWidgetData((data as Shift[]) ?? [], {
-        accent: colors.accent,
-        onAccent: colors.onAccent,
-      });
+      // Widgets : instantané ancré sur le JOUR J (semaine réelle + suivante),
+      // jamais sur la semaine consultée — naviguer ne réécrit pas le widget.
+      if (userId) {
+        void refreshWidgetSnapshot(userId, {
+          accent: colors.accent,
+          onAccent: colors.onAccent,
+        });
+      }
       // Rappels locaux : seulement sur MON planning de la semaine courante.
       if (monday === mondayOf(new Date())) {
         void rescheduleFromShifts((data as Shift[]) ?? []);

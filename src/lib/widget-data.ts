@@ -6,6 +6,7 @@
 import { Platform } from "react-native";
 
 import { addDays, mondayOf } from "./dates";
+import { supabase } from "./supabase";
 import type { Shift } from "./types";
 
 const APP_GROUP = "group.com.kyks.clork.shared";
@@ -81,5 +82,34 @@ export async function refreshWidgetData(
   } catch {
     // Module natif absent ou App Group inaccessible : les widgets
     // afficheront simplement leur état vide. Rien à signaler à l'utilisateur.
+  }
+}
+
+/**
+ * Rafraîchit les widgets depuis un instantané ANCRÉ SUR LE JOUR J : semaine
+ * courante réelle + suivante, quel que soit l'écran ou la semaine consultée
+ * dans l'app (naviguer entre les semaines ne doit jamais réécrire le widget
+ * avec une autre fenêtre). `targetUserId` = le planning affiché par le widget :
+ * le mien, ou le planning suivi choisi « par défaut » (mode conjoint v2).
+ */
+export async function refreshWidgetSnapshot(
+  targetUserId: string,
+  theme?: WidgetTheme,
+): Promise<void> {
+  if (Platform.OS !== "ios") return;
+  try {
+    const from = mondayOf(new Date());
+    const to = addDays(from, WINDOW_DAYS - 1);
+    const { data } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("user_id", targetUserId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date")
+      .order("start_at");
+    await refreshWidgetData((data as Shift[]) ?? [], theme);
+  } catch {
+    // Best-effort : jamais bloquant pour l'app.
   }
 }
