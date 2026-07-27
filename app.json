@@ -10,6 +10,11 @@
     "ios": {
       "bundleIdentifier": "com.kyks.clork",
       "supportsTablet": false,
+      "icon": {
+        "light": "./assets/images/icon.png",
+        "dark": "./assets/images/icon-dark.png",
+        "tinted": "./assets/images/icon-tinted.png"
+      },
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.kyks.clork.shared"
@@ -64,23 +69,43 @@
         [
           {
             "name": "honey",
-            "ios": "./assets/icons/icon-honey.png"
+            "ios": {
+              "light": "./assets/icons/icon-honey.png",
+              "dark": "./assets/icons/icon-honey-dark.png",
+              "tinted": "./assets/icons/icon-honey-tinted.png"
+            }
           },
           {
             "name": "blossom",
-            "ios": "./assets/icons/icon-blossom.png"
+            "ios": {
+              "light": "./assets/icons/icon-blossom.png",
+              "dark": "./assets/icons/icon-blossom-dark.png",
+              "tinted": "./assets/icons/icon-blossom-tinted.png"
+            }
           },
           {
             "name": "plum",
-            "ios": "./assets/icons/icon-plum.png"
+            "ios": {
+              "light": "./assets/icons/icon-plum.png",
+              "dark": "./assets/icons/icon-plum-dark.png",
+              "tinted": "./assets/icons/icon-plum-tinted.png"
+            }
           },
           {
             "name": "water",
-            "ios": "./assets/icons/icon-water.png"
+            "ios": {
+              "light": "./assets/icons/icon-water.png",
+              "dark": "./assets/icons/icon-water-dark.png",
+              "tinted": "./assets/icons/icon-water-tinted.png"
+            }
           },
           {
             "name": "graphite",
-            "ios": "./assets/icons/icon-graphite.png"
+            "ios": {
+              "light": "./assets/icons/icon-graphite.png",
+              "dark": "./assets/icons/icon-graphite-dark.png",
+              "tinted": "./assets/icons/icon-graphite-tinted.png"
+            }
           }
         ]
       ],

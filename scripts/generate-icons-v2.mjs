@@ -60,10 +60,11 @@ const tip = {
  * moteur MSVG d'ImageMagick rend mal les strokes (liserés parasites).
  * `holo` = couleur derrière le logo (halo de l'aiguille + anneau du pivot).
  */
-function markSvg({ dial, face, holo }) {
-  // Capsule pleine en coordonnées ABSOLUES (MSVG rend mal strokes ET
-  // transforms) : rectangle orienté + bouts arrondis, du centre vers la pointe.
-  const capsulePath = (bx, by, width) => {
+function markSvg({ dial, face, holo, noHalo = false }) {
+  // Capsule pleine en coordonnées ABSOLUES. MSVG rend mal strokes, transforms
+  // ET arcs (bouts « queue de poisson ») : on dessine un quadrilatère plein +
+  // deux CERCLES aux extrémités — bouts parfaitement arrondis garantis.
+  const capsule = (bx, by, width, fill) => {
     const r = width / 2;
     const dx = bx - C;
     const dy = by - C;
@@ -72,10 +73,10 @@ function markSvg({ dial, face, holo }) {
     const ny = (dx / len) * r;
     const f = (v) => v.toFixed(2);
     return (
-      `M ${f(C + nx)} ${f(C + ny)} L ${f(bx + nx)} ${f(by + ny)} ` +
-      `A ${f(r)} ${f(r)} 0 0 1 ${f(bx - nx)} ${f(by - ny)} ` +
-      `L ${f(C - nx)} ${f(C - ny)} ` +
-      `A ${f(r)} ${f(r)} 0 0 1 ${f(C + nx)} ${f(C + ny)} Z`
+      `<path d="M ${f(C + nx)} ${f(C + ny)} L ${f(bx + nx)} ${f(by + ny)} ` +
+      `L ${f(bx - nx)} ${f(by - ny)} L ${f(C - nx)} ${f(C - ny)} Z" fill="${fill}"/>` +
+      `<circle cx="${f(C)}" cy="${f(C)}" r="${f(r)}" fill="${fill}"/>` +
+      `<circle cx="${f(bx)}" cy="${f(by)}" r="${f(r)}" fill="${fill}"/>`
     );
   };
   return `
@@ -83,20 +84,35 @@ function markSvg({ dial, face, holo }) {
     <circle cx="${C}" cy="${C - DOT_DIST}" r="${DOT_R}" fill="${face}" opacity="0.45"/>
     <circle cx="${C - DOT_DIST}" cy="${C}" r="${DOT_R}" fill="${face}" opacity="0.45"/>
     <circle cx="${C}" cy="${C + DOT_DIST}" r="${DOT_R}" fill="${face}" opacity="0.45"/>
-    <path d="${capsulePath(tip.x, tip.y, HAND_WIDTH + HALO_WIDTH)}" fill="${holo}"/>
-    <path d="${capsulePath(tip.x, tip.y, HAND_WIDTH)}" fill="${face}"/>
-    <circle cx="${C}" cy="${C}" r="${(PIVOT_R + PIVOT_RING / 2).toFixed(2)}" fill="${holo}"/>
+    ${noHalo ? "" : capsule(tip.x, tip.y, HAND_WIDTH + HALO_WIDTH, holo)}
+    ${capsule(tip.x, tip.y, HAND_WIDTH, face)}
+    ${noHalo ? "" : `<circle cx="${C}" cy="${C}" r="${(PIVOT_R + PIVOT_RING / 2).toFixed(2)}" fill="${holo}"/>`}
     <circle cx="${C}" cy="${C}" r="${(PIVOT_R - PIVOT_RING / 2).toFixed(2)}" fill="${face}"/>`;
 }
 
-/** Icône d'app : cadran centré, ~30 % de marge, fond neutre clair. */
-function appIconSvg(accent) {
-  // Cadran Ø100 dans un viewBox 120 → scale pour ~30 % de marge totale :
-  // zone utile = 70 % de 1024. Le groupe 120 → 1024*0.7/100*... on cadre en
-  // posant le viewBox : marge = (120/0.7 - 120)/2 ≈ 25.7 de chaque côté.
+/**
+ * Icône d'app : cadran centré, ~30 % de marge. Trois apparences iOS :
+ * - light  : cadran accent sur fond neutre clair ;
+ * - dark   : fond TRANSPARENT (iOS pose son dégradé sombre), cadran accent,
+ *            détails blancs, halo encre (spec 4g « dark ») ;
+ * - tinted : niveaux de gris sur transparent (iOS teinte lui-même).
+ */
+function appIconSvg(accent, variant = "light") {
   const pad = 26;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${120 + 2 * pad} ${120 + 2 * pad}">
-  <rect x="${-pad}" y="${-pad}" width="${120 + 2 * pad}" height="${120 + 2 * pad}" fill="${NEUTRAL_BG}"/>
+  const size = 120 + 2 * pad;
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${size} ${size}">`;
+  if (variant === "dark") {
+    return `${open}
+  ${markSvg({ dial: accent, face: "#FFFFFF", holo: "none", noHalo: true })}
+</svg>`;
+  }
+  if (variant === "tinted") {
+    return `${open}
+  ${markSvg({ dial: "#C2C2C2", face: "#FFFFFF", holo: "none", noHalo: true })}
+</svg>`;
+  }
+  return `${open}
+  <rect x="${-pad}" y="${-pad}" width="${size}" height="${size}" fill="${NEUTRAL_BG}"/>
   ${markSvg({ dial: accent, face: NEUTRAL_BG, holo: NEUTRAL_BG })}
 </svg>`;
 }
@@ -159,11 +175,15 @@ function render(svg, outPath, size) {
 
 for (const [id, accent] of Object.entries(THEMES)) {
   render(appIconSvg(accent), path.join(APP, `assets/icons/icon-${id}.png`), 1024);
+  render(appIconSvg(accent, "dark"), path.join(APP, `assets/icons/icon-${id}-dark.png`), 1024);
+  render(appIconSvg(accent, "tinted"), path.join(APP, `assets/icons/icon-${id}-tinted.png`), 1024);
   render(transparentMarkSvg(accent), path.join(APP, `assets/images/logos/logo-${id}.png`), 1024);
 }
 
 const forestAccent = THEMES[DEFAULT_THEME];
 render(appIconSvg(forestAccent), path.join(APP, "assets/images/icon.png"), 1024);
+render(appIconSvg(forestAccent, "dark"), path.join(APP, "assets/images/icon-dark.png"), 1024);
+render(appIconSvg(forestAccent, "tinted"), path.join(APP, "assets/images/icon-tinted.png"), 1024);
 render(splashSvg(forestAccent), path.join(APP, "assets/images/splash-icon.png"), 1024);
 render(appIconSvg(forestAccent), path.join(APP, "assets/images/favicon.png"), 48);
 render(androidFgSvg(forestAccent), path.join(APP, "assets/images/android-icon-foreground.png"), 1024);
