@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { DraftShiftCard } from "@/components/scan/DraftShiftCard";
+import { ShiftEditorModal } from "@/components/week/ShiftEditorModal";
 import { Button } from "@/components/ui/Button";
 import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
@@ -58,6 +59,8 @@ export function ValidationView({
   const [baseline, setBaseline] = useState<DraftShift[]>(() =>
     initialTarget ? buildDrafts(initialTarget) : [],
   );
+  // Index du créneau en cours d'édition dans l'éditeur unique (null = fermé).
+  const [editIndex, setEditIndex] = useState<number | null>(null);
 
   // Heures PAYÉES (durée imprimée, pause déduite) — comparables au total du planning.
   const totalHours = useMemo(
@@ -109,6 +112,7 @@ export function ValidationView({
   const coherent = isRowCoherent(target);
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>{target.name}</Text>
@@ -134,13 +138,21 @@ export function ValidationView({
               : "Photo partiellement lisible : vérifie bien les horaires avant d'enregistrer."}
           </Text>
         </View>
+      ) : target.total_hours != null ? (
+        <View style={[styles.warningBox, { backgroundColor: colors.accentMuted }]}>
+          <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+          <Text style={[styles.warningText, { color: colors.text }]}>
+            Nickel — tes heures collent pile avec le total du planning ✨
+          </Text>
+        </View>
       ) : null}
 
       {drafts.map((draft, index) => (
         <DraftShiftCard
-          key={`${draft.date}-${draft.type}-${index}`}
+          key={`${draft.date}-${index}`}
           draft={draft}
-          onChange={(next) => updateDraft(index, next)}
+          onEdit={() => setEditIndex(index)}
+          onToggleInclude={() => updateDraft(index, { ...draft, include: !draft.include })}
         />
       ))}
 
@@ -175,6 +187,17 @@ export function ValidationView({
       />
       <Button label="Reprendre la photo" variant="ghost" onPress={onRetake} />
     </ScrollView>
+
+      <ShiftEditorModal
+        target={
+          editIndex != null && drafts[editIndex]
+            ? { mode: "draft", draft: drafts[editIndex], index: editIndex }
+            : null
+        }
+        onDraftSave={(index, next) => updateDraft(index, next)}
+        onClose={() => setEditIndex(null)}
+      />
+    </>
   );
 }
 

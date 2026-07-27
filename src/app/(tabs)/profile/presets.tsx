@@ -11,10 +11,12 @@ import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
   fonts,
   radius,
+  shiftPeriodLabels,
   shiftTypeLabel,
   spacing,
   typeScale,
   useThemeColors,
+  type ShiftPeriod,
 } from "@/constants/tokens";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
@@ -28,6 +30,7 @@ import {
 } from "@/lib/preset-service";
 
 const PRESET_TYPE_OPTIONS: PresetType[] = ["work", "training", "overtime"];
+const PRESET_PERIOD_OPTIONS: ShiftPeriod[] = ["day", "morning", "afternoon", "evening", "opening", "closing"];
 
 /**
  * Créneaux types personnalisables : chaque boîte a ses horaires (ex. 7h–13h
@@ -177,6 +180,32 @@ export default function PresetsScreen() {
               onChange={(breakMinutes) => patch(preset.id, { breakMinutes })}
               allowCustom
             />
+
+            <Text style={[styles.pauseLabel, { color: colors.textMuted }]}>Catégorie (optionnel)</Text>
+            <View style={styles.typeRow}>
+              {PRESET_PERIOD_OPTIONS.map((option) => {
+                const selected = (preset.period ?? null) === option;
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => patch(preset.id, { period: selected ? null : option })}
+                    style={[
+                      styles.typeChip,
+                      { backgroundColor: selected ? colors.text : colors.background },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.typeLabel,
+                        { color: selected ? colors.background : colors.textMuted },
+                      ]}
+                    >
+                      {shiftPeriodLabels[option]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         ))}
 

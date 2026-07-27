@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -9,12 +10,9 @@ import {
   spacing,
   typeScale,
   useThemeColors,
-  type ShiftType,
 } from "@/constants/tokens";
 import { addMinutesToTime } from "@/lib/dates";
-import { DurationChips } from "@/components/ui/DurationChips";
-import { TimePickerField } from "@/components/ui/TimePickerField";
-import { breakMinutes, spanHours, type DraftShift } from "@/lib/scan-service";
+import { breakMinutes, type DraftShift } from "@/lib/scan-service";
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
@@ -22,186 +20,99 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   month: "long",
 });
 
-const EDITABLE_TYPES: ShiftType[] = ["work", "training", "off", "rh", "cp", "meeting"];
-// Texte des chips sélectionnées : encre sur les couleurs claires, blanc sinon.
-const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave"];
-
 const INK = "#26210E";
 const INK_SOFT = "rgba(38,33,14,0.65)";
 
 type DraftShiftCardProps = {
   draft: DraftShift;
-  onChange: (next: DraftShift) => void;
+  /** Ouvre l'éditeur unique (tous les filtres). */
+  onEdit: () => void;
+  /** Inclure / ignorer ce jour sans ouvrir l'éditeur. */
+  onToggleInclude: () => void;
 };
 
-export function DraftShiftCard({ draft, onChange }: DraftShiftCardProps) {
+/**
+ * Carte-résumé d'un jour proposé par le scan : lecture claire (jour, type,
+ * horaires) + un tap pour éditer dans l'éditeur unique, + un interrupteur
+ * inclure/ignorer. Toute l'édition fine se fait dans le même éditeur que
+ * l'ajout manuel — mêmes filtres partout.
+ */
+export function DraftShiftCard({ draft, onEdit, onToggleInclude }: DraftShiftCardProps) {
   const colors = useThemeColors();
   const typeColor = shiftTypeColor[draft.type];
   const dayLabel = DAY_FORMATTER.format(new Date(`${draft.date}T12:00:00`));
   const showTimes = draft.type === "work" || draft.type === "meeting" || draft.type === "training";
   const pause = breakMinutes(draft);
 
+  const summary =
+    showTimes && draft.start && draft.end
+      ? `${draft.start} – ${draft.end}`
+      : shiftTypeLabel[draft.type];
+
   return (
-    <View
-      style={[
+    <Pressable
+      onPress={onEdit}
+      style={({ pressed }) => [
         styles.card,
         {
-          backgroundColor: draft.include
-            ? shiftTypeSoftColor[draft.type]
-            : colors.surfaceMuted,
-          opacity: draft.include ? 1 : 0.6,
+          backgroundColor: draft.include ? shiftTypeSoftColor[draft.type] : colors.surfaceMuted,
+          opacity: draft.include ? (pressed ? 0.85 : 1) : 0.6,
         },
       ]}
     >
       <View style={styles.headerRow}>
         <View style={[styles.typeDot, { backgroundColor: typeColor }]} />
-        <Text style={[styles.day, { color: INK }]}>{dayLabel}</Text>
-
+        <Text style={[styles.day, { color: INK }]} numberOfLines={1}>
+          {dayLabel}
+        </Text>
         <Pressable
           accessibilityRole="switch"
           accessibilityState={{ checked: draft.include }}
-          onPress={() => onChange({ ...draft, include: !draft.include })}
+          onPress={onToggleInclude}
+          hitSlop={6}
           style={[
             styles.includeToggle,
             { backgroundColor: draft.include ? INK : "rgba(255,255,255,0.7)" },
           ]}
         >
-          <Text
-            style={[
-              styles.includeLabel,
-              { color: draft.include ? "#FFF" : colors.textMuted },
-            ]}
-          >
+          <Text style={[styles.includeLabel, { color: draft.include ? "#FFF" : colors.textMuted }]}>
             {draft.include ? "Inclus" : "Ignoré"}
           </Text>
         </Pressable>
       </View>
 
-      <View style={styles.typeRow}>
-        {EDITABLE_TYPES.map((type) => {
-          const selected = draft.type === type;
-          return (
-            <Pressable
-              key={type}
-              onPress={() =>
-                onChange({
-                  ...draft,
-                  type,
-                  // Choisir un type = vouloir garder ce jour : on le ré-inclut
-                  // (les jours repos/illisibles arrivent « Ignoré » par défaut).
-                  include: true,
-                  // Un type sans horaires vide les heures ; work/meeting les exige.
-                  start: type === "work" || type === "meeting" || type === "training" ? draft.start : null,
-                  end: type === "work" || type === "meeting" || type === "training" ? draft.end : null,
-                })
-              }
-              style={[
-                styles.typeChip,
-                {
-                  backgroundColor: selected
-                    ? shiftTypeColor[type]
-                    : "rgba(255,255,255,0.65)",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.typeChipLabel,
-                  {
-                    color: selected
-                      ? INK_CHIP_TYPES.includes(type)
-                        ? INK
-                        : "#FFF"
-                      : INK_SOFT,
-                  },
-                ]}
-              >
-                {shiftTypeLabel[type]}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {showTimes ? (
-        <View style={styles.timesRow}>
-          <TimePickerField
-            compact
-            value={draft.start}
-            onChange={(start) => onChange({ ...draft, start })}
-            placeholder="Début"
-          />
-          <Text style={[styles.timeSeparator, { color: INK_SOFT }]}>→</Text>
-          <TimePickerField
-            compact
-            value={draft.end}
-            onChange={(end) => onChange({ ...draft, end })}
-            placeholder="Fin"
-          />
-        </View>
-      ) : null}
-
-      {draft.type === "work" && draft.start && draft.end ? (
-        <View style={styles.pauseBlock}>
-          <View style={styles.pauseHeaderRow}>
-            <Text style={styles.pauseLabel}>Pause</Text>
-            {pause > 0 && draft.breakStart ? (
-              <Text style={styles.pauseText}>
-                {draft.breakStart} → {addMinutesToTime(draft.breakStart, pause)}
-              </Text>
-            ) : null}
-            {draft.durationHours != null ? (
-              <Text style={styles.pauseText}>
-                {draft.durationHours.toLocaleString("fr-FR")}h payées
-              </Text>
-            ) : null}
+      <View style={styles.bodyRow}>
+        <View style={styles.summaryBox}>
+          <View style={[styles.typeChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
+            <Text style={[styles.typeChipLabel, { color: INK }]}>{shiftTypeLabel[draft.type]}</Text>
           </View>
-          <DurationChips
-            compact
-            allowCustom
-            value={pause}
-            onChange={(minutes) => {
-              const span = spanHours(draft);
-              if (span == null) return;
-              onChange({
-                ...draft,
-                durationHours: Math.max(0, span - minutes / 60),
-                breakStart: minutes > 0 ? draft.breakStart : null,
-              });
-            }}
-          />
+          <Text style={[styles.summary, { color: INK }]}>{summary}</Text>
           {pause > 0 ? (
-            <View style={styles.pauseStartRow}>
-              <Text style={styles.pauseText}>à</Text>
-              <TimePickerField
-                compact
-                value={draft.breakStart}
-                onChange={(breakStart) => onChange({ ...draft, breakStart })}
-                placeholder="12:30"
-              />
-            </View>
+            <Text style={[styles.pause, { color: INK_SOFT }]}>
+              · {pause} min de pause
+              {draft.breakStart ? ` (${draft.breakStart} → ${addMinutesToTime(draft.breakStart, pause)})` : ""}
+            </Text>
           ) : null}
         </View>
-      ) : null}
+        <Ionicons name="chevron-forward" size={18} color={INK_SOFT} />
+      </View>
 
       {draft.fromHandwriting ? (
-        <View style={styles.highlightBadge}>
-          <Text style={styles.highlightLabel}>✍️ Corrigé à la main sur le planning</Text>
+        <View style={styles.badge}>
+          <Text style={styles.badgeLabel}>✍️ Corrigé à la main sur le planning</Text>
         </View>
       ) : null}
-
       {draft.highlighted ? (
-        <View style={styles.highlightBadge}>
-          <Text style={styles.highlightLabel}>🖍️ Surligné sur le planning</Text>
+        <View style={styles.badge}>
+          <Text style={styles.badgeLabel}>🖍️ Surligné sur le planning</Text>
         </View>
       ) : null}
-
       {draft.note ? (
         <Text style={styles.note} numberOfLines={2}>
           {draft.note}
         </Text>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -227,9 +138,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textTransform: "capitalize",
   },
-  handwriting: {
-    fontSize: typeScale.body,
-  },
   includeToggle: {
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
@@ -239,66 +147,43 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.extraBold,
   },
-  typeRow: {
+  bodyRow: {
     flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  summaryBox: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     flexWrap: "wrap",
     gap: spacing.xs,
   },
   typeChip: {
     borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
   },
   typeChipLabel: {
+    fontSize: 11,
+    fontFamily: fonts.bold,
+  },
+  summary: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.black,
+  },
+  pause: {
     fontSize: typeScale.caption,
     fontFamily: fonts.bold,
   },
-  timesRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  timeSeparator: {
-    fontSize: typeScale.body,
-  },
-  pauseBlock: {
-    gap: spacing.xs,
-    borderTopWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: "rgba(38,33,14,0.2)",
-    paddingTop: spacing.sm,
-  },
-  pauseHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pauseLabel: {
-    fontSize: 11,
-    fontFamily: fonts.extraBold,
-    color: "rgba(38,33,14,0.65)",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    flex: 1,
-  },
-  pauseStartRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pauseText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-    color: INK_SOFT,
-  },
-  highlightBadge: {
+  badge: {
     alignSelf: "flex-start",
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     backgroundColor: "rgba(255,255,255,0.65)",
   },
-  highlightLabel: {
+  badgeLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.bold,
     color: INK,

@@ -70,16 +70,16 @@ const styles = StyleSheet.create({
   base: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md + 2,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
-    minHeight: 54,
+    minHeight: 58,
   },
   pressed: {
-    transform: [{ scale: 0.98 }],
+    transform: [{ scale: 0.97 }],
   },
   label: {
-    fontSize: typeScale.body,
+    fontSize: typeScale.body + 1,
     fontFamily: fonts.extraBold,
   },
 });

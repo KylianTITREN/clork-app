@@ -4,7 +4,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { ShiftType } from "@/constants/tokens";
+import type { ShiftPeriod, ShiftType } from "@/constants/tokens";
 
 const STORAGE_KEY = "clork.presets";
 export const MAX_PRESETS = 6;
@@ -19,6 +19,8 @@ export type ShiftPreset = {
   start: string; // "HH:MM"
   end: string; // "HH:MM"
   breakMinutes: number;
+  // Catégorie facultative pré-remplie par le preset (ouverture, fermeture…).
+  period?: ShiftPeriod | null;
 };
 
 export const DEFAULT_PRESETS: ShiftPreset[] = [

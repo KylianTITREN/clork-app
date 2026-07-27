@@ -11,7 +11,7 @@ import type {
   PlanningExtraction,
 } from "@/lib/extraction-types";
 import { supabase } from "@/lib/supabase";
-import type { ShiftType } from "@/constants/tokens";
+import type { ShiftPeriod, ShiftType } from "@/constants/tokens";
 
 // En dessous de ~2000 px de grand côté, l'extraction hallucine (testé phase 1).
 const TARGET_LONG_EDGE = 2400;
@@ -303,6 +303,8 @@ export type DraftShift = {
   // Durée PAYÉE imprimée sur le planning ; l'écart avec l'amplitude = pause.
   durationHours: number | null;
   breakStart: string | null; // début de pause ("12:30"), fin = début + pause
+  // Catégorie facultative (ouverture/fermeture/matin…), éditable à la validation.
+  period: ShiftPeriod | null;
   note: string | null;
   fromHandwriting: boolean;
   highlighted: boolean;
@@ -385,6 +387,7 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
           // entière : impossible de la ventiler par créneau → pas de pause déduite.
           durationHours: day.shifts.length === 1 ? day.duration_hours : null,
           breakStart: null,
+          period: null,
           note: day.note,
           fromHandwriting: day.handwritten_override,
           highlighted: day.highlighted,
@@ -399,6 +402,7 @@ export function toDraftShifts(employee: ExtractionEmployee): DraftShift[] {
         end: null,
         durationHours: null,
         breakStart: null,
+        period: null,
         note: day.status === "unknown" ? (day.note ?? "Illisible sur la photo") : day.note,
         fromHandwriting: day.handwritten_override,
         highlighted: day.highlighted,
@@ -423,6 +427,7 @@ export function meetingDraftsFromNotes(
       end: n.end ?? addOneHour(n.start as string),
       durationHours: null,
       breakStart: null,
+      period: null,
       note: n.text,
       fromHandwriting: true,
       highlighted: false,
@@ -470,6 +475,7 @@ export async function saveShifts(
       type: d.type,
       break_minutes: breakMinutes(d),
       break_start: breakMinutes(d) > 0 ? d.breakStart : null,
+      period: d.period,
       note: d.note,
       source: "scan" as const,
       is_edited: d.fromHandwriting,

@@ -31,6 +31,7 @@ import {
 } from "@/constants/tokens";
 import { addDays } from "@/lib/dates";
 import { DEFAULT_PRESETS, loadPresets, type ShiftPreset } from "@/lib/preset-service";
+import { breakMinutes, type DraftShift } from "@/lib/scan-service";
 import { supabase } from "@/lib/supabase";
 import type { Shift } from "@/lib/types";
 
@@ -76,12 +77,24 @@ const HALF_DAY_OPTIONS: { id: HalfDay; label: string }[] = [
 
 export type EditorTarget =
   | { mode: "edit"; shift: Shift }
-  | { mode: "create"; date: string; userId: string; endDate?: string };
+  | { mode: "create"; date: string; userId: string; endDate?: string }
+  // Édition d'un créneau de scan encore en mémoire (validation) : rien n'est
+  // écrit en base, le résultat repart au parent via onDraftSave.
+  | { mode: "draft"; draft: DraftShift; index: number };
 
 type ShiftEditorModalProps = {
   target: EditorTarget | null;
   onClose: (didChange: boolean) => void;
+  /** Requis pour le mode "draft" : renvoie le créneau édité au parent. */
+  onDraftSave?: (index: number, next: DraftShift) => void;
 };
+
+/** Heures décimales entre deux "HH:MM" (fin > début supposé). */
+function hoursBetween(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
+  return (eh * 60 + em - (sh * 60 + sm)) / 60;
+}
 
 function toLocalTime(iso: string | null): string | null {
   if (!iso) return null;
@@ -99,7 +112,7 @@ function datesBetween(from: string, to: string): string[] {
   return dates;
 }
 
-export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
+export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorModalProps) {
   const colors = useThemeColors();
   const [type, setType] = useState<ShiftType>("work");
   const [start, setStart] = useState<string | null>(null);
@@ -112,6 +125,7 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
   const [endDate, setEndDate] = useState<string | null>(null); // multi-jours
   const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -132,6 +146,16 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
           ? target.shift.period
           : "day",
       );
+    } else if (target.mode === "draft") {
+      const d = target.draft;
+      setType(d.type);
+      setStart(d.start);
+      setEnd(d.end);
+      setPauseMinutes(breakMinutes(d));
+      setPauseStart(d.breakStart);
+      setNote(d.note ?? "");
+      setPeriod(d.period ?? null);
+      setHalfDay(d.period === "morning" || d.period === "afternoon" ? d.period : "day");
     } else {
       setType("work");
       setStart(null);
@@ -144,21 +168,36 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
     }
     setEndDate(target.mode === "create" ? (target.endDate ?? null) : null);
     setSelectedPresetId(null);
+    // Options avancées repliées par défaut, sauf si le créneau en utilise déjà.
+    const usesAdvanced =
+      target.mode === "edit"
+        ? target.shift.period != null || !!target.shift.note
+        : target.mode === "draft"
+          ? target.draft.period != null || !!target.draft.note
+          : false;
+    setShowAdvanced(usesAdvanced);
   }, [target]);
 
   if (!target) return null;
 
   const isCreate = target.mode === "create";
-  const date = target.mode === "edit" ? target.shift.date : target.date;
+  const isDraft = target.mode === "draft";
+  const date =
+    target.mode === "edit"
+      ? target.shift.date
+      : target.mode === "draft"
+        ? target.draft.date
+        : target.date;
   const needsTimes = TIMED_TYPES.includes(type);
   const isHalfDayType = HALF_DAY_TYPES.includes(type);
-  const showPresets = isCreate && PRESET_TYPES.includes(type) && presets.length > 0;
+  const showPresets = (isCreate || isDraft) && PRESET_TYPES.includes(type) && presets.length > 0;
 
   function applyPreset(preset: ShiftPreset) {
     setType(preset.type);
     setStart(preset.start);
     setEnd(preset.end);
     setPauseMinutes(preset.breakMinutes);
+    if (preset.period !== undefined) setPeriod(preset.period);
     setSelectedPresetId(preset.id);
   }
 
@@ -174,13 +213,37 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
         return;
       }
     }
-    setIsSaving(true);
     // Demi-journée stockée dans period (morning/afternoon), journée = null.
     const effectivePeriod: ShiftPeriod | null = isHalfDayType
       ? halfDay === "day"
         ? null
         : halfDay
       : period;
+
+    // Mode "draft" (validation d'un scan) : on renvoie le créneau au parent,
+    // aucune écriture en base. La pause (durée payée = amplitude − pause) ne
+    // s'applique qu'aux créneaux horaires.
+    if (target.mode === "draft") {
+      const next: DraftShift = {
+        ...target.draft,
+        type,
+        start: needsTimes ? start : null,
+        end: needsTimes ? end : null,
+        durationHours:
+          needsTimes && start && end
+            ? Math.max(0, hoursBetween(start, end) - pauseMinutes / 60)
+            : null,
+        breakStart: needsTimes && pauseMinutes > 0 ? pauseStart : null,
+        period: effectivePeriod,
+        note: note.trim() || null,
+        include: true, // éditer un jour = vouloir le garder
+      };
+      onDraftSave?.(target.index, next);
+      onClose(false);
+      return;
+    }
+
+    setIsSaving(true);
     const basePayload = {
       start_at: null as string | null,
       end_at: null as string | null,
@@ -393,88 +456,113 @@ export function ShiftEditorModal({ target, onClose }: ShiftEditorModalProps) {
               </>
             ) : null}
 
-            {/* Multi-jours : congés du 11 au 20, 2 jours de formation… */}
-            {isCreate ? (
+            {/* Options avancées repliées : garde l'écran aéré par défaut, mais
+                TOUT reste accessible d'un tap (catégorie, plage, note). */}
+            <Pressable
+              onPress={() => setShowAdvanced((v) => !v)}
+              style={[styles.advancedToggle, { borderColor: colors.border }]}
+            >
+              <Ionicons
+                name="options-outline"
+                size={16}
+                color={colors.accent}
+              />
+              <Text style={[styles.advancedToggleLabel, { color: colors.accent }]}>
+                {showAdvanced ? "Moins d'options" : "Plus d'options"}
+              </Text>
+              <Ionicons
+                name={showAdvanced ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={colors.accent}
+              />
+            </Pressable>
+
+            {showAdvanced ? (
               <>
-                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                  Jusqu'au (optionnel)
-                </Text>
-                <View style={styles.rangeRow}>
-                  <DatePickerField
-                    value={endDate}
-                    onChange={setEndDate}
-                    placeholder="Un seul jour"
-                    minimumDate={addDays(date, 1)}
-                  />
-                  {endDate ? (
-                    <Pressable onPress={() => setEndDate(null)} hitSlop={8}>
-                      <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-                    </Pressable>
-                  ) : null}
-                  {endDate && endDate > date ? (
-                    <Text style={[styles.rangeCount, { color: colors.textMuted }]}>
-                      {datesBetween(date, endDate).length} jours d'affilée
+                {/* Multi-jours : congés du 11 au 20, 2 jours de formation… */}
+                {isCreate ? (
+                  <>
+                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                      Jusqu'au (optionnel)
                     </Text>
-                  ) : null}
-                </View>
-              </>
-            ) : null}
-
-            {/* Catégorie (optionnelle) pour les créneaux horaires */}
-            {needsTimes ? (
-              <>
-                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                  Catégorie (optionnel)
-                </Text>
-                <View style={styles.typeRow}>
-                  {PERIOD_ORDER.map((id) => {
-                    const selected = period === id;
-                    return (
-                      <Pressable
-                        key={id}
-                        onPress={() => setPeriod(selected ? null : id)}
-                        style={[
-                          styles.typeChip,
-                          { backgroundColor: selected ? colors.text : colors.surface },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.typeLabel,
-                            { color: selected ? colors.background : colors.textMuted },
-                          ]}
-                        >
-                          {shiftPeriodLabels[id]}
+                    <View style={styles.rangeRow}>
+                      <DatePickerField
+                        value={endDate}
+                        onChange={setEndDate}
+                        placeholder="Un seul jour"
+                        minimumDate={addDays(date, 1)}
+                      />
+                      {endDate ? (
+                        <Pressable onPress={() => setEndDate(null)} hitSlop={8}>
+                          <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                        </Pressable>
+                      ) : null}
+                      {endDate && endDate > date ? (
+                        <Text style={[styles.rangeCount, { color: colors.textMuted }]}>
+                          {datesBetween(date, endDate).length} jours d'affilée
                         </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                      ) : null}
+                    </View>
+                  </>
+                ) : null}
+
+                {/* Catégorie (optionnelle) pour les créneaux horaires */}
+                {needsTimes ? (
+                  <>
+                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                      Catégorie (optionnel)
+                    </Text>
+                    <View style={styles.typeRow}>
+                      {PERIOD_ORDER.map((id) => {
+                        const selected = period === id;
+                        return (
+                          <Pressable
+                            key={id}
+                            onPress={() => setPeriod(selected ? null : id)}
+                            style={[
+                              styles.typeChip,
+                              { backgroundColor: selected ? colors.text : colors.surface },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.typeLabel,
+                                { color: selected ? colors.background : colors.textMuted },
+                              ]}
+                            >
+                              {shiftPeriodLabels[id]}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+
+                {/* Note */}
+                <TextInput
+                  value={note}
+                  onChangeText={setNote}
+                  placeholder="Note (optionnelle)"
+                  placeholderTextColor={colors.textMuted}
+                  style={[
+                    styles.noteInput,
+                    { backgroundColor: colors.surface, color: colors.text },
+                  ]}
+                />
               </>
             ) : null}
-
-            {/* Note */}
-            <TextInput
-              value={note}
-              onChangeText={setNote}
-              placeholder="Note (optionnelle)"
-              placeholderTextColor={colors.textMuted}
-              style={[
-                styles.noteInput,
-                { backgroundColor: colors.surface, color: colors.text },
-              ]}
-            />
 
             <View style={styles.actionsRow}>
               <View style={styles.saveButton}>
                 <Button
-                  label={isCreate ? "Ajouter au planning" : "Enregistrer"}
+                  label={isCreate ? "Ajouter au planning" : isDraft ? "Valider ce créneau" : "Enregistrer"}
                   variant="dark"
                   onPress={handleSave}
                   isLoading={isSaving}
                 />
               </View>
-              {!isCreate ? (
+              {target.mode === "edit" ? (
                 <Pressable
                   onPress={handleDelete}
                   accessibilityLabel="Supprimer le créneau"
@@ -575,6 +663,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: -spacing.xs,
+  },
+  advancedToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+  },
+  advancedToggleLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.extraBold,
   },
   typeRow: {
     flexDirection: "row",
