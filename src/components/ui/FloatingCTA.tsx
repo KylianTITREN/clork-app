@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   button: {
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     minHeight: 54,
     paddingVertical: 15,
   },

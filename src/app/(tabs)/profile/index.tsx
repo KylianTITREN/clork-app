@@ -282,7 +282,8 @@ const styles = StyleSheet.create({
   closeButton: {
     width: 36,
     height: 36,
-    borderRadius: radius.pill,
+    // Maquette : la croix est un CARRÉ arrondi (le chevron retour reste rond).
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
