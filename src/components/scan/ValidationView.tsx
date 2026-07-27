@@ -8,12 +8,14 @@ import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import {
   applyDefaultBreak,
+  diffDrafts,
   isRowCoherent,
   meetingDraftsFromNotes,
   paidHours,
   toDraftShifts,
   type BreakPrefs,
   type DraftShift,
+  type ScanCorrection,
 } from "@/lib/scan-service";
 
 const WEEK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long" });
@@ -23,7 +25,12 @@ type ValidationViewProps = {
   initialTarget: ExtractionEmployee | null;
   breakPrefs: BreakPrefs;
   isSaving: boolean;
-  onSave: (drafts: DraftShift[], target: ExtractionEmployee, exportToCalendar: boolean) => void;
+  onSave: (
+    drafts: DraftShift[],
+    target: ExtractionEmployee,
+    exportToCalendar: boolean,
+    corrections: ScanCorrection[],
+  ) => void;
   onRetake: () => void;
 };
 
@@ -46,6 +53,11 @@ export function ValidationView({
   const [drafts, setDrafts] = useState<DraftShift[]>(() =>
     initialTarget ? buildDrafts(initialTarget) : [],
   );
+  // Proposition IA d'origine (aligne l'index avec `drafts`) : sert à repérer les
+  // corrections manuelles à l'enregistrement (journal qualité extraction).
+  const [baseline, setBaseline] = useState<DraftShift[]>(() =>
+    initialTarget ? buildDrafts(initialTarget) : [],
+  );
 
   // Heures PAYÉES (durée imprimée, pause déduite) — comparables au total du planning.
   const totalHours = useMemo(
@@ -57,8 +69,10 @@ export function ValidationView({
   );
 
   function selectTarget(employee: ExtractionEmployee) {
+    const built = buildDrafts(employee);
     setTarget(employee);
-    setDrafts(buildDrafts(employee));
+    setDrafts(built);
+    setBaseline(built);
   }
 
   function updateDraft(index: number, next: DraftShift) {
@@ -156,7 +170,7 @@ export function ValidationView({
       <Button
         label="Valider mes créneaux"
         variant="dark"
-        onPress={() => onSave(drafts, target, exportToCalendar)}
+        onPress={() => onSave(drafts, target, exportToCalendar, diffDrafts(baseline, drafts))}
         isLoading={isSaving}
       />
       <Button label="Reprendre la photo" variant="ghost" onPress={onRetake} />

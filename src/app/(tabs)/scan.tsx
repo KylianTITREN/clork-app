@@ -22,6 +22,7 @@ import {
   hasResolvedDates,
   markScanValidated,
   prepareImage,
+  logScanCorrections,
   saveShifts,
   startExtraction,
   undoImport,
@@ -30,6 +31,7 @@ import {
   waitForExtraction,
   type DraftShift,
   type PendingScan,
+  type ScanCorrection,
 } from "@/lib/scan-service";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { fetchPlan, isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
@@ -268,7 +270,12 @@ export default function ScanScreen() {
     );
   }
 
-  async function handleSave(drafts: DraftShift[], target: ExtractionEmployee, exportToCalendar: boolean) {
+  async function handleSave(
+    drafts: DraftShift[],
+    target: ExtractionEmployee,
+    exportToCalendar: boolean,
+    corrections: ScanCorrection[],
+  ) {
     if (!userId || state.step !== "validate") return;
     const problem = drafts.map(validateDraft).find((p) => p !== null);
     if (problem) {
@@ -281,6 +288,8 @@ export default function ScanScreen() {
       const scanRowId = state.rowIds.get(target.row_index) ?? null;
       const savedIds = await saveShifts(userId, drafts, scanRowId);
       const count = savedIds.length;
+      // Trace les erreurs de lecture de l'IA (best-effort, ne bloque pas).
+      void logScanCorrections(userId, scanId, scanRowId, corrections);
       await markScanValidated(scanId); // sans effet (RLS) sur un scan partagé, voulu
       if (scanRowId) {
         await recordClaimedRow(scanId, scanRowId);

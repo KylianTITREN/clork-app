@@ -22,6 +22,7 @@ import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { rescheduleFromShifts } from "@/lib/reminder-service";
+import { findShiftMates, findTargetEmployee } from "@/lib/scan-service";
 import { createShare } from "@/lib/share-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
@@ -58,6 +59,8 @@ export default function WeekScreen() {
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
   const [colleaguesScanId, setColleaguesScanId] = useState<string | null>(null);
+  // Équipe de la semaine (scan validé) : sert à afficher qui ouvre/ferme avec moi.
+  const [team, setTeam] = useState<{ employees: ExtractionEmployee[]; myRow: number | null } | null>(null);
   // Plannings suivis en lecture seule (ex: celui de sa compagne 💛).
   const [followedList, setFollowedList] = useState<FollowedUser[]>([]);
   const [viewing, setViewing] = useState<FollowedUser | null>(null);
@@ -143,11 +146,43 @@ export default function WeekScreen() {
     }
   }, [userId, monday, sunday, viewing, colors.accent, colors.onAccent]);
 
+  // Équipe de la semaine : qui ouvre/ferme aux mêmes heures que moi. Seulement
+  // sur MON planning (pas les plannings suivis).
+  const loadTeam = useCallback(async () => {
+    if (!userId || viewing) {
+      setTeam(null);
+      return;
+    }
+    const { data: scan } = await supabase
+      .from("scans")
+      .select("raw_extraction")
+      .eq("week_start", monday)
+      .eq("status", "validated")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ raw_extraction: PlanningExtraction | null }>();
+    const employees = scan?.raw_extraction?.employees;
+    if (!employees || employees.length === 0) {
+      setTeam(null);
+      return;
+    }
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("employee_aliases, display_name")
+      .eq("id", userId)
+      .single<{ employee_aliases: string[]; display_name: string }>();
+    const myRow =
+      findTargetEmployee(employees, profile?.employee_aliases ?? [], profile?.display_name ?? "")
+        ?.row_index ?? null;
+    setTeam({ employees, myRow });
+  }, [userId, monday, viewing]);
+
   useFocusEffect(
     useCallback(() => {
       loadShifts();
+      loadTeam();
       listFollowed().then(setFollowedList);
-    }, [loadShifts]),
+    }, [loadShifts, loadTeam]),
   );
 
   const days = useMemo(
@@ -404,6 +439,17 @@ export default function WeekScreen() {
                       shift.start_at ? toLocalTime(shift.start_at) : null,
                       shift.end_at ? toLocalTime(shift.end_at) : null,
                     );
+                // Qui ouvre / ferme avec moi ce jour-là (depuis le scan d'équipe).
+                const mates =
+                  team && shift.type === "work"
+                    ? findShiftMates(
+                        team.employees,
+                        team.myRow,
+                        shift.date,
+                        shift.start_at ? toLocalTime(shift.start_at) : null,
+                        shift.end_at ? toLocalTime(shift.end_at) : null,
+                      )
+                    : { openers: [], closers: [] };
                 return (
                   <Pressable
                     key={shift.id}
@@ -458,6 +504,21 @@ export default function WeekScreen() {
                       >
                         {shift.note}
                       </Text>
+                    ) : null}
+
+                    {mates.openers.length > 0 || mates.closers.length > 0 ? (
+                      <View style={styles.matesBox}>
+                        {mates.openers.length > 0 ? (
+                          <Text style={[styles.matesLine, { color: "rgba(38,33,14,0.7)" }]} numberOfLines={2}>
+                            🔓 Ouvre avec {mates.openers.join(", ")}
+                          </Text>
+                        ) : null}
+                        {mates.closers.length > 0 ? (
+                          <Text style={[styles.matesLine, { color: "rgba(38,33,14,0.7)" }]} numberOfLines={2}>
+                            🔒 Ferme avec {mates.closers.join(", ")}
+                          </Text>
+                        ) : null}
+                      </View>
                     ) : null}
                   </Pressable>
                 );
@@ -789,6 +850,16 @@ const styles = StyleSheet.create({
   shiftNote: {
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
+  },
+  matesBox: {
+    gap: 2,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(38,33,14,0.12)",
+    paddingTop: spacing.xs,
+  },
+  matesLine: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
   colleaguesBackdrop: {
     flex: 1,

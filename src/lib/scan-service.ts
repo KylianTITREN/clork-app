@@ -496,3 +496,104 @@ export async function undoImport(shiftIds: string[]): Promise<void> {
     throw new Error("Annulation impossible : " + error.message);
   }
 }
+
+// --- Journal des corrections de l'IA -----------------------------------------
+
+export type ScanCorrection = {
+  field: "type" | "start" | "end" | "include";
+  aiValue: string | null;
+  userValue: string | null;
+  date: string;
+};
+
+/**
+ * Compare la proposition de l'IA (baseline) à ce que l'utilisatrice a retenu.
+ * Les deux listes sont alignées par index (même construction, pas de tri) : un
+ * écart sur type/horaires/inclusion = une erreur de lecture de l'IA.
+ */
+export function diffDrafts(baseline: DraftShift[], final: DraftShift[]): ScanCorrection[] {
+  const corrections: ScanCorrection[] = [];
+  const count = Math.min(baseline.length, final.length);
+  for (let i = 0; i < count; i++) {
+    const before = baseline[i];
+    const after = final[i];
+    if (before.date !== after.date) continue; // garde-fou : lignes désalignées
+    if (before.type !== after.type) {
+      corrections.push({ field: "type", aiValue: before.type, userValue: after.type, date: after.date });
+    }
+    if ((before.start ?? "") !== (after.start ?? "")) {
+      corrections.push({ field: "start", aiValue: before.start, userValue: after.start, date: after.date });
+    }
+    if ((before.end ?? "") !== (after.end ?? "")) {
+      corrections.push({ field: "end", aiValue: before.end, userValue: after.end, date: after.date });
+    }
+    if (before.include !== after.include) {
+      corrections.push({
+        field: "include",
+        aiValue: String(before.include),
+        userValue: String(after.include),
+        date: after.date,
+      });
+    }
+  }
+  return corrections;
+}
+
+/** Best-effort : n'interrompt jamais la validation si l'insert échoue. */
+export async function logScanCorrections(
+  userId: string,
+  scanId: string,
+  scanRowId: string | null,
+  corrections: ScanCorrection[],
+): Promise<void> {
+  if (corrections.length === 0) return;
+  try {
+    await supabase.from("scan_corrections").insert(
+      corrections.map((c) => ({
+        user_id: userId,
+        scan_id: scanId,
+        scan_row_id: scanRowId,
+        date: c.date,
+        field: c.field,
+        ai_value: c.aiValue,
+        user_value: c.userValue,
+      })),
+    );
+  } catch {
+    // Le journal de qualité ne doit jamais bloquer l'utilisatrice.
+  }
+}
+
+// --- Qui ouvre / ferme avec moi ----------------------------------------------
+
+export type ShiftMates = { openers: string[]; closers: string[] };
+
+/**
+ * À partir de l'extraction d'équipe de la semaine : qui commence à la même
+ * heure que moi (ouvre avec moi) et qui finit à la même heure (ferme avec moi),
+ * ce jour-là. Ma propre ligne est exclue.
+ */
+export function findShiftMates(
+  employees: ExtractionEmployee[],
+  myRowIndex: number | null,
+  date: string,
+  start: string | null,
+  end: string | null,
+): ShiftMates {
+  const openers: string[] = [];
+  const closers: string[] = [];
+  for (const employee of employees) {
+    if (employee.row_index === myRowIndex) continue;
+    const day = employee.days.find((d) => d.date === date);
+    if (!day || day.status !== "work") continue;
+    for (const slot of day.shifts) {
+      if (start && slot.start === start && !openers.includes(employee.name)) {
+        openers.push(employee.name);
+      }
+      if (end && slot.end === end && !closers.includes(employee.name)) {
+        closers.push(employee.name);
+      }
+    }
+  }
+  return { openers, closers };
+}
