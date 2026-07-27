@@ -1,47 +1,53 @@
-import { Ionicons } from "@expo/vector-icons";
+// Vérification e-mail v2 (maquette 4f, étape 3/3) : code à 6 chiffres saisi
+// dans 6 cases (un seul TextInput invisible pilote l'ensemble), « Renvoyer le
+// code », CTA actif uniquement quand le code est complet.
+
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
-import { TextField } from "@/components/ui/TextField";
-import { logoByTheme } from "@/constants/logo-assets";
-import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { WizardFrame } from "@/components/ui/WizardFrame";
+import {
+  fonts,
+  letterSpacing,
+  radius,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
-import { useTheme } from "@/providers/theme-provider";
 
 const CODE_LENGTH = 6;
 
 export default function VerifyOtpScreen() {
   const colors = useThemeColors();
-  const { themeId } = useTheme();
   const params = useLocalSearchParams<{ email?: string }>();
   const email = typeof params.email === "string" ? params.email : "";
   const [code, setCode] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+
+  const isComplete = code.length === CODE_LENGTH;
 
   async function handleVerify() {
-    if (code.trim().length !== CODE_LENGTH) {
-      Alert.alert("Code incomplet", `Saisis le code à ${CODE_LENGTH} chiffres reçu par e-mail.`);
-      return;
-    }
+    if (!isComplete) return;
     setIsVerifying(true);
     // Succès : une session est créée → l'AuthProvider bascule vers l'app.
     const { error } = await supabase.auth.verifyOtp({
       email,
-      token: code.trim(),
+      token: code,
       type: "signup",
     });
     setIsVerifying(false);
@@ -61,44 +67,57 @@ export default function VerifyOtpScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <Pressable
-          onPress={() => (router.canGoBack() ? router.back() : router.replace("/sign-in"))}
-          hitSlop={12}
-          accessibilityLabel="Retour"
-          style={[styles.backButton, { backgroundColor: colors.surface }]}
-        >
-          <Ionicons name="chevron-back" size={22} color={colors.text} />
-        </Pressable>
-
+    <WizardFrame
+      step={3}
+      totalSteps={3}
+      closeIcon="back"
+      onClose={() => (router.canGoBack() ? router.back() : router.replace("/sign-in"))}
+    >
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
         <View style={styles.content}>
-          <View style={styles.header}>
-            <Image source={logoByTheme[themeId]} style={styles.logo} />
-            <Text style={[styles.title, { color: colors.text }]}>Vérifie ton e-mail</Text>
-            <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-              On t'a envoyé un code à {CODE_LENGTH} chiffres à {email || "ton adresse"}. Saisis-le
-              ci-dessous pour activer ton compte.
-            </Text>
-          </View>
+          <Text style={[styles.title, { color: colors.text }]}>Vérifie ton e-mail</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            On t'a envoyé un code à {CODE_LENGTH} chiffres à {email || "ton adresse"}.
+          </Text>
 
-          <View style={styles.form}>
-            <TextField
-              label="Code de vérification"
-              keyboardType="number-pad"
-              textContentType="oneTimeCode"
-              autoComplete="one-time-code"
-              maxLength={CODE_LENGTH}
-              placeholder="123456"
-              value={code}
-              onChangeText={(value) => setCode(value.replace(/[^0-9]/g, ""))}
-            />
-            <Button label="Valider" onPress={handleVerify} isLoading={isVerifying} />
-          </View>
+          {/* 6 cases visuelles pilotées par un input invisible. */}
+          <Pressable onPress={() => inputRef.current?.focus()} style={styles.cells}>
+            {Array.from({ length: CODE_LENGTH }, (_, index) => {
+              const digit = code[index] ?? "";
+              const isActive = index === code.length;
+              return (
+                <View
+                  key={index}
+                  style={[
+                    styles.cell,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: isActive ? colors.accent : digit ? colors.text : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.cellDigit, { color: colors.text }]}>{digit}</Text>
+                </View>
+              );
+            })}
+          </Pressable>
+          <TextInput
+            ref={inputRef}
+            value={code}
+            onChangeText={(value) => setCode(value.replace(/[^0-9]/g, "").slice(0, CODE_LENGTH))}
+            keyboardType="number-pad"
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
+            autoFocus
+            style={styles.hiddenInput}
+          />
 
+          <Button
+            label="Valider"
+            onPress={handleVerify}
+            isLoading={isVerifying}
+            disabled={!isComplete}
+          />
           <Pressable onPress={handleResend} disabled={isResending} hitSlop={8}>
             <Text style={[styles.resend, { color: colors.accent }]}>
               {isResending ? "Envoi…" : "Renvoyer le code"}
@@ -106,54 +125,54 @@ export default function VerifyOtpScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </WizardFrame>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
   flex: { flex: 1 },
-  backButton: {
-    position: "absolute",
-    top: spacing.sm,
-    left: spacing.lg,
-    zIndex: 10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   content: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-    gap: spacing.xl,
-  },
-  header: {
-    gap: spacing.xs,
-    alignItems: "center",
-  },
-  logo: {
-    width: 84,
-    height: 84,
-    marginBottom: spacing.sm,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   title: {
     fontSize: typeScale.title,
-    fontFamily: fonts.black,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+    marginTop: spacing.sm,
   },
   subtitle: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.regular,
-    textAlign: "center",
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
   },
-  form: {
-    gap: spacing.md,
+  cells: {
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    marginVertical: spacing.sm,
+  },
+  cell: {
+    width: 48,
+    height: 56,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cellDigit: {
+    fontSize: typeScale.title,
+    fontFamily: fonts.bold,
+  },
+  hiddenInput: {
+    position: "absolute",
+    opacity: 0,
+    height: 1,
+    width: 1,
   },
   resend: {
-    fontSize: typeScale.body,
+    fontSize: typeScale.bodySm,
     fontFamily: fonts.bold,
     textAlign: "center",
+    paddingVertical: spacing.sm,
   },
 });

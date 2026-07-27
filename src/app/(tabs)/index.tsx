@@ -183,6 +183,8 @@ export default function HomeScreen() {
     });
   }, [userId, defaultViewId, colors.accent, colors.onAccent]);
 
+  const isGuest = session?.user.is_anonymous ?? false;
+
   useEffect(() => {
     if (!userId) return;
     supabase
@@ -190,8 +192,20 @@ export default function HomeScreen() {
       .select("display_name")
       .eq("id", userId)
       .single<{ display_name: string }>()
-      .then(({ data }) => setDisplayName(data?.display_name ?? ""));
-  }, [userId]);
+      .then(async ({ data }) => {
+        const name = data?.display_name ?? "";
+        setDisplayName(name);
+        // Compte fraîchement vérifié (prénom vide, pas invité) : onboarding
+        // 4 étapes, une seule fois (drapeau local).
+        if (!isGuest && name.trim() === "") {
+          const AsyncStorage = (
+            require("@react-native-async-storage/async-storage") as typeof import("@react-native-async-storage/async-storage")
+          ).default;
+          const done = await AsyncStorage.getItem("clork.onboarding-done");
+          if (!done) router.navigate("/(tabs)/onboarding" as never);
+        }
+      });
+  }, [userId, isGuest]);
 
   useEffect(() => {
     getReminderPrefs().then((prefs) =>

@@ -1,5 +1,4 @@
 import { router } from "expo-router";
-import { Image } from "react-native";
 import { useState } from "react";
 import {
   Alert,
@@ -13,12 +12,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
+import { ClorkWordmark } from "@/components/brand/ClorkWordmark";
 import { TextField } from "@/components/ui/TextField";
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
-import { logoByTheme } from "@/constants/logo-assets";
+import { fonts, letterSpacing, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
-import { useTheme } from "@/providers/theme-provider";
 
 // Validation locale légère : on bloque les fautes de frappe évidentes avant
 // d'enchaîner sur le mot de passe.
@@ -31,7 +29,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 export default function SignInScreen() {
   const colors = useThemeColors();
-  const { themeId } = useTheme();
   const [step, setStep] = useState<"email" | "password">("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -82,13 +79,17 @@ export default function SignInScreen() {
         style={styles.flex}
       >
         <View style={styles.content}>
-          <View style={styles.header}>
-            <Image source={logoByTheme[themeId]} style={styles.logo} />
-            <Text style={[styles.brand, { color: colors.text }]}>Clork</Text>
-            <Text style={[styles.tagline, { color: colors.textMuted }]}>
-              Ton planning papier, dans ta poche.
-            </Text>
-          </View>
+          {/* Header sombre v2 : wordmark SEUL (spec 4g — pas d'icône au-dessus). */}
+          {step === "email" ? (
+            <View style={[styles.header, { backgroundColor: colors.ink }]}>
+              <ClorkWordmark size={38} color={colors.onInk} dial={colors.accent} background={colors.ink} />
+              <Text style={[styles.tagline, { color: colors.onInk, opacity: 0.7 }]}>
+                Ton planning papier, dans ta poche.
+              </Text>
+            </View>
+          ) : (
+            <Text style={[styles.welcomeBack, { color: colors.text }]}>Content de te revoir</Text>
+          )}
 
           {step === "email" ? (
             <>
@@ -184,18 +185,17 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
   },
   header: {
-    gap: spacing.xs,
+    gap: spacing.sm + 2,
     alignItems: "center",
+    borderRadius: radius.hero,
+    paddingVertical: spacing.xl + 8,
+    paddingHorizontal: spacing.lg,
   },
-  logo: {
-    width: 110,
-    height: 110,
-    marginBottom: spacing.sm,
-  },
-  brand: {
-    fontSize: typeScale.hero,
-    fontFamily: fonts.black,
-    letterSpacing: -1,
+  welcomeBack: {
+    fontSize: typeScale.title,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+    textAlign: "center",
   },
   tagline: {
     fontSize: typeScale.body,
