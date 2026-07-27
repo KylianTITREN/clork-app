@@ -30,7 +30,9 @@ export function ClorkWordmark({
     <View style={styles.row}>
       <Text style={[styles.letters, { color, fontSize: size }]}>cl</Text>
       <View style={[styles.mark, { marginHorizontal: size * 0.06 }]}>
-        <ClorkMark size={markSize} dial={dial} face={background} background={background} />
+        {/* Aiguille/pivot/points de la MÊME couleur que les lettres (retour
+            Kylian) — le halo garde la couleur du fond pour détacher du cadran. */}
+        <ClorkMark size={markSize} dial={dial} face={color} background={background} />
       </View>
       <Text style={[styles.letters, { color, fontSize: size }]}>rk</Text>
     </View>
