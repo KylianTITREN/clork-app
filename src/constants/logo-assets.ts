@@ -3,11 +3,9 @@
 
 import type { ThemeId } from "@/constants/themes";
 
-// Icônes d'app (fond accent) — pour prévisualiser l'icône liée au thème.
-// TODO(logo v2) : « forest » réutilise les assets sage (vert le plus proche)
-// en attendant la génération du logo v2 « cadran mordu » (spec 4g).
+// Icônes d'app v2 « cadran mordu » (générées par scripts/generate-icons-v2.mjs).
 export const appIconByTheme: Record<ThemeId, number> = {
-  forest: require("../../assets/icons/icon-sage.png"),
+  forest: require("../../assets/icons/icon-forest.png"),
   honey: require("../../assets/icons/icon-honey.png"),
   blossom: require("../../assets/icons/icon-blossom.png"),
   plum: require("../../assets/icons/icon-plum.png"),
@@ -15,8 +13,9 @@ export const appIconByTheme: Record<ThemeId, number> = {
   graphite: require("../../assets/icons/icon-graphite.png"),
 };
 
+// Marques transparentes (cadran seul) par thème.
 export const logoByTheme: Record<ThemeId, number> = {
-  forest: require("../../assets/images/logos/logo-sage.png"),
+  forest: require("../../assets/images/logos/logo-forest.png"),
   honey: require("../../assets/images/logos/logo-honey.png"),
   blossom: require("../../assets/images/logos/logo-blossom.png"),
   plum: require("../../assets/images/logos/logo-plum.png"),

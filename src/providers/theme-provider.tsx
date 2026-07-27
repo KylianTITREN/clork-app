@@ -37,10 +37,12 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
     // au hot reload de Metro (« Requiring unknown module »).
     const icons = require("expo-alternate-app-icons") as typeof import("expo-alternate-app-icons");
     if (!icons.supportsAlternateIcons) return;
-    // TODO(logo v2) : pas encore de catalogue « Forest » — le thème forêt
-    // utilise l'icône Sage (v1) en attendant les icônes « cadran mordu ».
-    const catalogName = themeId === "forest" ? "Sage" : themeId.charAt(0).toUpperCase() + themeId.slice(1);
-    const iconName = themeId === DEFAULT_THEME_ID ? "Sage" : catalogName;
+    // Forêt (défaut) = icône principale ; les autres thèmes = catalogues
+    // alternatifs en PascalCase (assets v2 « cadran mordu »).
+    const iconName =
+      themeId === DEFAULT_THEME_ID
+        ? null
+        : themeId.charAt(0).toUpperCase() + themeId.slice(1);
     try {
       await icons.setAlternateAppIcon(iconName);
     } catch (firstError) {

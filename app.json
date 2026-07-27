@@ -79,10 +79,6 @@
             "ios": "./assets/icons/icon-water.png"
           },
           {
-            "name": "sage",
-            "ios": "./assets/icons/icon-sage.png"
-          },
-          {
             "name": "graphite",
             "ios": "./assets/icons/icon-graphite.png"
           }
