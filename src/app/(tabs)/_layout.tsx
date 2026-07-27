@@ -1,15 +1,14 @@
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { Stack } from "expo-router";
 import { useEffect } from "react";
 
-import { useThemeColors } from "@/constants/tokens";
 import { registerPushToken } from "@/lib/notifications";
 import { useAuth } from "@/providers/auth-provider";
 
-// Tabs NATIVES (UITabBar) : sur iOS 26 elles héritent automatiquement du
-// Liquid Glass système — flou, reflets, minimisation au scroll.
-export default function TabsLayout() {
+// Architecture v2 : plus de barre d'onglets — 2 destinations + 1 action.
+// Accueil (index) ; Profil poussé via l'avatar ; « Ajouter mes horaires »
+// (scan) présenté en modal plein écran depuis le CTA flottant.
+export default function AppLayout() {
   const { session } = useAuth();
-  const colors = useThemeColors();
 
   useEffect(() => {
     if (session?.user.id) {
@@ -18,19 +17,10 @@ export default function TabsLayout() {
   }, [session?.user.id]);
 
   return (
-    <NativeTabs tintColor={colors.accent} minimizeBehavior="onScrollDown">
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Planning</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="calendar" drawable="ic_menu_my_calendar" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="scan">
-        <NativeTabs.Trigger.Label>Ajouter</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="plus.circle.fill" drawable="ic_menu_add" />
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Label>Profil</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="person.crop.circle" drawable="ic_menu_myplaces" />
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="scan" options={{ presentation: "fullScreenModal" }} />
+    </Stack>
   );
 }

@@ -1,19 +1,26 @@
+// Accueil v2 (maquette 4a) : segmented Aujourd'hui ⇄ Semaine, hero du jour
+// (horaire géant), rappel de départ, raccourcis (Équipe / Exporter / suivi
+// épinglé), « La suite », vue semaine avec navigation ‹ › et jour déplié,
+// CTA flottant « + Ajouter mes horaires ». La logique de données (chargement,
+// équipe, suivis, export, widgets, rappels) est reprise de la v1.
+
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, Easing, Modal, PanResponder, Pressable, ScrollView, Share as RNShare, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
+import { FloatingCTA } from "@/components/ui/FloatingCTA";
+import { Segmented } from "@/components/ui/Segmented";
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import {
   fonts,
+  letterSpacing,
   radius,
   shiftPeriodLabel,
   shiftPeriodLabels,
-  shiftTypeColor,
   shiftTypeLabel,
-  shiftTypeSoftColor,
-  softShadow,
   spacing,
   typeScale,
   useThemeColors,
@@ -21,9 +28,8 @@ import {
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
-import { rescheduleFromShifts } from "@/lib/reminder-service";
+import { getReminderPrefs, rescheduleFromShifts } from "@/lib/reminder-service";
 import { findShiftMates, findTargetEmployee } from "@/lib/scan-service";
-import { createShare } from "@/lib/share-service";
 import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { refreshWidgetSnapshot } from "@/lib/widget-data";
@@ -31,11 +37,17 @@ import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-ty
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
-const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric" });
+const DAY_LABELS = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"] as const;
+const HERO_DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
 const TIME_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
-const CHIP_LETTERS = ["L", "M", "M", "J", "V", "S", "D"];
-// Encre des cartes pastel (fonds clairs dans tous les thèmes).
-const INK = "#26210E";
+
+function toLocalTime(iso: string): string {
+  return TIME_FORMATTER.format(new Date(iso));
+}
 
 function formatBreak(minutes: number): string {
   return minutes >= 60
@@ -43,79 +55,52 @@ function formatBreak(minutes: number): string {
     : `${minutes} min`;
 }
 
-function toLocalTime(iso: string): string {
-  return TIME_FORMATTER.format(new Date(iso));
+/** Heures payées d'un créneau (amplitude − pause) — réunions incluses. */
+function paidHoursOf(shift: Shift): number {
+  if (!shift.start_at || !shift.end_at) return 0;
+  const span =
+    (new Date(shift.end_at).getTime() - new Date(shift.start_at).getTime()) / 3_600_000;
+  return Math.max(0, span - shift.break_minutes / 60);
 }
 
-export default function WeekScreen() {
+function formatHours(value: number): string {
+  return `${value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h`;
+}
+
+/** Ligne DayRow depuis les créneaux d'un jour. */
+function toDayRowSlots(dayShifts: Shift[]): DayRowSlot[] {
+  return dayShifts
+    .filter((s) => s.start_at && s.end_at)
+    .map((s) => ({
+      start: toLocalTime(s.start_at as string),
+      end: toLocalTime(s.end_at as string),
+      type: s.type,
+      paidLabel:
+        s.type === "work"
+          ? formatHours(paidHoursOf(s))
+          : `${shiftTypeLabel[s.type]} · ${formatHours(paidHoursOf(s))}`,
+    }));
+}
+
+export default function HomeScreen() {
   const colors = useThemeColors();
   const { session } = useAuth();
+  const [view, setView] = useState<"today" | "week">("today");
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [focusedDay, setFocusedDay] = useState<string | null>(null);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const plan = usePlan();
+  const [displayName, setDisplayName] = useState("");
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
-  const [colleaguesScanId, setColleaguesScanId] = useState<string | null>(null);
-  // Équipe de la semaine (scan validé) : sert à afficher qui ouvre/ferme avec moi.
+  // Équipe de la semaine (scan validé) : qui ouvre/ferme avec moi.
   const [team, setTeam] = useState<{ employees: ExtractionEmployee[]; myRow: number | null } | null>(null);
-  // Plannings suivis en lecture seule (ex: celui de sa compagne 💛).
+  // Plannings suivis en lecture seule (ex : celui de sa compagne).
   const [followedList, setFollowedList] = useState<FollowedUser[]>([]);
   const [viewing, setViewing] = useState<FollowedUser | null>(null);
-  // Glissement « cranté » d'une semaine à l'autre.
-  const slideAnim = useRef(new Animated.Value(0)).current;
-  const changeWeekRef = useRef<(deltaDays: number) => void>(() => {});
-
-  function changeWeek(deltaDays: number) {
-    setMonday((current) => addDays(current, deltaDays));
-    slideAnim.setValue(deltaDays > 0 ? 90 : -90);
-    Animated.timing(slideAnim, {
-      toValue: 0,
-      duration: 260,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }
-  changeWeekRef.current = changeWeek;
-
-  // Swipe horizontal sur le bandeau de jours = changer de semaine.
-  const swipeResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
-      onPanResponderRelease: (_, g) => {
-        if (g.dx <= -48) changeWeekRef.current(7);
-        else if (g.dx >= 48) changeWeekRef.current(-7);
-      },
-    }),
-  ).current;
-
-  async function openColleagues() {
-    const { data } = await supabase
-      .from("scans")
-      .select("id, raw_extraction")
-      .eq("week_start", monday)
-      .eq("status", "validated")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
-    setColleaguesScanId(data?.id ?? null);
-    const employees = data?.raw_extraction?.employees;
-    if (!employees || employees.length === 0) {
-      Alert.alert(
-        "Pas de planning d'équipe",
-        "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues.",
-      );
-      return;
-    }
-    if (!isPremiumPlan(plan)) {
-      showPremiumGate("Le planning de toute l'équipe");
-      return;
-    }
-    setColleagues(employees);
-  }
+  const [morningReminder, setMorningReminder] = useState<string | null>(null);
 
   const userId = session?.user.id;
   const sunday = addDays(monday, 6);
@@ -149,8 +134,6 @@ export default function WeekScreen() {
     }
   }, [userId, monday, sunday, viewing, colors.accent, colors.onAccent]);
 
-  // Équipe de la semaine : qui ouvre/ferme aux mêmes heures que moi. Seulement
-  // sur MON planning (pas les plannings suivis).
   const loadTeam = useCallback(async () => {
     if (!userId || viewing) {
       setTeam(null);
@@ -188,6 +171,22 @@ export default function WeekScreen() {
     }, [loadShifts, loadTeam]),
   );
 
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .single<{ display_name: string }>()
+      .then(({ data }) => setDisplayName(data?.display_name ?? ""));
+  }, [userId]);
+
+  useEffect(() => {
+    getReminderPrefs().then((prefs) =>
+      setMorningReminder(prefs.morningEnabled ? prefs.morningTime : null),
+    );
+  }, []);
+
   const days = useMemo(
     () =>
       Array.from({ length: 7 }, (_, i) => {
@@ -197,24 +196,38 @@ export default function WeekScreen() {
     [monday, shifts],
   );
 
-  const visibleDays = focusedDay ? days.filter((d) => d.date === focusedDay) : days;
-
-  // Heures payées de la semaine affichée.
+  // Heures payées de la semaine affichée (réunions/formations comprises).
   const weekHours = useMemo(
     () =>
       shifts
-        .filter((s) => s.type === "work" && s.start_at && s.end_at)
-        .reduce(
-          (acc, s) =>
-            acc +
-            (new Date(s.end_at as string).getTime() -
-              new Date(s.start_at as string).getTime()) /
-              3_600_000 -
-            s.break_minutes / 60,
-          0,
-        ),
+        .filter((s) => s.type === "work" || s.type === "meeting" || s.type === "training")
+        .reduce((acc, s) => acc + paidHoursOf(s), 0),
     [shifts],
   );
+
+  async function openColleagues() {
+    const { data } = await supabase
+      .from("scans")
+      .select("id, raw_extraction")
+      .eq("week_start", monday)
+      .eq("status", "validated")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
+    const employees = data?.raw_extraction?.employees;
+    if (!employees || employees.length === 0) {
+      Alert.alert(
+        "Pas de planning d'équipe",
+        "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues.",
+      );
+      return;
+    }
+    if (!isPremiumPlan(plan)) {
+      showPremiumGate("Le planning de toute l'équipe");
+      return;
+    }
+    setColleagues(employees);
+  }
 
   async function handleExport() {
     if (!isPremiumPlan(plan)) {
@@ -248,318 +261,414 @@ export default function WeekScreen() {
     }
   }
 
+  // --- Données du jour (vue Aujourd'hui) -------------------------------------
+  const todayShifts = useMemo(
+    () => shifts.filter((s) => s.date === todayIso),
+    [shifts, todayIso],
+  );
+  const mainToday = todayShifts.find((s) => s.type === "work" && s.start_at && s.end_at);
+  const heroShift = mainToday ?? todayShifts.find((s) => s.start_at && s.end_at);
+  const heroStatus = todayShifts.find((s) => !s.start_at);
+
+  // « Départ dans 1h10 — rappel à 8:15 » : prochain début à venir aujourd'hui.
+  const departure = useMemo(() => {
+    if (viewing) return null;
+    const next = todayShifts
+      .filter((s) => s.start_at && new Date(s.start_at).getTime() > Date.now())
+      .sort((a, b) => (a.start_at as string).localeCompare(b.start_at as string))[0];
+    if (!next?.start_at) return null;
+    const minutes = Math.round((new Date(next.start_at).getTime() - Date.now()) / 60_000);
+    if (minutes <= 0 || minutes > 12 * 60) return null;
+    const label =
+      minutes >= 60 ? `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}` : `${minutes} min`;
+    return `Départ dans ${label}${morningReminder ? ` — rappel à ${morningReminder}` : ""}`;
+  }, [todayShifts, viewing, morningReminder]);
+
+  // 3 prochains jours à partir de demain (la suite).
+  const upcoming = useMemo(() => {
+    const startIndex = days.findIndex((d) => d.date > todayIso);
+    const source = startIndex === -1 ? [] : days.slice(startIndex);
+    return source.slice(0, 3);
+  }, [days, todayIso]);
+
+  const initial = (viewing?.displayName ?? displayName ?? "C").charAt(0).toUpperCase() || "C";
+  const pinnedFollow = followedList[0] ?? null;
+
+  function openDayEditor(date: string, dayShifts: Shift[]) {
+    if (viewing) return;
+    if (dayShifts.length === 1) {
+      setEditorTarget({ mode: "edit", shift: dayShifts[0] });
+    } else if (dayShifts.length === 0 && userId) {
+      setEditorTarget({ mode: "create", date, userId });
+    } else {
+      // Multi-créneaux : la vue semaine déplie le jour pour choisir.
+      setView("week");
+      setExpandedDay(date);
+    }
+  }
+
+  // --- Rendus partagés ---------------------------------------------------------
+  const topBar = (
+    <View style={styles.topBar}>
+      <Segmented
+        options={[
+          { value: "today", label: "Aujourd'hui" },
+          { value: "week", label: "Semaine" },
+        ]}
+        value={view}
+        onChange={(next) => {
+          setView(next);
+          if (next === "week") setMonday(mondayOf(new Date()));
+        }}
+      />
+      <Pressable
+        accessibilityLabel="Profil"
+        onPress={() => router.navigate("/(tabs)/profile")}
+        style={[styles.avatar, { backgroundColor: colors.accent }]}
+      >
+        <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
+      </Pressable>
+    </View>
+  );
+
+  const viewingBanner = viewing ? (
+    <View style={[styles.viewingBanner, { backgroundColor: colors.accentMuted }]}>
+      <Ionicons name="eye-outline" size={15} color={colors.accentDeep} />
+      <Text style={[styles.viewingText, { color: colors.accentDeep }]} numberOfLines={1}>
+        Lecture seule — planning de {viewing.displayName}
+      </Text>
+      <Pressable onPress={() => setViewing(null)} hitSlop={8}>
+        <Text style={[styles.viewingBack, { color: colors.accentDeep }]}>Revenir à moi</Text>
+      </Pressable>
+    </View>
+  ) : null;
+
+  const shortcuts = (
+    <View style={styles.shortcutRow}>
+      <Pressable
+        onPress={openColleagues}
+        style={[styles.shortcut, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <Ionicons name="people-outline" size={18} color={colors.accent} />
+        <Text style={[styles.shortcutLabel, { color: colors.textSoft }]}>Équipe</Text>
+      </Pressable>
+      <Pressable
+        onPress={handleExport}
+        disabled={isExporting}
+        style={[
+          styles.shortcut,
+          { backgroundColor: colors.surface, borderColor: colors.border, opacity: isExporting ? 0.5 : 1 },
+        ]}
+      >
+        <Ionicons name="share-outline" size={18} color={colors.accent} />
+        <Text style={[styles.shortcutLabel, { color: colors.textSoft }]}>Exporter</Text>
+      </Pressable>
+      {pinnedFollow ? (
+        <Pressable
+          onPress={() => setViewing(viewing ? null : pinnedFollow)}
+          style={[
+            styles.shortcut,
+            viewing
+              ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
+              : { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Ionicons name="heart-outline" size={18} color={colors.accent} />
+          <Text style={[styles.shortcutLabel, { color: colors.textSoft }]} numberOfLines={1}>
+            {pinnedFollow.displayName}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.kicker, { color: colors.textMuted }]}>Mon planning</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Ma semaine</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            onPress={openColleagues}
-            style={[styles.iconPill, { backgroundColor: colors.surface }, softShadow]}
-            hitSlop={6}
-          >
-            <Ionicons name="people-outline" size={18} color={colors.accent} />
-          </Pressable>
-          <Pressable
-            onPress={() => router.navigate("/(tabs)/scan")}
-            style={[styles.iconPill, { backgroundColor: colors.surface }, softShadow]}
-            hitSlop={6}
-          >
-            <Ionicons name="camera-outline" size={18} color={colors.accent} />
-          </Pressable>
-          <Pressable
-            onPress={handleExport}
-            disabled={isExporting}
-            style={[
-              styles.exportButton,
-              { backgroundColor: colors.surface, opacity: isExporting ? 0.5 : 1 },
-              softShadow,
-            ]}
-          >
-            <Ionicons name="share-outline" size={18} color={colors.accent} />
-            <Text style={[styles.exportLabel, { color: colors.text }]}>Exporter</Text>
-          </Pressable>
-        </View>
-      </View>
+      {view === "today" ? (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {topBar}
+          {viewingBanner}
 
-      {followedList.length > 0 ? (
-        <View style={styles.personRow}>
-          {[null, ...followedList].map((person) => {
-            const selected = (person?.id ?? null) === (viewing?.id ?? null);
-            return (
-              <Pressable
-                key={person?.id ?? "me"}
-                onPress={() => setViewing(person)}
-                style={[
-                  styles.personChip,
-                  { backgroundColor: selected ? colors.accent : colors.surface },
-                  !selected && softShadow,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.personLabel,
-                    { color: selected ? colors.onAccent : colors.textMuted },
-                  ]}
-                >
-                  {person ? `💛 ${person.displayName}` : "Moi"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-
-      <View style={styles.weekNav}>
-        <Pressable
-          onPress={() => changeWeek(-7)}
-          hitSlop={12}
-          style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
-        >
-          <Ionicons name="chevron-back" size={18} color={colors.accent} />
-        </Pressable>
-        <Pressable onPress={() => setMonday(mondayOf(new Date()))}>
-          <Text style={[styles.weekLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => changeWeek(7)}
-          hitSlop={12}
-          style={[styles.navChevron, { backgroundColor: colors.surface }, softShadow]}
-        >
-          <Ionicons name="chevron-forward" size={18} color={colors.accent} />
-        </Pressable>
-      </View>
-
-      <Animated.View style={{ flex: 1, transform: [{ translateX: slideAnim }] }}>
-      <View style={styles.dayStrip} {...swipeResponder.panHandlers}>
-        {days.map(({ date, shifts: dayShifts }, i) => {
-          const isToday = date === todayIso;
-          const isFocused = focusedDay === date;
-          const hasWork = dayShifts.some((s) => s.type === "work" || s.type === "meeting");
-          return (
-            <Pressable
-              key={date}
-              onPress={() => setFocusedDay(isFocused ? null : date)}
-              style={styles.dayChipWrap}
-            >
-              <Text style={[styles.dayChipLetter, { color: colors.textMuted }]}>
-                {CHIP_LETTERS[i]}
-              </Text>
-              <View
-                style={[
-                  styles.dayChip,
-                  {
-                    backgroundColor: isFocused
-                      ? colors.accent
-                      : isToday
-                        ? colors.accentMuted
-                        : colors.surface,
-                  },
-                  !isFocused && softShadow,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.dayChipNumber,
-                    { color: isFocused ? colors.onAccent : colors.text },
-                  ]}
-                >
-                  {date.slice(8)}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.dayChipDot,
-                  { backgroundColor: hasWork ? colors.accent : "transparent" },
-                ]}
-              />
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        contentInsetAdjustmentBehavior="automatic"
-      >
-        {shifts.length > 0 ? (
-          <View style={[styles.heroCard, { backgroundColor: colors.accent }, softShadow]}>
-            <View style={styles.heroTextBox}>
-              <Text style={[styles.heroLabel, { color: colors.onAccent, opacity: 0.75 }]}>Heures payées cette semaine</Text>
-              <Text style={[styles.heroValue, { color: colors.onAccent }]}>
-                {weekHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h
-              </Text>
-            </View>
-            <View style={styles.heroBadge}>
-              <Ionicons name="time-outline" size={28} color={colors.onAccent} />
-            </View>
-          </View>
-        ) : (
-          <View style={[styles.emptyHint, { backgroundColor: colors.surface }, softShadow]}>
-            <Text style={[styles.emptyHintText, { color: colors.textMuted }]}>
-              Aucun créneau cette semaine — scanne un planning ou ajoute un jour avec « + ».
+          {/* Hero du jour */}
+          <View style={styles.hero}>
+            <Text style={[styles.heroKicker, { color: colors.accent }]}>
+              {HERO_DAY_FORMATTER.format(new Date(`${todayIso}T12:00:00`)).toUpperCase()}
             </Text>
-          </View>
-        )}
-
-        {visibleDays.map(({ date, shifts: dayShifts }) => (
-          <View key={date} style={styles.daySection}>
-            <View style={styles.dayHeader}>
-              <Text
-                style={[
-                  styles.dayLabel,
-                  { color: date === todayIso ? colors.text : colors.textMuted },
-                ]}
-              >
-                {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
-                {date === todayIso ? "  ·  aujourd'hui" : ""}
-              </Text>
-              {!viewing ? (
-                <Pressable
-                  onPress={() => userId && setEditorTarget({ mode: "create", date, userId })}
-                  hitSlop={8}
-                >
-                  <Ionicons name="add-circle" size={24} color={colors.accent} />
-                </Pressable>
-              ) : null}
-            </View>
-
-            {dayShifts.length === 0 ? (
-              <View style={[styles.restCard, { borderColor: colors.border }]}>
-                <Text style={[styles.restLabel, { color: colors.textMuted }]}>
-                  Rien de prévu
+            {heroShift?.start_at && heroShift.end_at ? (
+              <>
+                <Text style={[styles.heroTime, { color: colors.text }]}>
+                  {toLocalTime(heroShift.start_at)} → {toLocalTime(heroShift.end_at)}
                 </Text>
-              </View>
-            ) : (
-              dayShifts.map((shift) => {
-                const period = shift.period
-                  ? shiftPeriodLabels[shift.period]
-                  : shiftPeriodLabel(
-                      shift.start_at ? toLocalTime(shift.start_at) : null,
-                      shift.end_at ? toLocalTime(shift.end_at) : null,
-                    );
-                // Qui ouvre / ferme avec moi ce jour-là (depuis le scan d'équipe).
-                const mates =
-                  team && shift.type === "work"
-                    ? findShiftMates(
-                        team.employees,
-                        team.myRow,
-                        shift.date,
-                        shift.start_at ? toLocalTime(shift.start_at) : null,
-                        shift.end_at ? toLocalTime(shift.end_at) : null,
-                      )
-                    : { openers: [], closers: [] };
-                return (
-                  <Pressable
-                    key={shift.id}
-                    disabled={!!viewing}
-                    onPress={() => setEditorTarget({ mode: "edit", shift })}
-                    style={({ pressed }) => [
-                      styles.shiftCard,
-                      {
-                        backgroundColor: shiftTypeSoftColor[shift.type],
-                        opacity: pressed ? 0.8 : 1,
-                      },
-                    ]}
-                  >
-                    <View style={styles.shiftHeader}>
-                      <View style={styles.shiftTitleRow}>
-                        <View
-                          style={[styles.shiftDot, { backgroundColor: shiftTypeColor[shift.type] }]}
-                        />
-                        <Text style={[styles.shiftType, { color: INK }]}>
-                          {shiftTypeLabel[shift.type]}
-                        </Text>
-                        {(shift.type === "work" || shift.type === "training") && period ? (
-                          <View style={[styles.periodChip, { backgroundColor: "rgba(255,255,255,0.7)" }]}>
-                            <Text style={[styles.periodLabel, { color: INK }]}>{period}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      {shift.start_at && shift.end_at ? (
-                        <Text style={[styles.shiftTime, { color: INK }]}>
-                          {toLocalTime(shift.start_at)} – {toLocalTime(shift.end_at)}
-                        </Text>
-                      ) : null}
-                    </View>
-
-                    {shift.break_minutes > 0 ? (
-                      <View style={styles.pauseRow}>
-                        <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
-                        <Text style={[styles.pauseText, { color: "rgba(38,33,14,0.6)" }]}>
-                          {formatBreak(shift.break_minutes)} de pause
-                          {shift.break_start
-                            ? ` · ${toShortTime(shift.break_start)} → ${addMinutesToTime(shift.break_start, shift.break_minutes)}`
-                            : ""}
-                        </Text>
-                        <View style={[styles.pauseLine, { borderColor: "rgba(38,33,14,0.25)" }]} />
-                      </View>
-                    ) : null}
-
-                    {shift.note ? (
-                      <Text
-                        style={[styles.shiftNote, { color: "rgba(38,33,14,0.65)" }]}
-                        numberOfLines={2}
-                      >
-                        {shift.note}
+                <View style={styles.heroChips}>
+                  <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                    <Text style={[styles.chipStrongText, { color: colors.accent }]}>
+                      {shiftTypeLabel[heroShift.type]}
+                      {heroShift.type === "work"
+                        ? ` · ${
+                            heroShift.period
+                              ? shiftPeriodLabels[heroShift.period]
+                              : shiftPeriodLabel(
+                                  toLocalTime(heroShift.start_at),
+                                  toLocalTime(heroShift.end_at),
+                                ) ?? ""
+                          }`
+                        : ""}
+                    </Text>
+                  </View>
+                  {heroShift.break_minutes > 0 ? (
+                    <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Text style={[styles.chipText, { color: colors.textSoft }]}>
+                        Pause {formatBreak(heroShift.break_minutes)}
+                        {heroShift.break_start ? ` à ${toShortTime(heroShift.break_start)}` : ""}
                       </Text>
-                    ) : null}
-
-                    {mates.openers.length > 0 || mates.closers.length > 0 ? (
-                      <View style={styles.matesBox}>
-                        {mates.openers.length > 0 ? (
-                          <Text style={[styles.matesLine, { color: "rgba(38,33,14,0.7)" }]} numberOfLines={2}>
-                            🔓 Ouvre avec {mates.openers.join(", ")}
-                          </Text>
-                        ) : null}
-                        {mates.closers.length > 0 ? (
-                          <Text style={[styles.matesLine, { color: "rgba(38,33,14,0.7)" }]} numberOfLines={2}>
-                            🔒 Ferme avec {mates.closers.join(", ")}
-                          </Text>
-                        ) : null}
-                      </View>
-                    ) : null}
-                  </Pressable>
-                );
-              })
+                    </View>
+                  ) : null}
+                  <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.chipText, { color: colors.textSoft }]}>
+                      {formatHours(paidHoursOf(heroShift))} payées
+                    </Text>
+                  </View>
+                </View>
+                {todayShifts.filter((s) => s.id !== heroShift.id && s.start_at && s.end_at)
+                  .map((s) => (
+                    <Text key={s.id} style={[styles.heroExtra, { color: colors.textSoft }]}>
+                      Puis {toLocalTime(s.start_at as string)} – {toLocalTime(s.end_at as string)} ·{" "}
+                      {shiftTypeLabel[s.type]}
+                    </Text>
+                  ))}
+              </>
+            ) : (
+              <>
+                <Text style={[styles.heroTime, { color: colors.text }]}>
+                  {heroStatus ? shiftTypeLabel[heroStatus.type] : "Repos"}
+                </Text>
+                <Text style={[styles.heroExtra, { color: colors.textMuted }]}>
+                  {heroStatus && heroStatus.type !== "off"
+                    ? "Journée sans horaires précis."
+                    : "Rien de prévu aujourd'hui — profite."}
+                </Text>
+              </>
             )}
           </View>
-        ))}
-      </ScrollView>
 
-      </Animated.View>
+          {departure ? (
+            <View style={[styles.reminderCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.reminderDot, { backgroundColor: colors.accent }]} />
+              <Text style={[styles.reminderText, { color: colors.textSoft }]}>{departure}</Text>
+            </View>
+          ) : null}
 
+          {shortcuts}
+
+          {/* La suite */}
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>La suite</Text>
+            <Pressable onPress={() => setView("week")} hitSlop={8}>
+              <Text style={[styles.sectionMeta, { color: colors.accent }]}>
+                Semaine · {formatHours(weekHours)}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.dayList}>
+            {upcoming.map(({ date, shifts: dayShifts }) => (
+              <DayRow
+                key={date}
+                dayLabel={DAY_LABELS[days.findIndex((d) => d.date === date)]}
+                dayNumber={date.slice(8)}
+                slots={toDayRowSlots(dayShifts)}
+                status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
+                readOnly={!!viewing}
+                onPress={() => openDayEditor(date, dayShifts)}
+              />
+            ))}
+            {upcoming.length === 0 ? (
+              <Text style={[styles.emptyNote, { color: colors.textMuted }]}>
+                Fin de semaine — la suite arrive avec ton prochain planning.
+              </Text>
+            ) : null}
+          </View>
+        </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {topBar}
+          {viewingBanner}
+
+          {/* Navigation de semaine */}
+          <View style={styles.weekNav}>
+            <Pressable
+              accessibilityLabel="Semaine précédente"
+              onPress={() => setMonday((c) => addDays(c, -7))}
+              style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+            </Pressable>
+            <Pressable onPress={() => setMonday(mondayOf(new Date()))} style={styles.weekNavCenter}>
+              <Text style={[styles.weekNavLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
+              <Text style={[styles.weekNavSub, { color: colors.textMuted }]}>
+                {monday === mondayOf(new Date())
+                  ? "cette semaine"
+                  : monday === addDays(mondayOf(new Date()), 7)
+                    ? "semaine prochaine"
+                    : " "}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Semaine suivante"
+              onPress={() => setMonday((c) => addDays(c, 7))}
+              style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Ionicons name="chevron-forward" size={20} color={colors.text} />
+            </Pressable>
+          </View>
+
+          <View style={styles.weekTotal}>
+            <Text style={[styles.weekTotalValue, { color: colors.accent }]}>
+              {formatHours(weekHours)}
+            </Text>
+            <Text style={[styles.weekTotalLabel, { color: colors.textMuted }]}>
+              {" "}payées cette semaine
+            </Text>
+          </View>
+
+          <View style={styles.dayList}>
+            {days.map(({ date, shifts: dayShifts }, index) => {
+              const isExpanded = expandedDay === date;
+              const first = dayShifts.find((s) => s.start_at && s.end_at);
+              if (!isExpanded || !first) {
+                return (
+                  <DayRow
+                    key={date}
+                    dayLabel={DAY_LABELS[index]}
+                    dayNumber={date.slice(8)}
+                    slots={toDayRowSlots(dayShifts)}
+                    status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
+                    readOnly={!!viewing}
+                    onPress={() =>
+                      dayShifts.length === 0 && !viewing && userId
+                        ? setEditorTarget({ mode: "create", date, userId })
+                        : setExpandedDay(isExpanded ? null : date)
+                    }
+                  />
+                );
+              }
+              // Jour déplié : détails + équipe + « Modifier ce jour ».
+              const mates = team
+                ? findShiftMates(
+                    team.employees,
+                    team.myRow,
+                    date,
+                    first.start_at ? toLocalTime(first.start_at) : null,
+                    first.end_at ? toLocalTime(first.end_at) : null,
+                  )
+                : { openers: [], closers: [] };
+              return (
+                <Pressable
+                  key={date}
+                  onPress={() => setExpandedDay(null)}
+                  style={[styles.expandedCard, { backgroundColor: colors.surface, borderColor: colors.accent }]}
+                >
+                  <View style={styles.expandedHeader}>
+                    <View style={[styles.dateSquare, { backgroundColor: colors.background }]}>
+                      <Text style={[styles.dateDay, { color: colors.textMuted }]}>
+                        {DAY_LABELS[index]}
+                      </Text>
+                      <Text style={[styles.dateNumber, { color: colors.text }]}>{date.slice(8)}</Text>
+                    </View>
+                    <Text style={[styles.expandedTime, { color: colors.text }]}>
+                      {dayShifts
+                        .filter((s) => s.start_at && s.end_at)
+                        .map((s) => `${toLocalTime(s.start_at as string)} – ${toLocalTime(s.end_at as string)}`)
+                        .join(" · ")}
+                    </Text>
+                    <Ionicons name="chevron-up" size={16} color={colors.textMuted} />
+                  </View>
+
+                  <View style={[styles.expandedDetails, { borderTopColor: colors.separator }]}>
+                    <View style={styles.expandedRow}>
+                      <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>
+                        {first.break_minutes > 0
+                          ? `Pause ${formatBreak(first.break_minutes)}${first.break_start ? ` à ${toShortTime(first.break_start)}` : ""}`
+                          : "Pas de pause"}
+                      </Text>
+                      <Text style={[styles.expandedPaid, { color: colors.accent }]}>
+                        {formatHours(dayShifts.reduce((acc, s) => acc + paidHoursOf(s), 0))} payées
+                      </Text>
+                    </View>
+                    {mates.openers.length > 0 ? (
+                      <View style={styles.matesRow}>
+                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>Ouverture avec</Text>
+                        {mates.openers.slice(0, 3).map((name) => (
+                          <View key={name} style={[styles.mateChip, { backgroundColor: colors.background }]}>
+                            <Text style={[styles.mateChipText, { color: colors.text }]} numberOfLines={1}>
+                              {name.split(" ").pop()}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                    {mates.closers.length > 0 ? (
+                      <View style={styles.matesRow}>
+                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>Fermeture par</Text>
+                        {mates.closers.slice(0, 3).map((name) => (
+                          <View key={name} style={[styles.mateChip, { backgroundColor: colors.background }]}>
+                            <Text style={[styles.mateChipText, { color: colors.text }]} numberOfLines={1}>
+                              {name.split(" ").pop()}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                    {!viewing ? (
+                      <Pressable
+                        onPress={() => setEditorTarget({ mode: "edit", shift: first })}
+                        style={[styles.modifyButton, { backgroundColor: colors.ink }]}
+                      >
+                        <Text style={[styles.modifyLabel, { color: colors.onInk }]}>Modifier ce jour</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {shortcuts}
+          <Text style={[styles.footNote, { color: colors.textMuted }]}>
+            Touche un jour pour le modifier
+          </Text>
+        </ScrollView>
+      )}
+
+      {!viewing ? (
+        <FloatingCTA label="＋ Ajouter mes horaires" onPress={() => router.navigate("/(tabs)/scan")} />
+      ) : null}
+
+      {/* Feuille équipe (collègues du scan de la semaine) */}
       {colleagues ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setColleagues(null)}>
-          <Pressable style={styles.colleaguesBackdrop} onPress={() => setColleagues(null)} />
-          <View style={[styles.colleaguesSheet, { backgroundColor: colors.background }]}>
-            <View style={styles.colleaguesHeader}>
-              <Text style={[styles.colleaguesTitle, { color: colors.text }]}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setColleagues(null)} />
+          <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>
                 L'équipe · {weekLabel(monday)}
               </Text>
               <Pressable
                 onPress={() => setColleagues(null)}
                 hitSlop={10}
                 accessibilityLabel="Fermer"
-                style={[styles.colleaguesClose, { backgroundColor: colors.surface }]}
+                style={[styles.sheetClose, { backgroundColor: colors.surface }]}
               >
                 <Ionicons name="close" size={18} color={colors.textMuted} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.colleaguesList}>
+            <ScrollView contentContainerStyle={styles.sheetList}>
               {colleagues.map((employee) => {
-                const isExpanded = expandedColleague === employee.row_index;
+                const isOpen = expandedColleague === employee.row_index;
                 return (
                   <Pressable
                     key={employee.row_index}
-                    onPress={() =>
-                      setExpandedColleague(isExpanded ? null : employee.row_index)
-                    }
-                    style={[styles.colleagueRow, { backgroundColor: colors.surface }, softShadow]}
+                    onPress={() => setExpandedColleague(isOpen ? null : employee.row_index)}
+                    style={[styles.colleagueRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
                   >
                     <View style={styles.colleagueHeader}>
                       <View style={styles.colleagueText}>
@@ -570,13 +679,9 @@ export default function WeekScreen() {
                           {employee.total_hours != null ? `${employee.total_hours}h cette semaine` : "—"}
                         </Text>
                       </View>
-                      <Ionicons
-                        name={isExpanded ? "chevron-up" : "chevron-down"}
-                        size={18}
-                        color={colors.textMuted}
-                      />
+                      <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
                     </View>
-                    {isExpanded
+                    {isOpen
                       ? employee.days.map((day) => {
                           const summary =
                             day.status === "work" && day.shifts.length > 0
@@ -587,7 +692,7 @@ export default function WeekScreen() {
                                   ? "CP"
                                   : "Repos";
                           return (
-                            <View key={day.day_index} style={styles.colleagueDayRow}>
+                            <View key={day.day_index} style={[styles.colleagueDayRow, { borderTopColor: colors.separator }]}>
                               <Text style={[styles.colleagueDayLabel, { color: colors.textMuted }]}>
                                 {day.date
                                   ? new Date(`${day.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })
@@ -602,363 +707,354 @@ export default function WeekScreen() {
                 );
               })}
             </ScrollView>
-            {colleaguesScanId && !viewing ? (
-              <Pressable
-                onPress={async () => {
-                  try {
-                    const code = await createShare(colleaguesScanId);
-                    await RNShare.share({
-                      message:
-                        `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
-                        `Ouvre l'app → Scanner → « J'ai reçu un code » et saisis : ${code.toUpperCase()}`,
-                    });
-                  } catch (error) {
-                    Alert.alert("Partage impossible", error instanceof Error ? error.message : "Erreur");
-                  }
-                }}
-                style={[styles.shareTeamButton, { backgroundColor: colors.accent }]}
-              >
-                <Ionicons name="share-outline" size={18} color={colors.onAccent} />
-                <Text style={[styles.shareTeamLabel, { color: colors.onAccent }]}>
-                  Partager ce planning à l'équipe
-                </Text>
-              </Pressable>
-            ) : null}
           </View>
         </Modal>
       ) : null}
 
-      <ShiftEditorModal
-        target={editorTarget}
-        onClose={(didChange) => {
-          setEditorTarget(null);
-          if (didChange) loadShifts();
-        }}
-      />
+      {editorTarget ? (
+        <ShiftEditorModal
+          target={editorTarget}
+          onClose={(didChange) => {
+            setEditorTarget(null);
+            if (didChange) loadShifts();
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  header: {
+  content: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 120,
+    gap: spacing.md + 4,
+  },
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
   },
-  kicker: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  title: {
-    fontSize: typeScale.title,
-    fontFamily: fonts.black,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  iconPill: {
-    width: 36,
-    height: 36,
+  avatar: {
+    width: 38,
+    height: 38,
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
-  exportButton: {
+  avatarLetter: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+  },
+  viewingBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    borderRadius: radius.pill,
+    gap: spacing.sm,
+    borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
   },
-  exportLabel: {
+  viewingText: {
+    flex: 1,
     fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.medium,
+  },
+  viewingBack: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
+  hero: {
+    gap: 6,
+  },
+  heroKicker: {
+    fontSize: 11.5,
+    fontFamily: fonts.semiBold,
+    letterSpacing: 0.4,
+  },
+  heroTime: {
+    fontSize: typeScale.hero,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+  },
+  heroChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  chipStrong: {
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  chipStrongText: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  chip: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  chipText: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  heroExtra: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+    marginTop: 2,
+  },
+  reminderCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  reminderDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  reminderText: {
+    flex: 1,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+  },
+  shortcutRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  shortcut: {
+    flex: 1,
+    alignItems: "center",
+    gap: 5,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingVertical: 12,
+  },
+  shortcutLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginTop: spacing.xs,
+  },
+  sectionTitle: {
+    fontSize: typeScale.heading,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.heading,
+  },
+  sectionMeta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
+  dayList: {
+    gap: spacing.sm,
+  },
+  emptyNote: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.regular,
+    textAlign: "center",
+    paddingVertical: spacing.md,
   },
   weekNav: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
   },
-  navChevron: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
+  navButton: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  weekLabel: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
+  weekNavCenter: {
+    alignItems: "center",
+    gap: 1,
   },
-  dayStrip: {
+  weekNavLabel: {
+    fontSize: typeScale.body + 1,
+    fontFamily: fonts.bold,
+  },
+  weekNavSub: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+  },
+  weekTotal: {
     flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+  },
+  weekTotalValue: {
+    fontSize: 35,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+  },
+  weekTotalLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+  },
+  expandedCard: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 12,
+    gap: 8,
+  },
+  expandedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  dateSquare: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 1,
+  },
+  dateDay: {
+    fontSize: 10.5,
+    fontFamily: fonts.semiBold,
+  },
+  dateNumber: {
+    fontSize: 17,
+    fontFamily: fonts.bold,
+  },
+  expandedTime: {
+    flex: 1,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  expandedDetails: {
+    borderTopWidth: 1,
+    paddingTop: 9,
+    gap: 7,
+  },
+  expandedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  expandedDetail: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  expandedPaid: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
+  matesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  mateChip: {
+    borderRadius: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  mateChipText: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+  },
+  modifyButton: {
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center",
+    marginTop: 2,
+  },
+  modifyLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  footNote: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
+    textAlign: "center",
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(23,21,14,0.4)",
+  },
+  sheet: {
+    maxHeight: "75%",
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingTop: spacing.md,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
   },
-  dayChipWrap: {
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  dayChipLetter: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-  },
-  dayChip: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dayChipNumber: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
-  },
-  dayChipDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-  },
-  content: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
-  },
-  heroCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-  },
-  heroTextBox: {
-    gap: spacing.xs,
-  },
-  heroLabel: {
-    color: "rgba(38,33,14,0.65)",
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  heroValue: {
-    fontSize: typeScale.hero,
-    fontFamily: fonts.black,
-  },
-  heroBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.pill,
-    backgroundColor: "rgba(38,33,14,0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emptyHint: {
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  emptyHintText: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
-    lineHeight: 18,
-  },
-  daySection: {
-    gap: spacing.xs,
-  },
-  dayHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  dayLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
-    textTransform: "capitalize",
-  },
-  restCard: {
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm + 2,
-    alignItems: "center",
-  },
-  restLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
-  },
-  shiftCard: {
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  shiftHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  shiftTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    flexShrink: 1,
-  },
-  shiftDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  shiftType: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
-  },
-  periodChip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  periodLabel: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-  },
-  shiftTime: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.black,
-  },
-  pauseRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pauseLine: {
-    flex: 1,
-    borderBottomWidth: 1.5,
-    borderStyle: "dashed",
-  },
-  pauseText: {
-    fontSize: 11,
-    fontFamily: fonts.bold,
-  },
-  shiftNote: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
-  },
-  matesBox: {
-    gap: 2,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(38,33,14,0.12)",
-    paddingTop: spacing.xs,
-  },
-  matesLine: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-  },
-  colleaguesBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-  },
-  colleaguesSheet: {
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    maxHeight: "70%",
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  colleaguesHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  colleaguesTitle: {
-    flex: 1,
+  sheetTitle: {
     fontSize: typeScale.heading,
-    fontFamily: fonts.black,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.heading,
   },
-  colleaguesClose: {
+  sheetClose: {
     width: 32,
     height: 32,
-    borderRadius: radius.pill,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
   },
-  colleaguesList: {
+  sheetList: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
     gap: spacing.sm,
-    paddingBottom: spacing.lg,
   },
   colleagueRow: {
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  personRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    flexWrap: "wrap",
-  },
-  personChip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-  },
-  personLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 12,
+    gap: 8,
   },
   colleagueHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-  },
-  colleagueDayRow: {
-    flexDirection: "row",
     justifyContent: "space-between",
-    paddingTop: spacing.xs,
-  },
-  shareTeamButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    borderRadius: radius.pill,
-    paddingVertical: spacing.md,
-  },
-  shareTeamLabel: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
-  },
-  colleagueDayLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
-    textTransform: "capitalize",
   },
   colleagueText: {
     flex: 1,
     gap: 1,
   },
   colleagueName: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
   },
   colleagueMeta: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+  },
+  colleagueDayRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    paddingTop: 6,
+  },
+  colleagueDayLabel: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
   },
   colleagueDay: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.semiBold,
   },
 });
