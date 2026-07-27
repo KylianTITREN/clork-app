@@ -1,31 +1,38 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { NavRow } from "@/components/profile/NavRow";
-import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
-import { SavePill } from "@/components/profile/SavePill";
+import { WidgetPreviews } from "@/components/profile/WidgetPreviews";
 import { appIconByTheme } from "@/constants/logo-assets";
 import { DEFAULT_THEME_ID, themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
-import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
-import { useTheme } from "@/providers/theme-provider";
+import { getIconFollowsTheme, setIconFollowsTheme, useTheme } from "@/providers/theme-provider";
 
 /**
- * Choix du thème : la sélection est locale et ne prend effet (couleurs +
- * icône d'app) qu'à l'enregistrement — pas de changement surprise en scrollant.
+ * Apparence v2 (maquette 4c) : pastilles de thème à application IMMÉDIATE
+ * (plus de pilule Enregistrer), toggle « l'icône suit le thème », et la carte
+ * Widgets inline avec ses aperçus.
  */
 export default function ThemeSettingsScreen() {
   const colors = useThemeColors();
   const { themeId, setThemeId } = useTheme();
   const plan = usePlan();
   const isPremium = isPremiumPlan(plan);
-  const [selected, setSelected] = useState<ThemeId>(themeId);
 
-  const isDirty = selected !== themeId;
+  // Toggle « L'icône de l'app suit le thème » — hydraté depuis AsyncStorage.
+  const [isIconFollowing, setIsIconFollowing] = useState(true);
+  useEffect(() => {
+    let isMounted = true;
+    getIconFollowsTheme().then((enabled) => {
+      if (isMounted) setIsIconFollowing(enabled);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -34,99 +41,125 @@ export default function ThemeSettingsScreen() {
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <SubPageHeader
-          title="Apparence"
-          right={
-            <SavePill
-              isDirty={isDirty}
-              isSaving={false}
-              onPress={() => {
-                // Gating v2 : seuls le thème par défaut et le thème actif sont
-                // libres — le reste de la collection est Premium.
-                if (!isPremiumPlan(plan) && selected !== DEFAULT_THEME_ID) {
-                  showPremiumGate("Le changement de thème");
-                  return;
-                }
-                setThemeId(selected);
-              }}
-            />
-          }
-        />
+        <SubPageHeader title="Apparence" />
 
-        <Section
-          icon="color-palette"
-          iconBg={colors.accentMuted}
-          iconColor={colors.accent}
-          title="Couleur de l'app"
-          subtitle="L'icône sur l'écran d'accueil suit le thème"
-        >
+        {/* Carte Thème */}
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Thème</Text>
+            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+              La couleur d'accent de toute l'app
+            </Text>
+          </View>
+
           {!isPremium ? (
-            <View style={[styles.lockBanner, { backgroundColor: colors.surfaceMuted }]}>
-              <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => showPremiumGate("Le changement de thème")}
+              style={[styles.lockBanner, { backgroundColor: colors.background }]}
+            >
               <Text style={[styles.lockBannerText, { color: colors.textMuted }]}>
-                Les thèmes sont réservés à Clork Premium ⭐
+                Les thèmes sont réservés à Premium
               </Text>
-            </View>
+              <Text style={[styles.lockBannerCta, { color: colors.accent }]}>Débloquer ›</Text>
+            </Pressable>
           ) : null}
-          <View style={styles.list}>
+
+          <View style={styles.swatchRow}>
             {themeOrder.map((idRaw) => {
               const id = idRaw as ThemeId;
-              const isSelected = id === selected;
-              const isLocked = !isPremium && id !== "honey";
+              const isSelected = id === themeId;
+              // Gating v2 : seuls le thème par défaut et le thème actif sont
+              // libres — le reste de la collection est Premium.
+              const isLocked = !isPremium && !isSelected && id !== DEFAULT_THEME_ID;
               return (
                 <Pressable
                   key={id}
                   onPress={() =>
-                    isLocked ? showPremiumGate("Le changement de thème") : setSelected(id)
+                    isLocked ? showPremiumGate("Le changement de thème") : setThemeId(id)
                   }
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected }}
-                  style={[
-                    styles.row,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: isSelected ? colors.text : colors.border,
-                      opacity: isLocked ? 0.55 : 1,
-                    },
-                    isSelected && softShadow,
-                  ]}
+                  accessibilityLabel={`Thème ${themeLabels[id]}`}
+                  accessibilityState={{ selected: isSelected, disabled: isLocked }}
+                  style={styles.swatchItem}
                 >
-                  <Image source={appIconByTheme[id]} style={styles.rowIcon} />
+                  <View
+                    style={[
+                      styles.swatchRing,
+                      { borderColor: isSelected ? colors.text : "transparent" },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.swatch,
+                        { backgroundColor: themes[id].accent, opacity: isLocked ? 0.4 : 1 },
+                      ]}
+                    >
+                      {isSelected ? (
+                        <Ionicons name="checkmark" size={18} color={themes[id].onAccent} />
+                      ) : null}
+                    </View>
+                    {isLocked ? (
+                      <View
+                        style={[
+                          styles.lockBadge,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
+                        ]}
+                      >
+                        <Ionicons name="lock-closed" size={10} color={colors.textMuted} />
+                      </View>
+                    ) : null}
+                  </View>
                   <Text
                     style={[
-                      styles.rowLabel,
+                      styles.swatchLabel,
                       {
                         color: isSelected ? colors.text : colors.textMuted,
-                        fontFamily: isSelected ? fonts.extraBold : fonts.semiBold,
+                        fontFamily: isSelected ? fonts.semiBold : fonts.medium,
+                        opacity: isLocked ? 0.4 : 1,
                       },
                     ]}
                   >
                     {themeLabels[id]}
                   </Text>
-                  <View style={[styles.rowSwatch, { backgroundColor: themes[id].accent }]} />
-                  <Ionicons
-                    name={isLocked ? "lock-closed" : isSelected ? "radio-button-on" : "radio-button-off"}
-                    size={isLocked ? 17 : 20}
-                    color={isLocked ? colors.textMuted : isSelected ? colors.text : colors.border}
-                  />
                 </Pressable>
               );
             })}
           </View>
-          <Text style={[styles.hint, { color: colors.textMuted }]}>
-            Touche « Enregistrer » pour appliquer la couleur et changer l'icône de l'app.
-          </Text>
-        </Section>
 
-        {/* v2 : les widgets vivent dans Apparence. */}
-        <NavRow
-          icon="grid"
-          iconBg={colors.shiftWorkSoft}
-          iconColor={colors.text}
-          title="Widgets"
-          subtitle="Ton planning sur l'écran d'accueil"
-          onPress={() => router.push("/profile/widgets")}
-        />
+          {/* Toggle « L'icône de l'app suit le thème » */}
+          <View style={[styles.iconRow, { backgroundColor: colors.background }]}>
+            <Image source={appIconByTheme[themeId]} style={styles.iconRowImage} />
+            <Text style={[styles.iconRowLabel, { color: colors.text }]}>
+              L'icône de l'app suit le thème
+            </Text>
+            <Switch
+              value={isIconFollowing}
+              onValueChange={(enabled) => {
+                setIsIconFollowing(enabled);
+                setIconFollowsTheme(enabled);
+              }}
+              trackColor={{ false: colors.surfaceMuted, true: colors.accent }}
+              ios_backgroundColor={colors.surfaceMuted}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        </View>
+
+        {/* Carte Widgets — v2 : les widgets vivent dans Apparence. */}
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Widgets</Text>
+            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+              Ton planning sur l'écran d'accueil
+            </Text>
+          </View>
+          <WidgetPreviews />
+          <Text style={[styles.caption, { color: colors.textDisabled }]}>
+            Appui long sur l'écran d'accueil → ＋ → Clork. Appui long sur le widget Jour pour
+            basculer Aujourd'hui ⇄ Demain.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -134,37 +167,100 @@ export default function ThemeSettingsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  list: { gap: spacing.sm },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderWidth: 1.5,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  content: { padding: spacing.lg, gap: spacing.md - 4 },
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md + 2,
+    gap: 12,
   },
-  // Arrondi « squircle » iOS (~22 % de la taille).
-  rowIcon: { width: 40, height: 40, borderRadius: 9 },
-  rowLabel: { flex: 1, fontSize: typeScale.body },
-  rowSwatch: { width: 22, height: 22, borderRadius: radius.pill },
-  hint: {
+  cardTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
+  },
+  cardSubtitle: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.regular,
-    lineHeight: 17,
+    fontFamily: fonts.medium,
+    marginTop: 2,
   },
   lockBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs + 2,
+    gap: spacing.sm,
+    borderRadius: 10,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm + 1,
   },
   lockBannerText: {
     flex: 1,
-    fontSize: typeScale.caption,
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+  },
+  lockBannerCta: {
+    fontSize: typeScale.tiny,
     fontFamily: fonts.bold,
+  },
+  swatchRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  swatchItem: {
+    alignItems: "center",
+    gap: 5,
+  },
+  // Anneau de sélection : bordure encre 2px, décollée de la pastille.
+  swatchRing: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swatch: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 16,
+    height: 16,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swatchLabel: {
+    fontSize: typeScale.tiny - 1,
+  },
+  iconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: radius.input,
+    paddingHorizontal: spacing.sm + 5,
+    paddingVertical: spacing.sm + 2,
+  },
+  iconRowImage: {
+    width: 28,
+    height: 28,
+    // Arrondi « squircle » iOS (~25 % de la taille).
+    borderRadius: 7,
+  },
+  iconRowLabel: {
+    flex: 1,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  caption: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+    lineHeight: 16,
   },
 });

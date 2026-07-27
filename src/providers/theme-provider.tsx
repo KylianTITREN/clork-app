@@ -16,6 +16,12 @@ import {
 } from "@/constants/themes";
 
 const STORAGE_KEY = "clork.theme";
+// Toggle « L'icône de l'app suit le thème » (Apparence). "0" = désactivé,
+// tout le reste (clé absente incluse) = activé.
+const ICON_FOLLOWS_THEME_KEY = "clork.icon-follows-theme";
+
+// Dernier thème appliqué, lisible hors React pour setIconFollowsTheme().
+let currentThemeId: ThemeId = DEFAULT_THEME_ID;
 
 type ThemeContextValue = {
   themeId: ThemeId;
@@ -72,6 +78,35 @@ async function applyAlternateAppIcon(themeId: ThemeId): Promise<void> {
   }
 }
 
+/** Lit la préférence « l'icône suit le thème » (défaut : activé). */
+export async function getIconFollowsTheme(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(ICON_FOLLOWS_THEME_KEY)) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/** Applique l'icône du thème seulement si la préférence l'autorise. */
+async function applyAlternateAppIconIfEnabled(themeId: ThemeId): Promise<void> {
+  const isEnabled = await getIconFollowsTheme();
+  if (!isEnabled) return;
+  await applyAlternateAppIcon(themeId);
+}
+
+/**
+ * Persiste la préférence « l'icône suit le thème » et, à la réactivation,
+ * ré-aligne immédiatement l'icône sur le thème courant.
+ */
+export function setIconFollowsTheme(enabled: boolean): void {
+  AsyncStorage.setItem(ICON_FOLLOWS_THEME_KEY, enabled ? "1" : "0").catch(() => {
+    // Persistance impossible : la préférence vaut pour la session en cours.
+  });
+  if (enabled) {
+    applyAlternateAppIcon(currentThemeId);
+  }
+}
+
 export function ThemeProvider({ children }: PropsWithChildren) {
   const [themeId, setThemeIdState] = useState<ThemeId>(DEFAULT_THEME_ID);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -85,6 +120,7 @@ export function ThemeProvider({ children }: PropsWithChildren) {
         if (migrated) {
           // Pont module-level mis à jour avant le re-rendu (voir themes.ts).
           setActiveAccentFamily(migrated);
+          currentThemeId = migrated;
           setThemeIdState(migrated);
           if (migrated !== stored) {
             AsyncStorage.setItem(STORAGE_KEY, migrated).catch(() => {});
@@ -99,11 +135,12 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   const setThemeId = useCallback((next: ThemeId) => {
     setActiveAccentFamily(next);
+    currentThemeId = next;
     setThemeIdState(next);
     AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {
       // Persistance impossible : le thème reste appliqué pour la session.
     });
-    applyAlternateAppIcon(next);
+    applyAlternateAppIconIfEnabled(next);
   }, []);
 
   // AsyncStorage répond en quelques ms : on évite un flash du thème par défaut.

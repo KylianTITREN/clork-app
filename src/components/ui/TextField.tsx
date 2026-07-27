@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 
@@ -7,7 +6,7 @@ import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/t
 type TextFieldProps = TextInputProps & {
   label: string;
   hint?: string;
-  /** Champ mot de passe avec œil pour afficher/masquer. */
+  /** Champ mot de passe avec bascule texte AFFICHER/MASQUER (maquette v2). */
   secureToggle?: boolean;
 };
 
@@ -31,7 +30,7 @@ export function TextField({ label, hint, style, secureToggle, ...inputProps }: T
               borderColor: colors.border,
               color: colors.text,
             },
-            secureToggle && styles.inputWithEye,
+            secureToggle && styles.inputWithToggle,
             style,
           ]}
           {...inputProps}
@@ -40,14 +39,13 @@ export function TextField({ label, hint, style, secureToggle, ...inputProps }: T
           <Pressable
             onPress={() => setIsHidden((v) => !v)}
             hitSlop={10}
-            style={styles.eye}
+            style={styles.toggle}
+            accessibilityRole="button"
             accessibilityLabel={isHidden ? "Afficher le mot de passe" : "Masquer le mot de passe"}
           >
-            <Ionicons
-              name={isHidden ? "eye-outline" : "eye-off-outline"}
-              size={20}
-              color={colors.textMuted}
-            />
+            <Text style={[styles.toggleLabel, { color: colors.textMuted }]}>
+              {isHidden ? "Afficher" : "Masquer"}
+            </Text>
           </Pressable>
         ) : null}
       </View>
@@ -81,14 +79,20 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.regular,
   },
-  inputWithEye: {
-    paddingRight: 48,
+  inputWithToggle: {
+    paddingRight: 92,
   },
-  eye: {
+  toggle: {
     position: "absolute",
-    right: 16,
+    right: 15,
     top: 0,
     bottom: 0,
     justifyContent: "center",
+  },
+  toggleLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 });

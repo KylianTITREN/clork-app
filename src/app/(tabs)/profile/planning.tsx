@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -8,15 +8,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 
-import { NavRow } from "@/components/profile/NavRow";
 import { SavePill } from "@/components/profile/SavePill";
-import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
+import { ChoiceChips } from "@/components/ui/ChoiceChips";
+import { DurationChips } from "@/components/ui/DurationChips";
 import { TextField } from "@/components/ui/TextField";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
@@ -29,15 +30,59 @@ import {
   type ExportTarget,
   type WritableCalendar,
 } from "@/lib/calendar-export";
+import { DEFAULT_PRESETS, loadPresets, type ShiftPreset } from "@/lib/preset-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+
+// Seuils de déclenchement de la pause (recopiés de pause.tsx, fusion v2).
+const THRESHOLD_OPTIONS = [
+  { value: 4, label: "4h" },
+  { value: 5, label: "5h" },
+  { value: 6, label: "6h" },
+  { value: 7, label: "7h" },
+  { value: 8, label: "8h" },
+] as const;
 
 type FormSnapshot = {
   displayName: string;
   planningNames: string;
   employeeId: string;
+  breakMinutes: number;
+  breakThreshold: number;
+  breakStart: string | null;
 };
+
+/** Pause d'un créneau type au format court de la maquette (« 30 min », « 1h »). */
+function formatPresetBreak(minutes: number): string | null {
+  if (minutes <= 0) return null;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest} min`;
+  return rest > 0 ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
+}
+
+/** Carte blanche v2 : titre + sous-titre DANS la carte (maquette Scan & horaires). */
+function SettingsCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  const colors = useThemeColors();
+  return (
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View>
+        <Text style={[styles.cardTitle, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>{subtitle}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
 
 export default function PlanningSettingsScreen() {
   const colors = useThemeColors();
@@ -46,6 +91,10 @@ export default function PlanningSettingsScreen() {
   const [displayName, setDisplayName] = useState("");
   const [planningNames, setPlanningNames] = useState("");
   const [employeeId, setEmployeeId] = useState("");
+  // Pause déjeuner — logique de pause.tsx fusionnée ici (la page reste en place).
+  const [breakMinutes, setBreakMinutes] = useState(0);
+  const [breakThreshold, setBreakThreshold] = useState(6);
+  const [breakStart, setBreakStart] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<FormSnapshot | null>(null);
 
@@ -55,7 +104,10 @@ export default function PlanningSettingsScreen() {
     savedSnapshot != null &&
     (displayName !== savedSnapshot.displayName ||
       planningNames !== savedSnapshot.planningNames ||
-      employeeId !== savedSnapshot.employeeId);
+      employeeId !== savedSnapshot.employeeId ||
+      breakMinutes !== savedSnapshot.breakMinutes ||
+      breakThreshold !== savedSnapshot.breakThreshold ||
+      breakStart !== savedSnapshot.breakStart);
 
   const loadProfile = useCallback(async () => {
     if (!userId) return;
@@ -73,10 +125,16 @@ export default function PlanningSettingsScreen() {
         displayName: data.display_name,
         planningNames: data.employee_aliases.join(", "),
         employeeId: data.employee_id ?? "",
+        breakMinutes: data.break_default_minutes ?? 0,
+        breakThreshold: data.break_threshold_hours ?? 6,
+        breakStart: data.break_start_default ? data.break_start_default.slice(0, 5) : null,
       };
       setDisplayName(snapshot.displayName);
       setPlanningNames(snapshot.planningNames);
       setEmployeeId(snapshot.employeeId);
+      setBreakMinutes(snapshot.breakMinutes);
+      setBreakThreshold(snapshot.breakThreshold);
+      setBreakStart(snapshot.breakStart);
       setSavedSnapshot(snapshot);
     }
   }, [userId]);
@@ -102,13 +160,23 @@ export default function PlanningSettingsScreen() {
         display_name: displayName.trim(),
         employee_aliases: aliases,
         employee_id: employeeId.trim() || null,
+        break_default_minutes: breakMinutes,
+        break_threshold_hours: breakThreshold,
+        break_start_default: breakStart,
       })
       .eq("id", userId);
     setIsSaving(false);
     if (error) {
       Alert.alert("Erreur", "Sauvegarde impossible : " + error.message);
     } else {
-      setSavedSnapshot({ displayName, planningNames, employeeId });
+      setSavedSnapshot({
+        displayName,
+        planningNames,
+        employeeId,
+        breakMinutes,
+        breakThreshold,
+        breakStart,
+      });
     }
   }
 
@@ -140,6 +208,21 @@ export default function PlanningSettingsScreen() {
       .eq("id", userId);
   }
 
+  // --- Créneaux types : aperçu inline, édition sur /profile/presets.
+  const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      loadPresets().then((loaded) => {
+        if (!cancelled) setPresets(loaded);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
   const plan = usePlan();
   // --- Export calendrier : dédié (nom au choix) ou calendrier existant ---
   const [exportTarget, setExportTarget] = useState<ExportTarget>({ mode: "dedicated", name: "Clork" });
@@ -160,6 +243,9 @@ export default function PlanningSettingsScreen() {
     setCalendars(await listWritableCalendars());
   }
 
+  // Sur carte blanche, les inputs passent en surface bordée pour contraster.
+  const inputOnCard = { backgroundColor: colors.surface };
+
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
@@ -178,74 +264,120 @@ export default function PlanningSettingsScreen() {
             }
           />
 
-          <Section
-            icon="finger-print"
-            iconBg={colors.accentMuted}
-            iconColor={colors.accent}
-            title="Sur le planning"
-            subtitle="Pour retrouver TA ligne automatiquement"
-          >
-            <TextField label="Prénom (ou pseudo)" placeholder="Capucine" value={displayName} onChangeText={setDisplayName} />
+          <SettingsCard title="Sur le planning" subtitle="Pour retrouver ta ligne automatiquement">
+            <TextField
+              label="Prénom"
+              placeholder="Capucine"
+              value={displayName}
+              onChangeText={setDisplayName}
+              style={inputOnCard}
+            />
             <TextField
               label="Nom sur le planning"
               placeholder="DUPONT Capucine, Capucine"
               hint="Plusieurs variantes possibles, séparées par des virgules."
               value={planningNames}
               onChangeText={setPlanningNames}
+              style={inputOnCard}
             />
-            <TextField label="ID employé (optionnel)" placeholder="ex: 10684512" value={employeeId} onChangeText={setEmployeeId} />
-          </Section>
+            <TextField
+              label="ID employé (optionnel)"
+              placeholder="ex : 10684512"
+              value={employeeId}
+              onChangeText={setEmployeeId}
+              style={inputOnCard}
+            />
+          </SettingsCard>
 
-          {/* v2 : réglages fusionnés — créneaux types et pause vivent ici. */}
-          <NavRow
-            icon="flash"
-            iconBg={colors.accentMuted}
-            iconColor={colors.accent}
-            title="Créneaux types"
-            subtitle="Matin / Journée / Soir — heure + pause, éditables"
-            onPress={() => router.push("/profile/presets")}
-          />
-          <NavRow
-            icon="cafe"
-            iconBg={colors.shiftCpSoft}
-            iconColor={colors.shiftCp}
-            title="Pause déjeuner"
-            subtitle="Durée par défaut · seuil · heure habituelle"
-            onPress={() => router.push("/profile/pause")}
-          />
-
-          <Section
-            icon="storefront"
-            iconBg={colors.shiftRhSoft}
-            iconColor={colors.shiftRh}
-            title="Horaires du magasin"
-            subtitle="Pour t'indiquer « tu ouvres / tu fermes »"
-          >
-            <Text style={[styles.storeLabel, { color: colors.textMuted }]}>OUVRE À</Text>
-            <TimePickerField
-              value={storeOpen}
-              placeholder="--:--"
-              onChange={(time) => void saveStoreHours(time, storeClose)}
-            />
-            <Text style={[styles.storeLabel, { color: colors.textMuted }]}>FERME À</Text>
-            <TimePickerField
-              value={storeClose}
-              placeholder="--:--"
-              onChange={(time) => void saveStoreHours(storeOpen, time)}
-            />
-            <Text style={[styles.storeHint, { color: colors.textMuted }]}>
-              Si ton créneau commence à l'ouverture, tu ouvres ; s'il finit à la
-              fermeture, tu fermes. Les mentions O/F lues sur le planning priment.
+          <SettingsCard title="Horaires du magasin" subtitle="Pour savoir quand tu ouvres ou fermes">
+            <View style={styles.storeRow}>
+              <View style={[styles.storePill, { backgroundColor: colors.background }]}>
+                <Text style={[styles.storePillLabel, { color: colors.textMuted }]}>Ouvre</Text>
+                <TimePickerField
+                  value={storeOpen}
+                  placeholder="09:00"
+                  onChange={(time) => void saveStoreHours(time, storeClose)}
+                />
+              </View>
+              <View style={[styles.storePill, { backgroundColor: colors.background }]}>
+                <Text style={[styles.storePillLabel, { color: colors.textMuted }]}>Ferme</Text>
+                <TimePickerField
+                  value={storeClose}
+                  placeholder="21:00"
+                  onChange={(time) => void saveStoreHours(storeOpen, time)}
+                />
+              </View>
+            </View>
+            <Text style={[styles.storeHint, { color: colors.textDisabled }]}>
+              Créneau qui commence à l'ouverture → tu ouvres ; qui finit à la fermeture → tu
+              fermes. Les mentions O/F du planning priment.
             </Text>
-          </Section>
+          </SettingsCard>
 
-          <Section
-            icon="calendar"
-            iconBg={colors.accentMuted}
-            iconColor={colors.accent}
-            title="Export calendrier"
-            subtitle="Où envoyer tes semaines"
-          >
+          <SettingsCard title="Créneaux types" subtitle="Proposés en un tap à l'ajout manuel">
+            {presets.map((preset) => {
+              const presetBreak = formatPresetBreak(preset.breakMinutes);
+              return (
+                <Pressable
+                  key={preset.id}
+                  onPress={() => router.push("/profile/presets")}
+                  style={({ pressed }) => [
+                    styles.presetRow,
+                    { backgroundColor: colors.background, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.presetName, { color: colors.text }]} numberOfLines={1}>
+                    {preset.label}
+                  </Text>
+                  <Text style={[styles.presetMeta, { color: colors.textMuted }]}>
+                    {preset.start} – {preset.end}
+                    {presetBreak ? ` · ${presetBreak}` : ""}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={15} color={colors.textDisabled} />
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => router.push("/profile/presets")}
+              style={({ pressed }) => [
+                styles.addRow,
+                { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Ionicons name="add" size={16} color={colors.text} />
+              <Text style={[styles.addLabel, { color: colors.text }]}>Ajouter un créneau type</Text>
+            </Pressable>
+          </SettingsCard>
+
+          <SettingsCard title="Pause déjeuner" subtitle="Si le planning n'imprime pas la durée payée">
+            <View style={styles.fieldBlock}>
+              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Durée par défaut</Text>
+              <DurationChips value={breakMinutes} onChange={setBreakMinutes} allowCustom />
+            </View>
+
+            <View style={styles.fieldBlock}>
+              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Si journée ≥</Text>
+              <ChoiceChips options={THRESHOLD_OPTIONS} value={breakThreshold} onChange={setBreakThreshold} />
+            </View>
+
+            <View style={[styles.pauseTimeRow, { backgroundColor: colors.background }]}>
+              <Text style={[styles.fieldLabel, styles.inlineLabel, { color: colors.textMuted }]}>
+                Heure habituelle
+              </Text>
+              <TimePickerField value={breakStart} onChange={setBreakStart} placeholder="12:30" />
+              {breakStart ? (
+                <Pressable
+                  onPress={() => setBreakStart(null)}
+                  hitSlop={8}
+                  accessibilityLabel="Effacer l'heure habituelle"
+                >
+                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </SettingsCard>
+
+          <SettingsCard title="Export calendrier" subtitle="Où envoyer tes semaines">
             {!isPremiumPlan(plan) ? (
               <Pressable
                 onPress={() => showPremiumGate("L'export vers ton calendrier")}
@@ -273,6 +405,7 @@ export default function PlanningSettingsScreen() {
                 value={exportTarget.name}
                 onChangeText={(name) => setExportTarget({ mode: "dedicated", name })}
                 onEndEditing={() => void saveExportTarget(exportTarget.mode === "dedicated" && exportTarget.name.trim() ? exportTarget : { mode: "dedicated", name: "Clork" })}
+                style={inputOnCard}
               />
             ) : null}
             <Pressable
@@ -305,7 +438,7 @@ export default function PlanningSettingsScreen() {
             ) : null}
             </>
             )}
-          </Section>
+          </SettingsCard>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -315,7 +448,101 @@ export default function PlanningSettingsScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
+  content: { padding: spacing.lg, gap: 12 },
+  // Carte blanche v2 (maquette : bord 1px, r16, padding 18, gap 12).
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md + 2,
+    gap: 12,
+  },
+  cardTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
+  },
+  cardSubtitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    marginTop: 2,
+  },
+  // Pilules « Ouvre / Ferme » : fond neutre r11, label à gauche, heure à droite.
+  storeRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  storePill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingVertical: 6,
+    paddingLeft: 13,
+    paddingRight: 6,
+  },
+  storePillLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  storeHint: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+    lineHeight: 16,
+  },
+  // Rangée créneau type : « Matin   06:00 – 13:00 · 30 min   › ».
+  presetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 2,
+    borderRadius: radius.input,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+  },
+  presetName: {
+    flex: 1,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  presetMeta: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.bold,
+  },
+  addRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: radius.input,
+    paddingVertical: spacing.sm + 4,
+  },
+  addLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  // Pause déjeuner (styles recopiés de pause.tsx).
+  fieldBlock: { gap: spacing.sm - 2 },
+  fieldLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  pauseTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+  },
+  inlineLabel: { flex: 1 },
+  // Export calendrier (logique inchangée, habillage carte v2).
   calRow: {
     borderWidth: 1.5,
     borderRadius: radius.md,
@@ -339,14 +566,4 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   calMeta: { fontSize: typeScale.caption, fontFamily: fonts.regular },
-  storeHint: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.regular,
-    lineHeight: 17,
-  },
-  storeLabel: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.semiBold,
-    letterSpacing: 0.6,
-  },
 });
