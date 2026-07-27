@@ -3,8 +3,8 @@ import { StyleSheet, Text, View } from "react-native";
 
 import {
   fonts,
+  letterSpacing,
   radius,
-  softShadow,
   spacing,
   typeScale,
   useThemeColors,
@@ -21,11 +21,11 @@ type SectionProps = {
   children?: React.ReactNode;
 };
 
-/** Carte blanche avec pastille d'icône colorée — bloc de réglages du profil. */
+/** Bloc de réglages du profil : en-tête (pastille + titre) au-dessus d'une carte blanche bordée. */
 export function Section({ icon, iconBg, iconColor, title, subtitle, right, children }: SectionProps) {
   const colors = useThemeColors();
   return (
-    <View style={[styles.section, { backgroundColor: colors.surface }, softShadow]}>
+    <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionIcon, { backgroundColor: iconBg }]}>
           <Ionicons name={icon} size={18} color={iconColor} />
@@ -38,22 +38,36 @@ export function Section({ icon, iconBg, iconColor, title, subtitle, right, child
         </View>
         {right ?? null}
       </View>
-      {children}
+      {children ? (
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {children}
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { borderRadius: radius.lg, padding: spacing.md, gap: spacing.md },
-  sectionHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  section: { gap: 10 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
   sectionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.pill,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   sectionTitleBox: { flex: 1, gap: 1 },
-  sectionTitle: { fontSize: typeScale.body, fontFamily: fonts.extraBold },
-  sectionSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
+  sectionTitle: {
+    fontSize: typeScale.heading,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.heading,
+  },
+  sectionSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.medium },
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 12,
+  },
 });

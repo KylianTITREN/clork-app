@@ -1,14 +1,6 @@
-import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Pressable, StyleSheet, Text } from "react-native";
 
-import {
-  fonts,
-  radius,
-  softShadow,
-  spacing,
-  typeScale,
-  useThemeColors,
-} from "@/constants/tokens";
+import { fonts, typeScale, useThemeColors } from "@/constants/tokens";
 
 type SavePillProps = {
   isDirty: boolean;
@@ -16,9 +8,10 @@ type SavePillProps = {
   onPress: () => void;
 };
 
-/** Pilule Enregistrer/Enregistré des sous-pages (active quand le formulaire change). */
+/** Bouton Enregistrer/Enregistré compact des sous-pages (actif quand le formulaire change). */
 export function SavePill({ isDirty, isSaving, onPress }: SavePillProps) {
   const colors = useThemeColors();
+  const labelColor = isDirty ? colors.onAccent : colors.textMuted;
 
   return (
     <Pressable
@@ -30,22 +23,14 @@ export function SavePill({ isDirty, isSaving, onPress }: SavePillProps) {
           backgroundColor: isDirty ? colors.accent : colors.surfaceMuted,
           opacity: isSaving ? 0.5 : pressed && isDirty ? 0.85 : 1,
         },
-        isDirty && softShadow,
       ]}
     >
       {isSaving ? (
-        <ActivityIndicator size="small" color={colors.onAccent} />
+        <ActivityIndicator size="small" color={labelColor} />
       ) : (
-        <>
-          <Ionicons
-            name={isDirty ? "checkmark" : "checkmark-done"}
-            size={16}
-            color={isDirty ? colors.onAccent : colors.textMuted}
-          />
-          <Text style={[styles.label, { color: isDirty ? colors.onAccent : colors.textMuted }]}>
-            {isDirty ? "Enregistrer" : "Enregistré"}
-          </Text>
-        </>
+        <Text style={[styles.label, { color: labelColor }]}>
+          {isDirty ? "Enregistrer" : "Enregistré"}
+        </Text>
       )}
     </Pressable>
   );
@@ -53,14 +38,11 @@ export function SavePill({ isDirty, isSaving, onPress }: SavePillProps) {
 
 const styles = StyleSheet.create({
   pill: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    minWidth: 110,
     justifyContent: "center",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  label: { fontSize: typeScale.caption, fontFamily: fonts.extraBold },
+  label: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
 });

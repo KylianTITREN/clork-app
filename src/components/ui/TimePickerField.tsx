@@ -1,15 +1,31 @@
+import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { Button } from "@/components/ui/Button";
+import {
+  fonts,
+  radius,
+  softShadow,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 
 type TimePickerFieldProps = {
   value: string | null; // "HH:MM"
   onChange: (value: string) => void;
   placeholder?: string;
-  /** Style compact pour les cartes pastel (fond translucide, encre). */
-  compact?: boolean;
+  /** Libellé du champ (« Début », « Fin », « Débute à ») pour card/row. */
+  label?: string;
+  /**
+   * Variantes v2 :
+   * - pill (défaut) : pilule blanche bordée, chiffres bold ;
+   * - card : carte centrée, libellé au-dessus du chiffre géant (Début/Fin) ;
+   * - row : rangée pleine largeur, libellé à gauche, heure à droite (Débute à).
+   */
+  variant?: "pill" | "card" | "row";
 };
 
 function toDate(value: string | null): Date {
@@ -27,12 +43,13 @@ function toHHMM(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Sélecteur d'heure natif (roue iOS / horloge Android) derrière une pilule. */
+/** Sélecteur d'heure natif (roue iOS / horloge Android) derrière un champ v2. */
 export function TimePickerField({
   value,
   onChange,
   placeholder = "--:--",
-  compact = false,
+  label,
+  variant = "pill",
 }: TimePickerFieldProps) {
   const colors = useThemeColors();
   const [isOpen, setIsOpen] = useState(false);
@@ -48,32 +65,45 @@ export function TimePickerField({
     setIsOpen(false);
   }
 
+  const surfaceStyle = { backgroundColor: colors.surface, borderColor: colors.border };
+  const valueColor = value ? colors.text : colors.textDisabled;
+
   return (
     <>
-      <Pressable
-        onPress={open}
-        style={[
-          styles.pill,
-          compact
-            ? styles.pillCompact
-            : [{ backgroundColor: colors.surface }, softShadow],
-        ]}
-      >
-        <Text
-          style={[
-            styles.value,
-            { color: value ? (compact ? "#26210E" : colors.text) : colors.textMuted },
-          ]}
-        >
-          {value ?? placeholder}
-        </Text>
-      </Pressable>
+      {variant === "card" ? (
+        <Pressable onPress={open} style={[styles.card, surfaceStyle]}>
+          {label ? (
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>{label}</Text>
+          ) : null}
+          <Text style={[styles.cardValue, { color: valueColor }]}>{value ?? placeholder}</Text>
+        </Pressable>
+      ) : variant === "row" ? (
+        <Pressable onPress={open} style={[styles.rowField, surfaceStyle]}>
+          {label ? (
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>{label}</Text>
+          ) : null}
+          <View style={styles.rowValueBox}>
+            <Text style={[styles.rowValue, { color: valueColor }]}>{value ?? placeholder}</Text>
+            <Ionicons name="chevron-down" size={13} color={colors.textDisabled} />
+          </View>
+        </Pressable>
+      ) : (
+        <Pressable onPress={open} style={[styles.pill, surfaceStyle]}>
+          <Text style={[styles.pillValue, { color: valueColor }]}>{value ?? placeholder}</Text>
+        </Pressable>
+      )}
 
       {isOpen ? (
         Platform.OS === "ios" ? (
           <Modal visible transparent animationType="fade" onRequestClose={() => setIsOpen(false)}>
             <Pressable style={styles.backdrop} onPress={() => setIsOpen(false)} />
-            <View style={[styles.sheet, { backgroundColor: colors.surface }, softShadow]}>
+            <View
+              style={[
+                styles.sheet,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                softShadow,
+              ]}
+            >
               <DateTimePicker
                 value={draft}
                 mode="time"
@@ -82,9 +112,7 @@ export function TimePickerField({
                 onChange={(_, date) => date && setDraft(date)}
                 locale="fr-FR"
               />
-              <Pressable onPress={confirm} style={[styles.confirm, { backgroundColor: colors.accent }]}>
-                <Text style={[styles.confirmLabel, { color: colors.onAccent }]}>Valider</Text>
-              </Pressable>
+              <Button label="Valider" onPress={confirm} />
             </View>
           </Modal>
         ) : (
@@ -104,19 +132,53 @@ export function TimePickerField({
 }
 
 const styles = StyleSheet.create({
+  fieldLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
   pill: {
     borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     minWidth: 88,
     alignItems: "center",
   },
-  pillCompact: {
-    backgroundColor: "rgba(255,255,255,0.7)",
-  },
-  value: {
+  pillValue: {
     fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.bold,
+  },
+  card: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: 14,
+    alignItems: "center",
+    gap: 2,
+  },
+  cardValue: {
+    fontSize: 24,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.5,
+  },
+  rowField: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  rowValueBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  rowValue: {
+    fontSize: 16,
+    fontFamily: fonts.bold,
   },
   backdrop: {
     flex: 1,
@@ -128,16 +190,8 @@ const styles = StyleSheet.create({
     right: spacing.lg,
     bottom: spacing.xxl,
     borderRadius: radius.lg,
+    borderWidth: 1,
     padding: spacing.md,
     gap: spacing.sm,
-  },
-  confirm: {
-    borderRadius: radius.pill,
-    alignItems: "center",
-    paddingVertical: spacing.sm + 2,
-  },
-  confirmLabel: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
   },
 });

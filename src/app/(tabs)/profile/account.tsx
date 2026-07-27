@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -117,10 +118,10 @@ export default function AccountSettingsScreen() {
       setPlan(data === "founder" ? "founder" : "premium");
       setCachedPlan(data === "founder" ? "founder" : "premium");
       Alert.alert(
-        "Accès débloqué 🎉",
+        "Accès débloqué",
         data === "founder"
-          ? "Tu fais partie des VIP : scans illimités, à vie. 💛"
-          : "Tu fais désormais partie des membres Premium : scans illimités. ⭐",
+          ? "Tu fais partie des VIP : scans illimités, à vie."
+          : "Tu fais désormais partie des membres Premium : scans illimités.",
       );
     }
   }
@@ -135,7 +136,7 @@ export default function AccountSettingsScreen() {
     } else {
       setNewPassword("");
       setConfirmPassword("");
-      Alert.alert("Mot de passe mis à jour ✅");
+      Alert.alert("Mot de passe mis à jour");
     }
   }
 
@@ -157,7 +158,7 @@ export default function AccountSettingsScreen() {
               Alert.alert("Erreur", authErrorMessage(error));
             } else {
               setNewEmail("");
-              Alert.alert("Email mis à jour ✅", "Pense à valider l'email de confirmation.");
+              Alert.alert("Email mis à jour", "Pense à valider l'email de confirmation.");
             }
           },
         },
@@ -219,7 +220,7 @@ export default function AccountSettingsScreen() {
               title="Mode invité"
               subtitle="Pas encore de compte associé"
             >
-              <Text style={[styles.guestText, { color: colors.textMuted }]}>
+              <Text style={[styles.bodyText, { color: colors.textSoft }]}>
                 Crée ton compte gratuit depuis l'accueil du profil pour définir un email et un mot
                 de passe — toutes tes données seront conservées.
               </Text>
@@ -233,7 +234,7 @@ export default function AccountSettingsScreen() {
                 title="Email"
                 subtitle="Adresse de connexion actuelle"
               >
-                <Text style={[styles.emailValue, { color: colors.text, backgroundColor: colors.surfaceMuted }]}>
+                <Text style={[styles.emailValue, { color: colors.text, backgroundColor: colors.background }]}>
                   {email}
                 </Text>
                 <TextField
@@ -247,7 +248,6 @@ export default function AccountSettingsScreen() {
                 {newEmail.trim() ? (
                   <Button
                     label="Changer d'email"
-                    variant="dark"
                     onPress={handleChangeEmail}
                     disabled={!canSubmitEmail}
                     isLoading={isChangingEmail}
@@ -285,7 +285,6 @@ export default function AccountSettingsScreen() {
                 {newPassword ? (
                   <Button
                     label="Mettre à jour le mot de passe"
-                    variant="dark"
                     onPress={handleChangePassword}
                     disabled={!canSubmitPassword}
                     isLoading={isChangingPassword}
@@ -301,11 +300,18 @@ export default function AccountSettingsScreen() {
                 subtitle="Code VIP ou Premium reçu par l'équipe Clork"
               >
                 {plan !== "free" ? (
-                  <Text style={[styles.planActive, { color: colors.text, backgroundColor: colors.surfaceMuted }]}>
-                    {plan === "founder"
-                      ? "💛 Accès VIP actif — scans illimités, à vie."
-                      : "⭐ Accès Premium actif — scans illimités."}
-                  </Text>
+                  // Carte membre sobre : fond doux du thème, encre pour le texte.
+                  <View style={[styles.planCard, { backgroundColor: colors.accentMuted }]}>
+                    <Ionicons name="sparkles" size={18} color={colors.accent} />
+                    <View style={styles.planTextBox}>
+                      <Text style={[styles.planTitle, { color: colors.text }]}>
+                        {plan === "founder" ? "Accès VIP actif" : "Accès Premium actif"}
+                      </Text>
+                      <Text style={[styles.planSubtitle, { color: colors.textSoft }]}>
+                        {plan === "founder" ? "Scans illimités, à vie — merci." : "Scans illimités."}
+                      </Text>
+                    </View>
+                  </View>
                 ) : (
                   <>
                     <TextField
@@ -319,7 +325,6 @@ export default function AccountSettingsScreen() {
                     {promoCode.trim() ? (
                       <Button
                         label="Activer mon accès"
-                        variant="dark"
                         onPress={handleRedeemCode}
                         isLoading={isRedeeming}
                       />
@@ -328,18 +333,19 @@ export default function AccountSettingsScreen() {
                 )}
               </Section>
 
-              <Section
-                icon="warning"
-                iconBg="#FBE3E4"
-                iconColor={colors.danger}
-                title="Zone danger"
-                subtitle="Suppression définitive du compte"
+              {/* Zone danger v2 : carte blanche bordée dangerBorder, titre danger. */}
+              <View
+                style={[
+                  styles.dangerCard,
+                  { backgroundColor: colors.surface, borderColor: colors.dangerBorder },
+                ]}
               >
-                <Text style={[styles.guestText, { color: colors.textMuted }]}>
+                <Text style={[styles.dangerTitle, { color: colors.danger }]}>Zone danger</Text>
+                <Text style={[styles.dangerText, { color: colors.textMuted }]}>
                   Plannings, scans et partages seront effacés. Cette action est irréversible.
                 </Text>
                 <Button label="Supprimer mon compte" variant="danger" onPress={handleDeleteAccount} />
-              </Section>
+              </View>
             </>
           )}
         </ScrollView>
@@ -350,30 +356,41 @@ export default function AccountSettingsScreen() {
 
 const strengthStyles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  bars: { flex: 1, flexDirection: "row", gap: spacing.xs },
-  bar: { flex: 1, height: 6, borderRadius: radius.pill },
-  label: { fontSize: typeScale.caption, fontFamily: fonts.bold },
+  bars: { flex: 1, flexDirection: "row", gap: spacing.xs + 2 },
+  bar: { flex: 1, height: 5, borderRadius: radius.pill },
+  label: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
 });
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  guestText: { fontSize: typeScale.caption, fontFamily: fonts.semiBold, lineHeight: 18 },
-  planActive: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.bold,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    overflow: "hidden",
-  },
+  content: { padding: spacing.lg, gap: 12 },
+  bodyText: { fontSize: typeScale.caption, fontFamily: fonts.regular, lineHeight: 18 },
   emailValue: {
     fontSize: typeScale.body,
-    fontFamily: fonts.bold,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.sm,
+    fontFamily: fonts.semiBold,
+    paddingVertical: spacing.sm + 4,
+    paddingHorizontal: spacing.md - 2,
+    borderRadius: radius.input,
     overflow: "hidden",
   },
+  planCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
+  },
+  planTextBox: { flex: 1, gap: 1 },
+  planTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.bold },
+  planSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.regular },
+  dangerCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: spacing.sm + 2,
+  },
+  dangerTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.bold },
+  dangerText: { fontSize: typeScale.caption, fontFamily: fonts.medium, lineHeight: 17 },
 });

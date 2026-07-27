@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 export type ProcessingStep = "compress" | "upload" | "extract" | "save";
 
@@ -17,11 +17,11 @@ const STEPS: { key: ProcessingStep; label: string }[] = [
 const EXTRACT_HINTS = [
   "L'IA repère les lignes du tableau…",
   "Lecture des horaires, ratures comprises…",
-  "Les corrections au stylo priment sur l'imprimé ✍️",
+  "Les corrections au stylo priment sur l'imprimé…",
   "Détection des RH, CP et jours de repos…",
   "Lecture des post-its et notes en bas de page…",
   "Vérification des totaux d'heures…",
-  "Encore quelques secondes, la précision se mérite ☕",
+  "Encore quelques secondes, la précision se mérite…",
 ];
 
 const HINT_INTERVAL_MS = 9000;
@@ -51,7 +51,9 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
         <Ionicons name="scan" size={40} color={colors.accent} />
       </View>
       <ActivityIndicator size="large" color={colors.accent} />
-      <View style={[styles.steps, { backgroundColor: colors.surface }, softShadow]}>
+      <View
+        style={[styles.steps, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
         {STEPS.map((step, index) => {
           const isDone = index < currentIndex;
           const isCurrent = index === currentIndex;
@@ -60,12 +62,20 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
               <Ionicons
                 name={isDone ? "checkmark-circle" : isCurrent ? "ellipse" : "ellipse-outline"}
                 size={20}
-                color={isDone ? colors.success : isCurrent ? colors.accent : colors.textMuted}
+                color={
+                  isDone ? colors.success : isCurrent ? colors.accent : colors.textDisabled
+                }
               />
               <Text
                 style={[
                   styles.stepLabel,
-                  { color: isCurrent ? colors.text : colors.textMuted },
+                  {
+                    color: isDone
+                      ? colors.textMuted
+                      : isCurrent
+                        ? colors.text
+                        : colors.textDisabled,
+                  },
                   isCurrent && styles.stepLabelCurrent,
                 ]}
               >
@@ -83,9 +93,14 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
           {/* La lecture tourne côté serveur : l'app peut être fermée, une
               notification push signale la fin (sendPushNotification), et la
               reprise propose le scan à valider (bannière d'accueil). */}
-          <View style={[styles.backgroundNote, { backgroundColor: colors.surface }, softShadow]}>
+          <View
+            style={[
+              styles.backgroundNote,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
             <Ionicons name="notifications-outline" size={18} color={colors.accent} />
-            <Text style={[styles.backgroundNoteText, { color: colors.textMuted }]}>
+            <Text style={[styles.backgroundNoteText, { color: colors.textSoft }]}>
               Pas besoin d'attendre ici : tu peux fermer l'app, on t'envoie une
               notification dès que ton planning est prêt à valider.
             </Text>
@@ -115,6 +130,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     alignSelf: "stretch",
     borderRadius: radius.lg,
+    borderWidth: 1,
     padding: spacing.lg,
   },
   stepRow: {
@@ -124,14 +140,14 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     fontSize: typeScale.body,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
   },
   stepLabelCurrent: {
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.semiBold,
   },
   hint: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
     textAlign: "center",
     fontStyle: "italic",
   },
@@ -140,12 +156,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
     alignSelf: "stretch",
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
     padding: spacing.md,
   },
   backgroundNoteText: {
     flex: 1,
     fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
   },
 });

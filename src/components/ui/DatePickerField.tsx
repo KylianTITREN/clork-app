@@ -2,7 +2,15 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { Button } from "@/components/ui/Button";
+import {
+  fonts,
+  radius,
+  softShadow,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 
 type DatePickerFieldProps = {
   value: string | null; // "YYYY-MM-DD"
@@ -29,7 +37,7 @@ const LABEL_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   month: "short",
 });
 
-/** Sélecteur de date natif (roue iOS / calendrier Android) derrière une pilule. */
+/** Sélecteur de date natif (roue iOS / calendrier Android) derrière une pilule v2. */
 export function DatePickerField({
   value,
   onChange,
@@ -52,8 +60,11 @@ export function DatePickerField({
 
   return (
     <>
-      <Pressable onPress={open} style={[styles.pill, { backgroundColor: colors.surface }, softShadow]}>
-        <Text style={[styles.value, { color: value ? colors.text : colors.textMuted }]}>
+      <Pressable
+        onPress={open}
+        style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <Text style={[styles.value, { color: value ? colors.text : colors.textDisabled }]}>
           {value ? LABEL_FORMATTER.format(new Date(`${value}T12:00:00`)) : placeholder}
         </Text>
       </Pressable>
@@ -62,7 +73,13 @@ export function DatePickerField({
         Platform.OS === "ios" ? (
           <Modal visible transparent animationType="fade" onRequestClose={() => setIsOpen(false)}>
             <Pressable style={styles.backdrop} onPress={() => setIsOpen(false)} />
-            <View style={[styles.sheet, { backgroundColor: colors.surface }, softShadow]}>
+            <View
+              style={[
+                styles.sheet,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                softShadow,
+              ]}
+            >
               <DateTimePicker
                 value={draft}
                 mode="date"
@@ -71,9 +88,7 @@ export function DatePickerField({
                 onChange={(_, date) => date && setDraft(date)}
                 locale="fr-FR"
               />
-              <Pressable onPress={confirm} style={[styles.confirm, { backgroundColor: colors.accent }]}>
-                <Text style={[styles.confirmLabel, { color: colors.onAccent }]}>Valider</Text>
-              </Pressable>
+              <Button label="Valider" onPress={confirm} />
             </View>
           </Modal>
         ) : (
@@ -96,14 +111,15 @@ export function DatePickerField({
 const styles = StyleSheet.create({
   pill: {
     borderRadius: radius.sm,
+    borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     minWidth: 110,
     alignItems: "center",
   },
   value: {
     fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.bold,
   },
   backdrop: {
     flex: 1,
@@ -115,16 +131,8 @@ const styles = StyleSheet.create({
     right: spacing.lg,
     bottom: spacing.xxl,
     borderRadius: radius.lg,
+    borderWidth: 1,
     padding: spacing.md,
     gap: spacing.sm,
-  },
-  confirm: {
-    borderRadius: radius.pill,
-    alignItems: "center",
-    paddingVertical: spacing.sm + 2,
-  },
-  confirmLabel: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.extraBold,
   },
 });

@@ -14,14 +14,15 @@ import {
 } from "react-native";
 
 import { Button } from "@/components/ui/Button";
+import { ChoiceChips } from "@/components/ui/ChoiceChips";
 import { DatePickerField } from "@/components/ui/DatePickerField";
 import { DurationChips } from "@/components/ui/DurationChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
   fonts,
+  letterSpacing,
   radius,
   shiftPeriodLabels,
-  shiftTypeColor,
   shiftTypeLabel,
   spacing,
   typeScale,
@@ -54,9 +55,6 @@ const TYPES: ShiftType[] = [
   "absent",
   "unpaid",
 ];
-// Chips sélectionnées : encre sur couleurs claires, blanc sur foncées.
-const INK_CHIP_TYPES: ShiftType[] = ["work", "cp", "leave", "absent"];
-
 // Types horaires (début/fin obligatoires) vs absences (journée/demi-journée).
 const TIMED_TYPES: ShiftType[] = ["work", "training", "overtime", "meeting"];
 // Catégories proposées, dans l'ordre demandé.
@@ -308,18 +306,11 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
         <View style={[styles.sheet, { backgroundColor: colors.background }]}>
           <View style={styles.grabber} />
           <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-            {/* En-tête : création et édition clairement différenciées */}
+            {/* En-tête : création, correction et édition clairement différenciées */}
             <View style={styles.headerRow}>
-              <View style={[styles.headerIcon, { backgroundColor: colors.accentMuted }]}>
-                <Ionicons
-                  name={isCreate ? "add" : "pencil"}
-                  size={20}
-                  color={colors.text}
-                />
-              </View>
               <View style={styles.headerTextBox}>
                 <Text style={[styles.title, { color: colors.text }]}>
-                  {isCreate ? "Nouveau créneau" : "Modifier le créneau"}
+                  {isCreate ? "Nouveau créneau" : isDraft ? "Corriger" : "Modifier le créneau"}
                 </Text>
                 <Text style={[styles.subtitle, { color: colors.textMuted }]}>
                   {DAY_FORMATTER.format(new Date(`${date}T12:00:00`))}
@@ -328,99 +319,93 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
               <Pressable
                 onPress={() => onClose(false)}
                 hitSlop={10}
-                style={[styles.closeButton, { backgroundColor: colors.surfaceMuted }]}
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
               >
-                <Ionicons name="close" size={18} color={colors.textMuted} />
+                <Ionicons name="close" size={18} color={colors.text} />
               </Pressable>
             </View>
 
             {/* Presets en premier : un tap et tout est pré-rempli */}
             {showPresets ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.presetRow}
-              >
-                {presets.map((preset) => {
-                  const selected = selectedPresetId === preset.id;
-                  return (
-                    <Pressable
-                      key={preset.id}
-                      onPress={() => applyPreset(preset)}
-                      style={[
-                        styles.presetChip,
-                        { backgroundColor: selected ? colors.accent : colors.surface },
-                      ]}
-                    >
-                      <Text style={[styles.presetLabel, { color: colors.text }]} numberOfLines={1}>
-                        {preset.label}
-                      </Text>
-                      <Text style={[styles.presetHours, { color: colors.textMuted }]}>
-                        {preset.start}–{preset.end}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+              <View style={styles.presetBlock}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.presetRow}
+                >
+                  {presets.map((preset) => {
+                    const selected = selectedPresetId === preset.id;
+                    return (
+                      <Pressable
+                        key={preset.id}
+                        onPress={() => applyPreset(preset)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        style={[
+                          styles.presetChip,
+                          selected
+                            ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
+                            : { backgroundColor: colors.surface, borderColor: colors.border },
+                        ]}
+                      >
+                        <Text style={[styles.presetLabel, { color: colors.text }]} numberOfLines={1}>
+                          {preset.label}
+                        </Text>
+                        <Text style={[styles.presetHours, { color: colors.textMuted }]}>
+                          {preset.start}–{preset.end}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                <Text style={[styles.presetHint, { color: colors.textDisabled }]}>
+                  tes créneaux types — un tap pour remplir
+                </Text>
+              </View>
             ) : null}
 
             {/* Type */}
-            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Type</Text>
-            <View style={styles.typeRow}>
-              {TYPES.map((t) => {
-                const selected = type === t;
-                return (
-                  <Pressable
-                    key={t}
-                    onPress={() => {
-                      setType(t);
-                      setSelectedPresetId(null);
-                    }}
-                    style={[
-                      styles.typeChip,
-                      { backgroundColor: selected ? shiftTypeColor[t] : colors.surface },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.typeLabel,
-                        {
-                          color: selected
-                            ? INK_CHIP_TYPES.includes(t)
-                              ? "#26210E"
-                              : "#FFF"
-                            : colors.textMuted,
-                        },
-                      ]}
-                    >
-                      {shiftTypeLabel[t]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+              C'était quoi ce jour ?
+            </Text>
+            <ChoiceChips
+              options={TYPES.map((t) => ({ value: t, label: shiftTypeLabel[t] }))}
+              value={type}
+              onChange={(t) => {
+                setType(t);
+                setSelectedPresetId(null);
+              }}
+            />
 
             {/* Horaires + pause */}
             {needsTimes ? (
               <>
                 <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Horaires</Text>
                 <View style={styles.timesRow}>
-                  <TimePickerField value={start} onChange={setStart} placeholder="Début" />
-                  <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
-                  <TimePickerField value={end} onChange={setEnd} placeholder="Fin" />
+                  <View style={styles.timeCol}>
+                    <TimePickerField value={start} onChange={setStart} label="Début" variant="card" />
+                  </View>
+                  <Ionicons name="arrow-forward" size={16} color={colors.textDisabled} />
+                  <View style={styles.timeCol}>
+                    <TimePickerField value={end} onChange={setEnd} label="Fin" variant="card" />
+                  </View>
                 </View>
 
-                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Pause</Text>
+                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
+                  Durée de pause
+                </Text>
                 <DurationChips value={pauseMinutes} onChange={setPauseMinutes} allowCustom />
                 {pauseMinutes > 0 ? (
-                  <View style={styles.pauseStartRow}>
-                    <Text style={[styles.pauseAt, { color: colors.textMuted }]}>à</Text>
-                    <TimePickerField
-                      value={pauseStart}
-                      onChange={setPauseStart}
-                      placeholder="12:30"
-                    />
-                  </View>
+                  <TimePickerField
+                    value={pauseStart}
+                    onChange={setPauseStart}
+                    placeholder="12:30"
+                    label="Débute à"
+                    variant="row"
+                  />
                 ) : null}
               </>
             ) : null}
@@ -429,51 +414,28 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
             {isHalfDayType ? (
               <>
                 <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Durée</Text>
-                <View style={styles.typeRow}>
-                  {HALF_DAY_OPTIONS.map((option) => {
-                    const selected = halfDay === option.id;
-                    return (
-                      <Pressable
-                        key={option.id}
-                        onPress={() => setHalfDay(option.id)}
-                        style={[
-                          styles.typeChip,
-                          { backgroundColor: selected ? colors.text : colors.surface },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.typeLabel,
-                            { color: selected ? colors.background : colors.textMuted },
-                          ]}
-                        >
-                          {option.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <ChoiceChips
+                  options={HALF_DAY_OPTIONS.map((option) => ({
+                    value: option.id,
+                    label: option.label,
+                  }))}
+                  value={halfDay}
+                  onChange={setHalfDay}
+                />
               </>
             ) : null}
 
             {/* Options avancées repliées : garde l'écran aéré par défaut, mais
                 TOUT reste accessible d'un tap (catégorie, plage, note). */}
-            <Pressable
-              onPress={() => setShowAdvanced((v) => !v)}
-              style={[styles.advancedToggle, { borderColor: colors.border }]}
-            >
-              <Ionicons
-                name="options-outline"
-                size={16}
-                color={colors.accent}
-              />
-              <Text style={[styles.advancedToggleLabel, { color: colors.accent }]}>
+            <Pressable onPress={() => setShowAdvanced((v) => !v)} style={styles.advancedToggle}>
+              <Ionicons name="options-outline" size={15} color={colors.textMuted} />
+              <Text style={[styles.advancedToggleLabel, { color: colors.textSoft }]}>
                 {showAdvanced ? "Moins d'options" : "Plus d'options"}
               </Text>
               <Ionicons
                 name={showAdvanced ? "chevron-up" : "chevron-down"}
-                size={16}
-                color={colors.accent}
+                size={15}
+                color={colors.textMuted}
               />
             </Pressable>
 
@@ -512,30 +474,14 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
                     <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
                       Catégorie (optionnel)
                     </Text>
-                    <View style={styles.typeRow}>
-                      {PERIOD_ORDER.map((id) => {
-                        const selected = period === id;
-                        return (
-                          <Pressable
-                            key={id}
-                            onPress={() => setPeriod(selected ? null : id)}
-                            style={[
-                              styles.typeChip,
-                              { backgroundColor: selected ? colors.text : colors.surface },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.typeLabel,
-                                { color: selected ? colors.background : colors.textMuted },
-                              ]}
-                            >
-                              {shiftPeriodLabels[id]}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
+                    <ChoiceChips
+                      options={PERIOD_ORDER.map((id) => ({
+                        value: id,
+                        label: shiftPeriodLabels[id],
+                      }))}
+                      value={period}
+                      onChange={(id) => setPeriod(period === id ? null : id)}
+                    />
                   </>
                 ) : null}
 
@@ -544,10 +490,14 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
                   value={note}
                   onChangeText={setNote}
                   placeholder="Note (optionnelle)"
-                  placeholderTextColor={colors.textMuted}
+                  placeholderTextColor={colors.textDisabled}
                   style={[
                     styles.noteInput,
-                    { backgroundColor: colors.surface, color: colors.text },
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
                   ]}
                 />
               </>
@@ -557,7 +507,6 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
               <View style={styles.saveButton}>
                 <Button
                   label={isCreate ? "Ajouter au planning" : isDraft ? "Valider ce créneau" : "Enregistrer"}
-                  variant="dark"
                   onPress={handleSave}
                   isLoading={isSaving}
                 />
@@ -566,9 +515,12 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
                 <Pressable
                   onPress={handleDelete}
                   accessibilityLabel="Supprimer le créneau"
-                  style={[styles.deleteButton, { backgroundColor: colors.surface }]}
+                  style={[
+                    styles.deleteButton,
+                    { backgroundColor: colors.surface, borderColor: colors.dangerBorder },
+                  ]}
                 >
-                  <Ionicons name="trash-outline" size={20} color="#D64545" />
+                  <Ionicons name="trash-outline" size={20} color={colors.danger} />
                 </Pressable>
               ) : null}
             </View>
@@ -610,32 +562,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
   },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   headerTextBox: {
     flex: 1,
-    gap: 1,
+    gap: 2,
   },
   closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.pill,
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   title: {
     fontSize: typeScale.heading,
-    fontFamily: fonts.black,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.heading,
   },
   subtitle: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
     textTransform: "capitalize",
+  },
+  presetBlock: {
+    gap: 6,
   },
   presetRow: {
     flexDirection: "row",
@@ -643,59 +593,52 @@ const styles = StyleSheet.create({
   },
   presetChip: {
     minWidth: 104,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm + 4,
     alignItems: "center",
-    gap: 1,
+    gap: 2,
   },
   presetLabel: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
-  },
-  presetHours: {
-    fontSize: 11,
     fontFamily: fonts.semiBold,
   },
+  presetHours: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+  },
+  presetHint: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+    textAlign: "center",
+  },
   sectionLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
-    marginBottom: -spacing.xs,
+    marginBottom: -spacing.sm,
   },
   advancedToggle: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.xs,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderRadius: radius.md,
+    gap: spacing.xs + 2,
     paddingVertical: spacing.sm,
+    minHeight: 44,
   },
   advancedToggleLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
-  },
-  typeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  typeChip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-  },
-  typeLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
   },
   timesRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.sm + 2,
+  },
+  timeCol: {
+    flex: 1,
   },
   rangeRow: {
     flexDirection: "row",
@@ -704,23 +647,15 @@ const styles = StyleSheet.create({
   },
   rangeCount: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-  },
-  pauseStartRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pauseAt: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
   },
   noteInput: {
-    borderRadius: radius.md,
+    borderRadius: radius.input,
+    borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: 12,
     fontSize: typeScale.body,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
   },
   actionsRow: {
     flexDirection: "row",
@@ -733,7 +668,8 @@ const styles = StyleSheet.create({
   deleteButton: {
     width: 52,
     height: 52,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },

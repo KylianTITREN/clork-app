@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { PropsWithChildren } from "react";
 import { useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
@@ -27,6 +27,7 @@ export function WizardFrame({
   children,
 }: WizardFrameProps) {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const progress = useRef(new Animated.Value(step / totalSteps)).current;
 
   useEffect(() => {
@@ -38,7 +39,14 @@ export function WizardFrame({
   }, [progress, step, totalSteps]);
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    // Padding manuel : en fullScreenModal, SafeAreaView laissait la croix
+    // remonter dans la notch (retour utilisateur) — insets explicites.
+    <View
+      style={[
+        styles.safeArea,
+        { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 12) + 4 },
+      ]}
+    >
       <View style={styles.header}>
         <Pressable
           accessibilityLabel={closeIcon === "close" ? "Fermer" : "Retour"}
@@ -82,7 +90,7 @@ export function WizardFrame({
         )}
       </View>
       {children}
-    </SafeAreaView>
+    </View>
   );
 }
 

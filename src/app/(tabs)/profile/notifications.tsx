@@ -1,12 +1,15 @@
+// Notifications v2 (maquette 4c) : 3 cartes blanches bordées espacées — titre
+// bodySm/semiBold + sous-titre caption à gauche, toggle à droite ; réglage
+// conditionnel (heure sur fond neutre, jour en chips) sous la ligne du toggle.
+
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { ChoiceChips } from "@/components/ui/ChoiceChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
-import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { addDays, isoDate } from "@/lib/dates";
 import {
   applyReminderPrefs,
@@ -83,6 +86,18 @@ export default function NotificationsSettingsScreen() {
     );
   }
 
+  function renderToggleRow(title: string, subtitle: string, toggle: React.ReactNode) {
+    return (
+      <View style={styles.toggleRow}>
+        <View style={styles.toggleTextBox}>
+          <Text style={[styles.toggleTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.toggleSubtitle, { color: colors.textMuted }]}>{subtitle}</Text>
+        </View>
+        {toggle}
+      </View>
+    );
+  }
+
   if (!prefs) {
     return (
       <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -102,66 +117,61 @@ export default function NotificationsSettingsScreen() {
       >
         <SubPageHeader title="Notifications" />
 
-        <Section
-          icon="moon"
-          iconBg={colors.shiftMeetingSoft}
-          iconColor={colors.shiftMeeting}
-          title="La veille au soir"
-          subtitle="Tes horaires de demain, en un coup d'œil"
-          right={renderSwitch(prefs.eveEnabled, (next) => update({ eveEnabled: next }))}
-        >
-          <Text style={[styles.description, { color: colors.textMuted }]}>
-            « Demain : 09:00–17:00 (1h de pause) » — uniquement si tu travailles le lendemain.
-          </Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {renderToggleRow(
+            "La veille au soir",
+            "« Demain : 09:00–17:00 (1h de pause) »",
+            renderSwitch(prefs.eveEnabled, (next) => update({ eveEnabled: next })),
+          )}
           {prefs.eveEnabled ? (
-            <View style={styles.settingRow}>
-              <Text style={[styles.settingRowLabel, { color: colors.textMuted }]}>HEURE DU RAPPEL</Text>
+            <View style={[styles.timeRow, { backgroundColor: colors.background }]}>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGrow, { color: colors.textMuted }]}>
+                Heure du rappel
+              </Text>
               <TimePickerField value={prefs.eveTime} onChange={(time) => update({ eveTime: time })} />
             </View>
           ) : null}
-        </Section>
+        </View>
 
-        <Section
-          icon="sunny"
-          iconBg={colors.accentMuted}
-          iconColor={colors.accent}
-          title="Le matin même"
-          subtitle="Petit rappel avant de partir"
-          right={renderSwitch(prefs.morningEnabled, (next) => update({ morningEnabled: next }))}
-        >
-          <Text style={[styles.description, { color: colors.textMuted }]}>
-            Tes horaires du jour, envoyés le matin — uniquement les jours travaillés.
-          </Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {renderToggleRow(
+            "Le matin même",
+            "Petit rappel avant de partir",
+            renderSwitch(prefs.morningEnabled, (next) => update({ morningEnabled: next })),
+          )}
           {prefs.morningEnabled ? (
-            <View style={styles.settingRow}>
-              <Text style={[styles.settingRowLabel, { color: colors.textMuted }]}>HEURE DU RAPPEL</Text>
-              <TimePickerField value={prefs.morningTime} onChange={(time) => update({ morningTime: time })} />
+            <View style={[styles.timeRow, { backgroundColor: colors.background }]}>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGrow, { color: colors.textMuted }]}>
+                Heure du rappel
+              </Text>
+              <TimePickerField
+                value={prefs.morningTime}
+                onChange={(time) => update({ morningTime: time })}
+              />
             </View>
           ) : null}
-        </Section>
+        </View>
 
-        <Section
-          icon="camera"
-          iconBg={colors.shiftRhSoft}
-          iconColor={colors.shiftRh}
-          title="Rappel scan hebdo"
-          subtitle="Pour ne jamais rater la semaine suivante"
-          right={renderSwitch(prefs.scanEnabled, (next) => update({ scanEnabled: next }))}
-        >
-          <Text style={[styles.description, { color: colors.textMuted }]}>
-            « Pense à scanner le planning de la semaine prochaine 📸 » à 18:00, le jour de ton choix.
-          </Text>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {renderToggleRow(
+            "Rappel scan hebdo",
+            "« Pense à scanner la semaine prochaine »",
+            renderSwitch(prefs.scanEnabled, (next) => update({ scanEnabled: next })),
+          )}
           {prefs.scanEnabled ? (
-            <View style={styles.settingBlock}>
-              <Text style={[styles.settingLabel, { color: colors.textMuted }]}>JOUR DU RAPPEL</Text>
+            <View style={styles.dayBlock}>
+              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Jour du rappel</Text>
               <ChoiceChips
                 options={WEEKDAY_OPTIONS}
                 value={prefs.scanWeekday}
                 onChange={(weekday) => update({ scanWeekday: weekday })}
               />
+              <Text style={[styles.dayFootnote, { color: colors.textDisabled }]}>
+                Envoyé à 18:00 le jour choisi.
+              </Text>
             </View>
           ) : null}
-        </Section>
+        </View>
 
         <Text style={[styles.footnote, { color: colors.textMuted }]}>
           Les notifications de fin de scan (push) arriveront avec une prochaine version.
@@ -173,12 +183,38 @@ export default function NotificationsSettingsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  description: { fontSize: typeScale.caption, fontFamily: fonts.semiBold, lineHeight: 18 },
-  settingRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  settingBlock: { gap: spacing.xs },
-  settingLabel: { fontSize: typeScale.caption, fontFamily: fonts.bold, letterSpacing: 0.6 },
-  settingRowLabel: { flex: 1, fontSize: typeScale.caption, fontFamily: fonts.bold, letterSpacing: 0.6 },
+  content: { padding: spacing.lg, gap: 12 },
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 12,
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  toggleTextBox: { flex: 1, gap: 2 },
+  toggleTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.semiBold },
+  toggleSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.regular, lineHeight: 17 },
+  timeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+  },
+  fieldLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  fieldLabelGrow: { flex: 1 },
+  dayBlock: { gap: spacing.sm },
+  dayFootnote: { fontSize: typeScale.tiny, fontFamily: fonts.medium },
   footnote: {
     fontSize: typeScale.caption,
     fontFamily: fonts.regular,

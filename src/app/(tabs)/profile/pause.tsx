@@ -9,7 +9,7 @@ import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { ChoiceChips } from "@/components/ui/ChoiceChips";
 import { DurationChips } from "@/components/ui/DurationChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
-import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -117,17 +117,21 @@ export default function PauseSettingsScreen() {
           subtitle="Si le planning n'imprime pas la durée payée"
         >
           <View style={styles.fieldBlock}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>DURÉE PAR DÉFAUT</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Durée par défaut</Text>
             <DurationChips value={breakMinutes} onChange={setBreakMinutes} allowCustom />
           </View>
 
           <View style={styles.fieldBlock}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>DÈS QUE LA JOURNÉE ATTEINT</Text>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+              Dès que la journée atteint
+            </Text>
             <ChoiceChips options={THRESHOLD_OPTIONS} value={breakThreshold} onChange={setBreakThreshold} />
           </View>
 
-          <View style={styles.pauseTimeRow}>
-            <Text style={[styles.inlineLabel, { color: colors.textMuted }]}>HEURE HABITUELLE</Text>
+          <View style={[styles.pauseTimeRow, { backgroundColor: colors.background }]}>
+            <Text style={[styles.fieldLabel, styles.inlineLabel, { color: colors.textMuted }]}>
+              Heure habituelle
+            </Text>
             <TimePickerField value={breakStart} onChange={setBreakStart} placeholder="12:30" />
             {breakStart ? (
               <Pressable
@@ -147,9 +151,22 @@ export default function PauseSettingsScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  fieldBlock: { gap: spacing.xs },
-  fieldLabel: { fontSize: typeScale.caption, fontFamily: fonts.bold, letterSpacing: 0.6 },
-  pauseTimeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  inlineLabel: { flex: 1, fontSize: typeScale.caption, fontFamily: fonts.bold, letterSpacing: 0.6 },
+  content: { padding: spacing.lg, gap: 12 },
+  fieldBlock: { gap: spacing.sm - 2 },
+  // Labels de champ v2 : tiny/semiBold, uppercase, letterSpacing 0.6.
+  fieldLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  pauseTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+  },
+  inlineLabel: { flex: 1 },
 });

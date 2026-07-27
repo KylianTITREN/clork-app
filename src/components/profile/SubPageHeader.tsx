@@ -4,8 +4,8 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   fonts,
+  letterSpacing,
   radius,
-  softShadow,
   spacing,
   typeScale,
   useThemeColors,
@@ -17,7 +17,7 @@ type SubPageHeaderProps = {
   right?: React.ReactNode;
 };
 
-/** En-tête des sous-pages du profil : chevron retour + titre + action. */
+/** En-tête des sous-pages du profil : bouton retour rond bordé + titre aligné à gauche. */
 export function SubPageHeader({ title, right }: SubPageHeaderProps) {
   const colors = useThemeColors();
 
@@ -30,11 +30,14 @@ export function SubPageHeader({ title, right }: SubPageHeaderProps) {
         hitSlop={8}
         style={({ pressed }) => [
           styles.back,
-          { backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 },
-          softShadow,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            opacity: pressed ? 0.7 : 1,
+          },
         ]}
       >
-        <Ionicons name="chevron-back" size={20} color={colors.text} />
+        <Ionicons name="chevron-back" size={18} color={colors.text} />
       </Pressable>
       <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
         {title}
@@ -48,15 +51,21 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: 12,
     marginBottom: spacing.sm,
   },
   back: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: radius.pill,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { flex: 1, fontSize: typeScale.heading, fontFamily: fonts.black },
+  title: {
+    flex: 1,
+    fontSize: typeScale.title,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+  },
 });

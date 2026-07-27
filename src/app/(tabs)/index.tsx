@@ -6,8 +6,17 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
@@ -334,6 +343,36 @@ export default function HomeScreen() {
   // Raccourci épinglé : la vue par défaut si définie, sinon le premier suivi.
   const pinnedFollow = followedList.find((f) => f.isDefaultView) ?? followedList[0] ?? null;
 
+  // Hero replié (maquette 4a) : au scroll, une barre compacte se substitue au
+  // hero — segmented condensé + horaire du jour.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  useEffect(() => {
+    const id = scrollY.addListener(({ value }) => setIsCollapsed(value > 64));
+    return () => scrollY.removeListener(id);
+  }, [scrollY]);
+  const collapsedStyle = {
+    opacity: scrollY.interpolate({ inputRange: [56, 96], outputRange: [0, 1], extrapolate: "clamp" as const }),
+    transform: [
+      {
+        translateY: scrollY.interpolate({
+          inputRange: [56, 96],
+          outputRange: [-10, 0],
+          extrapolate: "clamp" as const,
+        }),
+      },
+    ],
+  };
+  const onScroll = Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+    useNativeDriver: true,
+  });
+  const collapsedInfo =
+    view === "today"
+      ? heroShift?.start_at && heroShift.end_at
+        ? `${toLocalTime(heroShift.start_at)} → ${toLocalTime(heroShift.end_at)}`
+        : "Repos"
+      : `${formatHours(weekHours)} payées`;
+
   function openDayEditor(date: string, dayShifts: Shift[]) {
     if (viewing) return;
     if (dayShifts.length === 1) {
@@ -434,7 +473,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       {view === "today" ? (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Animated.ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
           {topBar}
           {viewingBanner}
 
@@ -548,9 +587,9 @@ export default function HomeScreen() {
               </Text>
             ) : null}
           </View>
-        </ScrollView>
+        </Animated.ScrollView>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Animated.ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
           {topBar}
           {viewingBanner}
 
@@ -697,8 +736,33 @@ export default function HomeScreen() {
           <Text style={[styles.footNote, { color: colors.textMuted }]}>
             Touche un jour pour le modifier
           </Text>
-        </ScrollView>
+        </Animated.ScrollView>
       )}
+
+      {/* Hero replié : barre compacte qui se substitue au hero au scroll. */}
+      <Animated.View
+        pointerEvents={isCollapsed ? "auto" : "none"}
+        style={[
+          styles.collapsedBar,
+          { backgroundColor: colors.background, borderBottomColor: colors.separator },
+          collapsedStyle,
+        ]}
+      >
+        <Segmented
+          options={[
+            { value: "today", label: "Auj." },
+            { value: "week", label: "Semaine" },
+          ]}
+          value={view}
+          onChange={(next) => {
+            setView(next);
+            if (next === "week") setMonday(mondayOf(new Date()));
+          }}
+        />
+        <Text style={[styles.collapsedInfo, { color: colors.text }]} numberOfLines={1}>
+          {collapsedInfo}
+        </Text>
+      </Animated.View>
 
       {!viewing ? (
         <FloatingCTA label="＋ Ajouter mes horaires" onPress={() => router.navigate("/(tabs)/scan")} />
@@ -797,6 +861,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  collapsedBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+  },
+  collapsedInfo: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.heading,
   },
   avatar: {
     width: 38,

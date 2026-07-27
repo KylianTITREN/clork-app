@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { fonts, radius, spacing, useThemeColors } from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 const PRESETS: { minutes: number; label: string }[] = [
   { minutes: 0, label: "Aucune" },
@@ -26,44 +27,23 @@ type DurationChipsProps = {
   /** Durée sélectionnée en minutes. */
   value: number;
   onChange: (minutes: number) => void;
-  /** Rendu sur carte pastel (fonds translucides, encre). */
-  compact?: boolean;
   /** Ajoute un choix libre (saisie en minutes) en plus des propositions. */
   allowCustom?: boolean;
 };
 
-/** Sélecteur de durée de pause en chips — fini la saisie au clavier. */
-export function DurationChips({
-  value,
-  onChange,
-  compact = false,
-  allowCustom = false,
-}: DurationChipsProps) {
+/**
+ * Sélecteur de durée de pause en chips v2 — volontairement distinct du
+ * sélecteur d'heure : actif = fond primaire texte blanc, inactif = carte
+ * blanche bordée ; la durée custom s'affiche en pilule encre avec un crayon.
+ */
+export function DurationChips({ value, onChange, allowCustom = false }: DurationChipsProps) {
   const colors = useThemeColors();
-  const ink = "#26210E";
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
 
   // Valeur sélectionnée qui ne correspond à aucune proposition.
   const isCustomValue =
     allowCustom && value > 0 && !PRESETS.some((preset) => preset.minutes === value);
-
-  const chipBg = (selected: boolean) =>
-    selected
-      ? compact
-        ? ink
-        : colors.text
-      : compact
-        ? "rgba(255,255,255,0.65)"
-        : colors.surfaceMuted;
-  const chipColor = (selected: boolean) =>
-    selected
-      ? compact
-        ? "#FFF"
-        : colors.background
-      : compact
-        ? "rgba(38,33,14,0.65)"
-        : colors.textMuted;
 
   function openEditor() {
     setText(isCustomValue ? String(value) : "");
@@ -86,10 +66,26 @@ export function DurationChips({
           return (
             <Pressable
               key={minutes}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
               onPress={() => onChange(minutes)}
-              style={[styles.chip, { backgroundColor: chipBg(selected) }]}
+              style={[
+                styles.chip,
+                selected
+                  ? { backgroundColor: colors.accent, borderColor: colors.accent }
+                  : { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
             >
-              <Text style={[styles.label, { color: chipColor(selected) }]}>{label}</Text>
+              <Text
+                style={[
+                  styles.label,
+                  selected
+                    ? [styles.labelSelected, { color: colors.onAccent }]
+                    : { color: colors.textSoft },
+                ]}
+              >
+                {label}
+              </Text>
             </Pressable>
           );
         })}
@@ -97,20 +93,24 @@ export function DurationChips({
         {isCustomValue ? (
           <Pressable
             onPress={openEditor}
-            style={[styles.chip, { backgroundColor: chipBg(true) }]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: true }}
+            style={[styles.chip, styles.customChip, { backgroundColor: colors.ink, borderColor: colors.ink }]}
           >
-            <Text style={[styles.label, { color: chipColor(true) }]}>
+            <Text style={[styles.label, styles.labelSelected, { color: colors.onInk }]}>
               {formatMinutes(value)}
             </Text>
+            <Ionicons name="pencil" size={12} color={colors.onInk} />
           </Pressable>
         ) : null}
 
         {allowCustom ? (
           <Pressable
             onPress={openEditor}
-            style={[styles.chip, { backgroundColor: chipBg(false) }]}
+            accessibilityRole="button"
+            style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}
           >
-            <Text style={[styles.label, { color: chipColor(false) }]}>Autre…</Text>
+            <Text style={[styles.label, { color: colors.textSoft }]}>Autre…</Text>
           </Pressable>
         ) : null}
       </View>
@@ -123,21 +123,24 @@ export function DurationChips({
             keyboardType="number-pad"
             autoFocus
             placeholder="minutes"
-            placeholderTextColor={compact ? "rgba(38,33,14,0.4)" : colors.textMuted}
+            placeholderTextColor={colors.textDisabled}
             onSubmitEditing={commit}
             style={[
               styles.input,
               {
-                backgroundColor: compact ? "rgba(255,255,255,0.85)" : colors.surfaceMuted,
-                color: compact ? ink : colors.text,
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                color: colors.text,
               },
             ]}
           />
-          <Text style={[styles.unit, { color: compact ? "rgba(38,33,14,0.65)" : colors.textMuted }]}>
-            min
-          </Text>
-          <Pressable onPress={commit} style={[styles.okButton, { backgroundColor: compact ? ink : colors.text }]}>
-            <Text style={[styles.okLabel, { color: compact ? "#FFF" : colors.background }]}>OK</Text>
+          <Text style={[styles.unit, { color: colors.textMuted }]}>min</Text>
+          <Pressable
+            onPress={commit}
+            accessibilityRole="button"
+            style={[styles.okButton, { backgroundColor: colors.accent }]}
+          >
+            <Text style={[styles.okLabel, { color: colors.onAccent }]}>OK</Text>
           </Pressable>
         </View>
       ) : null}
@@ -147,21 +150,32 @@ export function DurationChips({
 
 const styles = StyleSheet.create({
   container: {
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: spacing.xs,
+    gap: 7,
   },
   chip: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  customChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   label: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+  },
+  labelSelected: {
+    fontFamily: fonts.semiBold,
   },
   editorRow: {
     flexDirection: "row",
@@ -169,24 +183,26 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   input: {
-    width: 88,
-    borderRadius: radius.pill,
+    width: 96,
+    borderRadius: radius.input,
+    borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    fontSize: 14,
-    fontFamily: fonts.bold,
+    paddingVertical: 10,
+    fontSize: typeScale.body,
+    fontFamily: fonts.medium,
   },
   unit: {
-    fontSize: 12,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
   },
   okButton: {
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    minHeight: 44,
+    justifyContent: "center",
   },
   okLabel: {
-    fontSize: 12,
-    fontFamily: fonts.extraBold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
   },
 });

@@ -1,14 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import {
-  fonts,
-  radius,
-  softShadow,
-  spacing,
-  typeScale,
-  useThemeColors,
-} from "@/constants/tokens";
+import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 type NavRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -29,8 +22,11 @@ export function NavRow({ icon, iconBg, iconColor, title, subtitle, onPress }: Na
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
-        { backgroundColor: colors.surface, opacity: pressed ? 0.85 : 1 },
-        softShadow,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          opacity: pressed ? 0.85 : 1,
+        },
       ]}
     >
       <View style={[styles.icon, { backgroundColor: iconBg }]}>
@@ -42,7 +38,7 @@ export function NavRow({ icon, iconBg, iconColor, title, subtitle, onPress }: Na
           {subtitle}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+      <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
     </Pressable>
   );
 }
@@ -51,18 +47,20 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    borderRadius: radius.lg,
-    padding: spacing.md,
+    gap: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingVertical: 15,
+    paddingHorizontal: spacing.md,
   },
   icon: {
-    width: 38,
-    height: 38,
-    borderRadius: radius.pill,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   textBox: { flex: 1, gap: 1 },
-  title: { fontSize: typeScale.body, fontFamily: fonts.extraBold },
-  subtitle: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
+  title: { fontSize: typeScale.body, fontFamily: fonts.bold },
+  subtitle: { fontSize: typeScale.caption, fontFamily: fonts.medium },
 });
