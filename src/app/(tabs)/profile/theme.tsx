@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { NavRow } from "@/components/profile/NavRow";
 import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { SavePill } from "@/components/profile/SavePill";
 import { appIconByTheme } from "@/constants/logo-assets";
-import { themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
+import { DEFAULT_THEME_ID, themeLabels, themeOrder, themes, type ThemeId } from "@/constants/themes";
 import { fonts, radius, softShadow, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { useTheme } from "@/providers/theme-provider";
@@ -33,13 +35,15 @@ export default function ThemeSettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <SubPageHeader
-          title="Thème"
+          title="Apparence"
           right={
             <SavePill
               isDirty={isDirty}
               isSaving={false}
               onPress={() => {
-                if (!isPremiumPlan(plan) && selected !== "honey") {
+                // Gating v2 : seuls le thème par défaut et le thème actif sont
+                // libres — le reste de la collection est Premium.
+                if (!isPremiumPlan(plan) && selected !== DEFAULT_THEME_ID) {
                   showPremiumGate("Le changement de thème");
                   return;
                 }
@@ -113,6 +117,16 @@ export default function ThemeSettingsScreen() {
             Touche « Enregistrer » pour appliquer la couleur et changer l'icône de l'app.
           </Text>
         </Section>
+
+        {/* v2 : les widgets vivent dans Apparence. */}
+        <NavRow
+          icon="grid"
+          iconBg={colors.shiftWorkSoft}
+          iconColor={colors.text}
+          title="Widgets"
+          subtitle="Ton planning sur l'écran d'accueil"
+          onPress={() => router.push("/profile/widgets")}
+        />
       </ScrollView>
     </SafeAreaView>
   );

@@ -100,6 +100,8 @@ export default function HomeScreen() {
   // Plannings suivis en lecture seule (ex : celui de sa compagne).
   const [followedList, setFollowedList] = useState<FollowedUser[]>([]);
   const [viewing, setViewing] = useState<FollowedUser | null>(null);
+  // L'utilisateur a changé de vue à la main : la vue par défaut ne s'impose plus.
+  const [hasChosenView, setHasChosenView] = useState(false);
   const [morningReminder, setMorningReminder] = useState<string | null>(null);
 
   const userId = session?.user.id;
@@ -118,21 +120,11 @@ export default function HomeScreen() {
       .order("date")
       .order("start_at");
     setShifts((data as Shift[]) ?? []);
-    if (!viewing) {
-      // Widgets : instantané ancré sur le JOUR J (semaine réelle + suivante),
-      // jamais sur la semaine consultée — naviguer ne réécrit pas le widget.
-      if (userId) {
-        void refreshWidgetSnapshot(userId, {
-          accent: colors.accent,
-          onAccent: colors.onAccent,
-        });
-      }
-      // Rappels locaux : seulement sur MON planning de la semaine courante.
-      if (monday === mondayOf(new Date())) {
-        void rescheduleFromShifts((data as Shift[]) ?? []);
-      }
+    // Rappels locaux : seulement sur MON planning de la semaine courante.
+    if (!viewing && monday === mondayOf(new Date())) {
+      void rescheduleFromShifts((data as Shift[]) ?? []);
     }
-  }, [userId, monday, sunday, viewing, colors.accent, colors.onAccent]);
+  }, [userId, monday, sunday, viewing]);
 
   const loadTeam = useCallback(async () => {
     if (!userId || viewing) {
@@ -167,9 +159,29 @@ export default function HomeScreen() {
     useCallback(() => {
       loadShifts();
       loadTeam();
-      listFollowed().then(setFollowedList);
-    }, [loadShifts, loadTeam]),
+      listFollowed().then((list) => {
+        setFollowedList(list);
+        // Vue par défaut (mode conjoint) : l'accueil s'ouvre sur ce planning
+        // tant que l'utilisateur n'a pas changé de vue à la main.
+        const defaultView = list.find((f) => f.isDefaultView) ?? null;
+        if (defaultView && !hasChosenView) {
+          setViewing((current) => current ?? defaultView);
+        }
+      });
+    }, [loadShifts, loadTeam, hasChosenView]),
   );
+
+  // Widgets : instantané ancré sur le JOUR J (semaine réelle + suivante) et
+  // sur le planning PAR DÉFAUT (le mien, ou le suivi choisi par défaut) —
+  // indépendant de la semaine ou du planning consultés à l'écran.
+  const defaultViewId = followedList.find((f) => f.isDefaultView)?.id ?? null;
+  useEffect(() => {
+    if (!userId) return;
+    void refreshWidgetSnapshot(defaultViewId ?? userId, {
+      accent: colors.accent,
+      onAccent: colors.onAccent,
+    });
+  }, [userId, defaultViewId, colors.accent, colors.onAccent]);
 
   useEffect(() => {
     if (!userId) return;
@@ -292,7 +304,8 @@ export default function HomeScreen() {
   }, [days, todayIso]);
 
   const initial = (viewing?.displayName ?? displayName ?? "C").charAt(0).toUpperCase() || "C";
-  const pinnedFollow = followedList[0] ?? null;
+  // Raccourci épinglé : la vue par défaut si définie, sinon le premier suivi.
+  const pinnedFollow = followedList.find((f) => f.isDefaultView) ?? followedList[0] ?? null;
 
   function openDayEditor(date: string, dayShifts: Shift[]) {
     if (viewing) return;
@@ -337,7 +350,13 @@ export default function HomeScreen() {
       <Text style={[styles.viewingText, { color: colors.accentDeep }]} numberOfLines={1}>
         Lecture seule — planning de {viewing.displayName}
       </Text>
-      <Pressable onPress={() => setViewing(null)} hitSlop={8}>
+      <Pressable
+        onPress={() => {
+          setHasChosenView(true);
+          setViewing(null);
+        }}
+        hitSlop={8}
+      >
         <Text style={[styles.viewingBack, { color: colors.accentDeep }]}>Revenir à moi</Text>
       </Pressable>
     </View>
@@ -365,7 +384,10 @@ export default function HomeScreen() {
       </Pressable>
       {pinnedFollow ? (
         <Pressable
-          onPress={() => setViewing(viewing ? null : pinnedFollow)}
+          onPress={() => {
+            setHasChosenView(true);
+            setViewing(viewing ? null : pinnedFollow);
+          }}
           style={[
             styles.shortcut,
             viewing

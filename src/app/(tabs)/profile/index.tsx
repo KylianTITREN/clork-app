@@ -1,3 +1,8 @@
+// Profil & réglages v2 (maquette 4c) : header sombre (avatar + nom + email),
+// 5 lignes de navigation (Scan & horaires / Partage & suivi / Notifications /
+// Apparence / Compte), footer « Se déconnecter » + « Propulsé par KYKS 🚀 ».
+// Invité : carte création de compte + encart danger (déconnexion = perte).
+
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -14,10 +19,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
+import { DarkHeader } from "@/components/ui/DarkHeader";
 import { TextField } from "@/components/ui/TextField";
 import { NavRow } from "@/components/profile/NavRow";
 import {
   fonts,
+  letterSpacing,
   radius,
   spacing,
   typeScale,
@@ -25,6 +32,8 @@ import {
 } from "@/constants/tokens";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
+
+const APP_VERSION = "2.0.0";
 
 export default function ProfileHubScreen() {
   const colors = useThemeColors();
@@ -81,8 +90,7 @@ export default function ProfileHubScreen() {
 
   function handleSignOut() {
     // Compte d'essai : aucune donnée n'est rattachée à un e-mail/mot de passe.
-    // Se déconnecter détruit la session anonyme → perte définitive des plannings.
-    // On avertit et on renvoie vers la carte « Créer un compte » (déjà en haut).
+    // Se déconnecter détruit la session anonyme → perte définitive.
     if (isGuest) {
       Alert.alert(
         "Mode invité — tes données seront perdues",
@@ -99,40 +107,54 @@ export default function ProfileHubScreen() {
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          contentInsetAdjustmentBehavior="automatic"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* En-tête identité */}
+        <DarkHeader>
           <View style={styles.headerRow}>
-            <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
-              <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
-            </View>
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.navigate("/(tabs)"))}
+              hitSlop={12}
+              accessibilityLabel="Retour"
+              style={styles.backButton}
+            >
+              <Ionicons name="chevron-back" size={22} color={colors.onInk} />
+            </Pressable>
+            {isGuest ? (
+              <View style={[styles.avatar, styles.avatarGuest, { borderColor: colors.onInk }]}>
+                <Ionicons name="person-outline" size={22} color={colors.onInk} />
+              </View>
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
+                <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
+              </View>
+            )}
             <View style={styles.headerTextBox}>
               <View style={styles.titleRow}>
-                <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-                  {displayName.trim() || "Mon profil"}
+                <Text style={[styles.title, { color: colors.onInk }]} numberOfLines={1}>
+                  {isGuest ? "Invité" : displayName.trim() || "Mon profil"}
                 </Text>
                 {plan === "founder" ? (
                   <View style={[styles.planBadge, { backgroundColor: colors.accent }]}>
                     <Text style={[styles.planBadgeLabel, { color: colors.onAccent }]}>VIP 💛</Text>
                   </View>
                 ) : plan === "premium" ? (
-                  <View style={[styles.planBadge, { backgroundColor: colors.text }]}>
-                    <Text style={[styles.planBadgeLabel, { color: colors.background }]}>Premium ⭐</Text>
+                  <View style={[styles.planBadge, { backgroundColor: colors.onInk }]}>
+                    <Text style={[styles.planBadgeLabel, { color: colors.ink }]}>Premium ⭐</Text>
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.headerMeta, { color: colors.textMuted }]} numberOfLines={1}>
-                {isGuest ? "Mode invité · 1 scan/semaine" : (email ?? "")}
+              <Text style={[styles.headerMeta, { color: colors.onInk, opacity: 0.65 }]} numberOfLines={1}>
+                {isGuest ? "⚡ 1 scan/semaine" : (email ?? "")}
               </Text>
             </View>
           </View>
+        </DarkHeader>
 
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           {isGuest ? (
             <View style={[styles.upgradeCard, { backgroundColor: colors.accentMuted }]}>
               <View style={styles.upgradeHeader}>
@@ -142,7 +164,7 @@ export default function ProfileHubScreen() {
                 <View style={styles.upgradeTitleBox}>
                   <Text style={[styles.upgradeTitle, { color: colors.text }]}>Crée ton compte gratuit</Text>
                   <Text style={[styles.upgradeSubtitle, { color: colors.textMuted }]}>
-                    Données conservées · partage débloqué
+                    Tout ce que tu as déjà ajouté est conservé.
                   </Text>
                 </View>
               </View>
@@ -152,53 +174,22 @@ export default function ProfileHubScreen() {
             </View>
           ) : null}
 
+          {/* 5 destinations v2 */}
           <NavRow
-            icon="finger-print"
+            icon="scan"
             iconBg={colors.accentMuted}
             iconColor={colors.accent}
-            title="Mon planning"
-            subtitle="Nom sur le planning · ID employé"
+            title="Scan & horaires"
+            subtitle="Nom sur le planning · créneaux types · pause"
             onPress={() => router.push("/profile/planning")}
-          />
-          <NavRow
-            icon="flash"
-            iconBg={colors.accentMuted}
-            iconColor={colors.accent}
-            title="Créneaux types"
-            subtitle="Tes presets Matin / Journée / Soir"
-            onPress={() => router.push("/profile/presets")}
-          />
-          <NavRow
-            icon="cafe"
-            iconBg={colors.shiftCpSoft}
-            iconColor={colors.shiftCp}
-            title="Pause déjeuner"
-            subtitle="Durée par défaut · heure habituelle"
-            onPress={() => router.push("/profile/pause")}
           />
           <NavRow
             icon="heart"
             iconBg={colors.shiftMeetingSoft}
             iconColor={colors.shiftMeeting}
             title="Partage & suivi"
-            subtitle="Mon code · plannings suivis"
+            subtitle="Mon code · code équipe · plannings suivis"
             onPress={() => router.push("/profile/sharing")}
-          />
-          <NavRow
-            icon="color-palette"
-            iconBg={colors.accentMuted}
-            iconColor={colors.accent}
-            title="Thème"
-            subtitle="Couleur de l'app et de son icône"
-            onPress={() => router.push("/profile/theme")}
-          />
-          <NavRow
-            icon="grid"
-            iconBg={colors.shiftWorkSoft}
-            iconColor={colors.text}
-            title="Widgets"
-            subtitle="Ton planning sur l'écran d'accueil"
-            onPress={() => router.push("/profile/widgets")}
           />
           <NavRow
             icon="notifications"
@@ -209,20 +200,40 @@ export default function ProfileHubScreen() {
             onPress={() => router.push("/profile/notifications")}
           />
           <NavRow
+            icon="color-palette"
+            iconBg={colors.shiftCpSoft}
+            iconColor={colors.shiftCp}
+            title="Apparence"
+            subtitle="Thème · icône · widgets"
+            onPress={() => router.push("/profile/theme")}
+          />
+          <NavRow
             icon="key"
             iconBg={colors.surfaceMuted}
             iconColor={colors.text}
             title="Compte"
-            subtitle={isGuest ? "Mode invité" : "Email · mot de passe · suppression"}
+            subtitle={isGuest ? "Mode invité" : "Avatar · email · mot de passe"}
             onPress={() => router.push("/profile/account")}
           />
 
-          <Pressable onPress={handleSignOut} style={styles.signOutRow} hitSlop={8}>
-            <Ionicons name="log-out-outline" size={16} color={colors.textMuted} />
-            <Text style={[styles.signOutLabel, { color: colors.textMuted }]}>Se déconnecter</Text>
-          </Pressable>
+          {isGuest ? (
+            <View style={[styles.dangerCard, { borderColor: colors.dangerBorder }]}>
+              <Text style={[styles.dangerText, { color: colors.danger }]}>
+                Sans compte, te déconnecter effacera définitivement tes plannings
+                sur cet appareil.
+              </Text>
+              <Button label="Se déconnecter quand même" variant="danger" onPress={handleSignOut} />
+            </View>
+          ) : (
+            <Pressable onPress={handleSignOut} style={styles.signOutRow} hitSlop={8}>
+              <Ionicons name="log-out-outline" size={16} color={colors.textMuted} />
+              <Text style={[styles.signOutLabel, { color: colors.textMuted }]}>Se déconnecter</Text>
+            </Pressable>
+          )}
 
-          <Text style={[styles.poweredBy, { color: colors.textMuted }]}>Propulsé par KYKS 🚀</Text>
+          <Text style={[styles.poweredBy, { color: colors.textMuted }]}>
+            Propulsé par KYKS 🚀 · v{APP_VERSION}
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -230,10 +241,48 @@ export default function ProfileHubScreen() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1 },
+  flex: { flex: 1 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(247,246,242,0.12)",
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarGuest: {
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+  },
+  avatarLetter: {
+    fontSize: typeScale.heading,
+    fontFamily: fonts.bold,
+  },
+  headerTextBox: { flex: 1, gap: 2 },
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+  },
+  title: {
+    fontSize: typeScale.title - 4,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+    flexShrink: 1,
   },
   planBadge: {
     borderRadius: radius.pill,
@@ -241,31 +290,45 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   planBadgeLabel: {
-    fontSize: 11,
-    fontFamily: fonts.extraBold,
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.bold,
   },
-  safeArea: { flex: 1 },
-  flex: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
-  avatar: { width: 60, height: 60, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
-  avatarLetter: { fontSize: typeScale.title, fontFamily: fonts.black },
-  headerTextBox: { flex: 1, gap: 2 },
-  title: { fontSize: typeScale.title, fontFamily: fonts.black },
-  headerMeta: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
+  headerMeta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  content: { padding: spacing.lg, gap: spacing.sm + 2 },
   upgradeCard: { borderRadius: radius.lg, padding: spacing.md, gap: spacing.md },
   upgradeHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   upgradeIcon: { width: 38, height: 38, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
   upgradeTitleBox: { flex: 1, gap: 1 },
-  upgradeTitle: { fontSize: typeScale.body, fontFamily: fonts.extraBold },
-  upgradeSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
-  signOutRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs, paddingVertical: spacing.sm },
+  upgradeTitle: { fontSize: typeScale.body, fontFamily: fonts.bold },
+  upgradeSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.medium },
+  dangerCard: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: spacing.sm + 2,
+    marginTop: spacing.sm,
+  },
+  dangerText: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 18,
+  },
+  signOutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
   signOutLabel: { fontSize: typeScale.caption, fontFamily: fonts.bold },
   poweredBy: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
+    fontFamily: fonts.medium,
     textAlign: "center",
     opacity: 0.7,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
   },
 });

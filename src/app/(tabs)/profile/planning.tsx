@@ -11,10 +11,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { router } from "expo-router";
+
+import { NavRow } from "@/components/profile/NavRow";
 import { SavePill } from "@/components/profile/SavePill";
 import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { TextField } from "@/components/ui/TextField";
+import { TimePickerField } from "@/components/ui/TimePickerField";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
@@ -108,6 +112,34 @@ export default function PlanningSettingsScreen() {
     }
   }
 
+  // --- Horaires du magasin (v2) : « tu ouvres / tu fermes » sur l'accueil.
+  // Les mentions O/F lues sur le planning priment sur cette déduction.
+  const [storeOpen, setStoreOpen] = useState<string | null>(null);
+  const [storeClose, setStoreClose] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from("profiles")
+      .select("store_open_time, store_close_time")
+      .eq("id", userId)
+      .single<{ store_open_time: string | null; store_close_time: string | null }>()
+      .then(({ data }) => {
+        setStoreOpen(data?.store_open_time?.slice(0, 5) ?? null);
+        setStoreClose(data?.store_close_time?.slice(0, 5) ?? null);
+      });
+  }, [userId]);
+
+  async function saveStoreHours(open: string | null, close: string | null) {
+    if (!userId) return;
+    setStoreOpen(open);
+    setStoreClose(close);
+    await supabase
+      .from("profiles")
+      .update({ store_open_time: open, store_close_time: close })
+      .eq("id", userId);
+  }
+
   const plan = usePlan();
   // --- Export calendrier : dédié (nom au choix) ou calendrier existant ---
   const [exportTarget, setExportTarget] = useState<ExportTarget>({ mode: "dedicated", name: "Clork" });
@@ -138,7 +170,7 @@ export default function PlanningSettingsScreen() {
           showsVerticalScrollIndicator={false}
         >
           <SubPageHeader
-            title="Mon planning"
+            title="Scan & horaires"
             right={
               savedSnapshot != null ? (
                 <SavePill isDirty={isDirty} isSaving={isSaving} onPress={handleSave} />
@@ -162,6 +194,49 @@ export default function PlanningSettingsScreen() {
               onChangeText={setPlanningNames}
             />
             <TextField label="ID employé (optionnel)" placeholder="ex: 10684512" value={employeeId} onChangeText={setEmployeeId} />
+          </Section>
+
+          {/* v2 : réglages fusionnés — créneaux types et pause vivent ici. */}
+          <NavRow
+            icon="flash"
+            iconBg={colors.accentMuted}
+            iconColor={colors.accent}
+            title="Créneaux types"
+            subtitle="Matin / Journée / Soir — heure + pause, éditables"
+            onPress={() => router.push("/profile/presets")}
+          />
+          <NavRow
+            icon="cafe"
+            iconBg={colors.shiftCpSoft}
+            iconColor={colors.shiftCp}
+            title="Pause déjeuner"
+            subtitle="Durée par défaut · seuil · heure habituelle"
+            onPress={() => router.push("/profile/pause")}
+          />
+
+          <Section
+            icon="storefront"
+            iconBg={colors.shiftRhSoft}
+            iconColor={colors.shiftRh}
+            title="Horaires du magasin"
+            subtitle="Pour t'indiquer « tu ouvres / tu fermes »"
+          >
+            <Text style={[styles.storeLabel, { color: colors.textMuted }]}>OUVRE À</Text>
+            <TimePickerField
+              value={storeOpen}
+              placeholder="--:--"
+              onChange={(time) => void saveStoreHours(time, storeClose)}
+            />
+            <Text style={[styles.storeLabel, { color: colors.textMuted }]}>FERME À</Text>
+            <TimePickerField
+              value={storeClose}
+              placeholder="--:--"
+              onChange={(time) => void saveStoreHours(storeOpen, time)}
+            />
+            <Text style={[styles.storeHint, { color: colors.textMuted }]}>
+              Si ton créneau commence à l'ouverture, tu ouvres ; s'il finit à la
+              fermeture, tu fermes. Les mentions O/F lues sur le planning priment.
+            </Text>
           </Section>
 
           <Section
@@ -264,4 +339,14 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   calMeta: { fontSize: typeScale.caption, fontFamily: fonts.regular },
+  storeHint: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
+    lineHeight: 17,
+  },
+  storeLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    letterSpacing: 0.6,
+  },
 });
