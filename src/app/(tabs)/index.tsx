@@ -184,17 +184,30 @@ export default function HomeScreen() {
   }, [userId, defaultViewId, colors.accent, colors.onAccent]);
 
   const isGuest = session?.user.is_anonymous ?? false;
+  // Horaires du magasin : « tu ouvres / tu fermes » sur le hero du jour.
+  const [storeHours, setStoreHours] = useState<{ open: string | null; close: string | null }>({
+    open: null,
+    close: null,
+  });
 
   useEffect(() => {
     if (!userId) return;
     supabase
       .from("profiles")
-      .select("display_name")
+      .select("display_name, store_open_time, store_close_time")
       .eq("id", userId)
-      .single<{ display_name: string }>()
+      .single<{
+        display_name: string;
+        store_open_time: string | null;
+        store_close_time: string | null;
+      }>()
       .then(async ({ data }) => {
         const name = data?.display_name ?? "";
         setDisplayName(name);
+        setStoreHours({
+          open: data?.store_open_time?.slice(0, 5) ?? null,
+          close: data?.store_close_time?.slice(0, 5) ?? null,
+        });
         // Compte fraîchement vérifié (prénom vide, pas invité) : onboarding
         // 4 étapes, une seule fois (drapeau local).
         if (!isGuest && name.trim() === "") {
@@ -464,6 +477,18 @@ export default function HomeScreen() {
                       {formatHours(paidHoursOf(heroShift))} payées
                     </Text>
                   </View>
+                  {/* Déduit des horaires du magasin (les mentions O/F du scan priment
+                      déjà via le type opening/closing du créneau). */}
+                  {storeHours.open && toLocalTime(heroShift.start_at) <= storeHours.open ? (
+                    <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                      <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu ouvres</Text>
+                    </View>
+                  ) : null}
+                  {storeHours.close && toLocalTime(heroShift.end_at) >= storeHours.close ? (
+                    <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                      <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu fermes</Text>
+                    </View>
+                  ) : null}
                 </View>
                 {todayShifts.filter((s) => s.id !== heroShift.id && s.start_at && s.end_at)
                   .map((s) => (
