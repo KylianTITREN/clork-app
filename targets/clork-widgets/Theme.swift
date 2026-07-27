@@ -1,22 +1,25 @@
 import SwiftUI
 
-/// Clork design tokens for widgets.
+/// Clork design tokens for widgets — v2 « épurée & pro ».
 /// Mirrors `src/constants/tokens.ts`. The accent follows the in-app theme:
 /// the app writes hex values in the shared App Group (see widget-data.ts).
 enum ClorkTheme {
     private static let suite = UserDefaults(suiteName: "group.com.kyks.clork.shared")
 
-    static let cream = Color(red: 0xF7 / 255, green: 0xF5 / 255, blue: 0xEE / 255)
-    static let ink = Color(red: 0x22 / 255, green: 0x1F / 255, blue: 0x15 / 255)
+    /// Fond neutre froid v2 (#F7F6F2).
+    static let cream = Color(red: 0xF7 / 255, green: 0xF6 / 255, blue: 0xF2 / 255)
+    /// Encre v2 (#17150E).
+    static let ink = Color(red: 0x17 / 255, green: 0x15 / 255, blue: 0x0E / 255)
 
-    /// Accent du thème actif (défaut : miel #FFC233).
+    /// Accent du thème actif (défaut v2 : vert forêt #1F6B47).
     static var accent: Color {
-        Color(hex: suite?.string(forKey: "widget-accent")) ?? Color(red: 1.0, green: 0xC2 / 255, blue: 0x33 / 255)
+        Color(hex: suite?.string(forKey: "widget-accent"))
+            ?? Color(red: 0x1F / 255, green: 0x6B / 255, blue: 0x47 / 255)
     }
 
-    /// Texte posé sur l'accent (défaut : encre).
+    /// Texte posé sur l'accent (v2 : blanc — les primaires sont foncés).
     static var onAccent: Color {
-        Color(hex: suite?.string(forKey: "widget-on-accent")) ?? ink
+        Color(hex: suite?.string(forKey: "widget-on-accent")) ?? .white
     }
 
     static let inkSoft = ink.opacity(0.55)
@@ -38,8 +41,9 @@ extension Color {
 }
 
 extension Font {
-    /// SF Rounded, the widget counterpart of the app's Nunito.
-    static func clork(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+    /// SF (design par défaut) — pendant widget d'Instrument Sans.
+    /// v2 : graisses contenues, plus de rounded (ex-pendant de Nunito).
+    static func clork(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .default)
     }
 }

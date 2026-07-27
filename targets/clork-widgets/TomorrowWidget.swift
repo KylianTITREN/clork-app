@@ -87,9 +87,9 @@ struct DayWidgetView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(entry.kicker)
-                .font(.clork(11, weight: .heavy))
+                .font(.clork(11, weight: .bold))
                 .kerning(1.2)
-                .foregroundStyle(ClorkTheme.ink)
+                .foregroundStyle(ClorkTheme.onAccent)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(ClorkTheme.accent, in: Capsule())
@@ -104,7 +104,7 @@ struct DayWidgetView: View {
     private var restView: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Repos 🎉")
-                .font(.clork(family == .systemSmall ? 24 : 28, weight: .heavy))
+                .font(.clork(family == .systemSmall ? 24 : 28, weight: .bold))
                 .foregroundStyle(ClorkTheme.ink)
                 .minimumScaleFactor(0.7)
             Text("Aucun créneau prévu")
@@ -146,7 +146,7 @@ private struct ShiftRow: View {
                     .foregroundStyle(ClorkTheme.inkSoft)
                 if let range = shift.timeRangeLabel {
                     Text(range)
-                        .font(.clork(compact ? 19 : 21, weight: .heavy))
+                        .font(.clork(compact ? 19 : 21, weight: .bold))
                         .foregroundStyle(ClorkTheme.ink)
                         .minimumScaleFactor(0.6)
                         .lineLimit(1)
