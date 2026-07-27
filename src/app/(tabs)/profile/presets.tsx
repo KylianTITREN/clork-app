@@ -38,11 +38,6 @@ const TYPE_CHOICES = PRESET_TYPE_OPTIONS.map((option) => ({
   value: option,
   label: shiftTypeLabel[option],
 }));
-const PERIOD_CHOICES = PRESET_PERIOD_OPTIONS.map((option) => ({
-  value: option,
-  label: shiftPeriodLabels[option],
-}));
-
 /**
  * Créneaux types personnalisables : chaque boîte a ses horaires (ex. 7h–13h
  * le matin). Proposés en un tap à l'ajout d'un créneau Travail/Formation.
@@ -188,19 +183,6 @@ export default function PresetsScreen() {
                 value={preset.breakMinutes}
                 onChange={(breakMinutes) => patch(preset.id, { breakMinutes })}
                 allowCustom
-              />
-            </View>
-
-            <View style={styles.fieldBlock}>
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-                Catégorie (optionnel)
-              </Text>
-              <ChoiceChips
-                options={PERIOD_CHOICES}
-                value={preset.period ?? null}
-                onChange={(period) =>
-                  patch(preset.id, { period: (preset.period ?? null) === period ? null : period })
-                }
               />
             </View>
           </View>

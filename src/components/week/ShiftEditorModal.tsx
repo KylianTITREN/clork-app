@@ -58,7 +58,6 @@ const TYPES: ShiftType[] = [
 // Types horaires (début/fin obligatoires) vs absences (journée/demi-journée).
 const TIMED_TYPES: ShiftType[] = ["work", "training", "overtime", "meeting"];
 // Catégories proposées, dans l'ordre demandé.
-const PERIOD_ORDER: ShiftPeriod[] = ["day", "morning", "afternoon", "evening", "opening", "closing"];
 const HALF_DAY_TYPES: ShiftType[] = ["cp", "rtt", "sick", "absent", "unpaid"];
 // Presets proposés sur les types « poste » (demande : travail ou formation).
 const PRESET_TYPES: ShiftType[] = ["work", "training"];
@@ -465,23 +464,6 @@ export function ShiftEditorModal({ target, onClose, onDraftSave }: ShiftEditorMo
                         </Text>
                       ) : null}
                     </View>
-                  </>
-                ) : null}
-
-                {/* Catégorie (optionnelle) pour les créneaux horaires */}
-                {needsTimes ? (
-                  <>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                      Catégorie (optionnel)
-                    </Text>
-                    <ChoiceChips
-                      options={PERIOD_ORDER.map((id) => ({
-                        value: id,
-                        label: shiftPeriodLabels[id],
-                      }))}
-                      value={period}
-                      onChange={(id) => setPeriod(period === id ? null : id)}
-                    />
                   </>
                 ) : null}
 
