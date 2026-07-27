@@ -572,12 +572,21 @@ export async function logScanCorrections(
 
 // --- Qui ouvre / ferme avec moi ----------------------------------------------
 
-export type ShiftMates = { openers: string[]; closers: string[] };
+export type ShiftMates = {
+  openers: string[];
+  closers: string[];
+  /** MOI, est-ce que j'ouvre / je ferme ce jour-là ? (pilote « avec » vs « par ») */
+  iOpen: boolean;
+  iClose: boolean;
+};
 
 /**
- * À partir de l'extraction d'équipe de la semaine : qui commence à la même
- * heure que moi (ouvre avec moi) et qui finit à la même heure (ferme avec moi),
- * ce jour-là. Ma propre ligne est exclue.
+ * Qui ouvre et qui ferme le magasin ce jour-là, d'après l'extraction d'équipe.
+ * Référence = HORAIRES DU MAGASIN (profil) : ouvre = créneau qui commence à
+ * l'ouverture (ou avant), ferme = créneau qui finit à la fermeture (ou après).
+ * Sans horaires magasin renseignés, repli sur l'ancien comportement : même
+ * heure de début/fin que moi. Ma propre ligne est exclue des listes ; iOpen /
+ * iClose disent si MOI j'ouvre ou je ferme (formulation « avec » vs « par »).
  */
 export function findShiftMates(
   employees: ExtractionEmployee[],
@@ -585,7 +594,15 @@ export function findShiftMates(
   date: string,
   start: string | null,
   end: string | null,
+  storeHours?: { open: string | null; close: string | null },
 ): ShiftMates {
+  const storeOpen = storeHours?.open ?? null;
+  const storeClose = storeHours?.close ?? null;
+  const isOpener = (slotStart: string) =>
+    storeOpen ? slotStart <= storeOpen : start != null && slotStart === start;
+  const isCloser = (slotEnd: string) =>
+    storeClose ? slotEnd >= storeClose : end != null && slotEnd === end;
+
   const openers: string[] = [];
   const closers: string[] = [];
   for (const employee of employees) {
@@ -593,13 +610,18 @@ export function findShiftMates(
     const day = employee.days.find((d) => d.date === date);
     if (!day || day.status !== "work") continue;
     for (const slot of day.shifts) {
-      if (start && slot.start === start && !openers.includes(employee.name)) {
+      if (isOpener(slot.start) && !openers.includes(employee.name)) {
         openers.push(employee.name);
       }
-      if (end && slot.end === end && !closers.includes(employee.name)) {
+      if (isCloser(slot.end) && !closers.includes(employee.name)) {
         closers.push(employee.name);
       }
     }
   }
-  return { openers, closers };
+  return {
+    openers,
+    closers,
+    iOpen: start != null && (storeOpen ? start <= storeOpen : true),
+    iClose: end != null && (storeClose ? end >= storeClose : true),
+  };
 }
