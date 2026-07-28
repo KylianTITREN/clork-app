@@ -109,7 +109,7 @@ type TypeSheetProps = {
 
 export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
   const colors = useThemeColors();
-  const { panHandlers, dragStyle } = useSheetDrag(onClose);
+  const { panHandlers, grabberHandlers, dragStyle } = useSheetDrag(onClose);
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
@@ -163,7 +163,9 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
             },
           ]}
         >
-          <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+          <View {...grabberHandlers} style={styles.grabZone}>
+            <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+          </View>
 
           <View style={styles.headerRow}>
             <Text style={[styles.title, { color: colors.text }]}>Nouveau type</Text>
@@ -269,6 +271,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     gap: 14,
     overflow: "hidden",
+  },
+  grabZone: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    paddingVertical: 10,
   },
   grabber: {
     alignSelf: "center",

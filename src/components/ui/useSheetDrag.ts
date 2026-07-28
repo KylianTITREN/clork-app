@@ -47,8 +47,35 @@ export function useSheetDrag(onClose: () => void) {
     }),
   ).current;
 
+  // Zone de préhension (grabber élargi) : claim dès le TOUCHER — c'est la
+  // méthode fiable, la négociation move-capture restant un plan B sur le corps.
+  const grabberResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_, gesture) => {
+        if (gesture.dy > 0) translateY.setValue(gesture.dy);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy > CLOSE_DISTANCE || gesture.vy > CLOSE_VELOCITY) {
+          Animated.timing(translateY, {
+            toValue: EXIT_DISTANCE,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            closeRef.current();
+            translateY.setValue(0);
+          });
+        } else {
+          Animated.spring(translateY, { toValue: 0, friction: 8, useNativeDriver: true }).start();
+        }
+      },
+    }),
+  ).current;
+
   return {
     panHandlers: panResponder.panHandlers,
+    grabberHandlers: grabberResponder.panHandlers,
     dragStyle: { transform: [{ translateY }] },
   };
 }

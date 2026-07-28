@@ -32,7 +32,7 @@ export function PremiumGateSheet() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [feature, setFeature] = useState<string | null>(null);
-  const { panHandlers, dragStyle } = useSheetDrag(() => setFeature(null));
+  const { panHandlers, grabberHandlers, dragStyle } = useSheetDrag(() => setFeature(null));
 
   useEffect(() => {
     setPremiumGateListener(setFeature);
@@ -58,7 +58,9 @@ export function PremiumGateSheet() {
           { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md },
         ]}
       >
-        <View style={[styles.grabber, { backgroundColor: colors.surfaceMuted }]} />
+        <View {...grabberHandlers} style={styles.grabZone}>
+          <View style={[styles.grabber, { backgroundColor: colors.surfaceMuted }]} />
+        </View>
 
         <View style={[styles.iconBadge, { backgroundColor: colors.accent }]}>
           <Ionicons name="star" size={22} color={colors.onAccent} />
@@ -115,11 +117,15 @@ const styles = StyleSheet.create({
     gap: spacing.sm + 2,
     overflow: "hidden",
   },
+  grabZone: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
   grabber: {
     width: 40,
     height: 4,
     borderRadius: 2,
-    marginBottom: spacing.xs,
   },
   iconBadge: {
     width: 48,

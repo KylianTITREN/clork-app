@@ -251,27 +251,22 @@ export default function SharingSettingsScreen() {
                 />
               </View>
 
-              {/* Code équipe — verrouillé */}
-              <View
-                style={[
-                  styles.card,
-                  styles.lockedCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-              >
-                <View style={styles.lockedRow}>
-                  <View style={styles.lockedText}>
-                    <Text style={[styles.cardTitle, { color: colors.textMuted }]}>
-                      Code équipe de la semaine
-                    </Text>
-                    <Text style={[styles.cardSubtitle, { color: colors.textDisabled }]}>
-                      Disponible avec un compte
-                    </Text>
-                  </View>
-                  <View style={[styles.lockBadge, { backgroundColor: colors.background }]}>
-                    <Ionicons name="lock-closed" size={13} color={colors.textDisabled} />
-                  </View>
-                </View>
+              {/* Code équipe — même verrou que non-premium (maquette 4e). */}
+              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Code équipe</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+                  Partage par code de la semaine scannée
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => showPremiumGate("Le partage de planning par code")}
+                  style={[styles.premiumBanner, { backgroundColor: colors.background }]}
+                >
+                  <Text style={[styles.premiumBannerText, { color: colors.textSoft }]}>
+                    Le partage par code est une fonction Premium
+                  </Text>
+                  <Text style={[styles.premiumBannerCta, { color: colors.accent }]}>Débloquer ›</Text>
+                </Pressable>
               </View>
             </>
           ) : (
@@ -300,10 +295,12 @@ export default function SharingSettingsScreen() {
               {/* Code équipe */}
               <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>
-                  Code équipe de la semaine
+                  {isPremium ? "Code équipe de la semaine" : "Code équipe"}
                 </Text>
                 <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
-                  Tes collègues récupèrent leurs horaires sans re-scanner
+                  {isPremium
+                    ? "Tes collègues récupèrent leurs horaires sans re-scanner"
+                    : "Partage par code de la semaine scannée"}
                 </Text>
                 {teamCode ? (
                   isPremium ? (
