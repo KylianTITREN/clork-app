@@ -351,7 +351,8 @@ export default function HomeScreen() {
     return source.slice(0, 3);
   }, [days, todayIso]);
 
-  const initial = (viewing?.displayName ?? displayName ?? "C").charAt(0).toUpperCase() || "C";
+  // Avatar = TOUJOURS moi (jamais la personne suivie) ; invité = pastille « ? ».
+  const initial = (displayName || "C").charAt(0).toUpperCase();
   // Raccourci épinglé : la vue par défaut si définie, sinon le premier suivi.
   const pinnedFollow = followedList.find((f) => f.isDefaultView) ?? followedList[0] ?? null;
 
@@ -407,9 +408,18 @@ export default function HomeScreen() {
       <Pressable
         accessibilityLabel="Profil"
         onPress={() => router.navigate("/(tabs)/profile")}
-        style={[styles.avatar, { backgroundColor: colors.accent }]}
+        style={[
+          styles.avatar,
+          isGuest
+            ? { backgroundColor: colors.surfaceMuted, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.textDisabled }
+            : { backgroundColor: colors.accent },
+        ]}
       >
-        <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
+        {isGuest ? (
+          <Ionicons name="help" size={17} color={colors.textMuted} />
+        ) : (
+          <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
+        )}
       </Pressable>
     </View>
   );
