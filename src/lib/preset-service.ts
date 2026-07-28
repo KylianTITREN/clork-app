@@ -5,12 +5,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { ShiftPeriod, ShiftType } from "@/constants/tokens";
+import type { CustomShiftType } from "@/lib/custom-types-service";
 
 const STORAGE_KEY = "clork.presets";
 export const MAX_PRESETS = 6;
 
-/** Types autorisés pour un preset (créneaux avec horaires). */
-export type PresetType = Extract<ShiftType, "work" | "training" | "overtime">;
+/**
+ * Types autorisés pour un preset : tous les types de créneau, y compris les
+ * types sans horaires (repos, CP…) et les types personnalisés (un perso payé
+ * est stocké type "work", non payé type "off", + customTypeId).
+ */
+export type PresetType = ShiftType;
 
 export type ShiftPreset = {
   id: string;
@@ -21,7 +26,31 @@ export type ShiftPreset = {
   breakMinutes: number;
   // Catégorie facultative pré-remplie par le preset (ouverture, fermeture…).
   period?: ShiftPeriod | null;
+  /**
+   * Type personnalisé associé (custom_shift_types) — absent/null = type natif.
+   * Champ optionnel : les presets déjà stockés restent valides tels quels.
+   */
+  customTypeId?: string | null;
 };
+
+// Types standard portant des horaires — aligné sur TIMED_DAY_TYPES de
+// l'éditeur de jour (un type perso payé → "work", non payé → "off").
+const TIMED_PRESET_TYPES: readonly ShiftType[] = ["work", "training", "meeting", "overtime"];
+
+/**
+ * Le preset porte-t-il des horaires ? Sans `customTypes`, on se fie au type
+ * natif stocké ; avec, le caractère payé du type perso fait foi.
+ */
+export function presetHasTimes(
+  preset: Pick<ShiftPreset, "type" | "customTypeId">,
+  customTypes?: readonly CustomShiftType[],
+): boolean {
+  if (preset.customTypeId && customTypes) {
+    const custom = customTypes.find((candidate) => candidate.id === preset.customTypeId);
+    if (custom) return custom.isPaid;
+  }
+  return TIMED_PRESET_TYPES.includes(preset.type);
+}
 
 export const DEFAULT_PRESETS: ShiftPreset[] = [
   { id: "morning", label: "🌅 Matin", type: "work", start: "09:00", end: "13:00", breakMinutes: 0 },
@@ -38,7 +67,11 @@ function isValidPreset(value: unknown): value is ShiftPreset {
     typeof preset.type === "string" &&
     typeof preset.start === "string" &&
     typeof preset.end === "string" &&
-    typeof preset.breakMinutes === "number"
+    typeof preset.breakMinutes === "number" &&
+    // customTypeId optionnel (rétrocompatible) : absent, null ou string.
+    (preset.customTypeId === undefined ||
+      preset.customTypeId === null ||
+      typeof preset.customTypeId === "string")
   );
 }
 

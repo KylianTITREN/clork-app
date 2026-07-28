@@ -24,6 +24,7 @@ import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { Button } from "@/components/ui/Button";
 import { ChoiceChips } from "@/components/ui/ChoiceChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
+import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import {
   fonts,
   radius,
@@ -32,17 +33,28 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { listCustomTypes, type CustomShiftType } from "@/lib/custom-types-service";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
   MAX_PRESETS,
   loadPresets,
   newPresetId,
+  presetHasTimes,
   savePresets,
   type PresetType,
   type ShiftPreset,
 } from "@/lib/preset-service";
 
-const PRESET_TYPE_OPTIONS: readonly PresetType[] = ["work", "training", "overtime"];
+// Types standard proposés en chips (même langage que l'éditeur de jour) ;
+// les types persos de l'utilisateur suivent, puis la chip « + Autre… ».
+const STANDARD_TYPE_OPTIONS: readonly PresetType[] = [
+  "work",
+  "off",
+  "cp",
+  "training",
+  "meeting",
+  "overtime",
+];
 
 /** Limite de créneaux types du plan gratuit (au-delà : Premium). */
 export const FREE_PRESET_LIMIT = 3;
@@ -180,6 +192,11 @@ export default function PresetEditorScreen() {
   const [allPresets, setAllPresets] = useState<ShiftPreset[] | null>(null);
   const [label, setLabel] = useState("");
   const [type, setType] = useState<PresetType>("work");
+  // Type personnalisé sélectionné : null = type natif (même modèle que
+  // l'éditeur de jour — un perso payé porte type "work", non payé "off").
+  const [customTypeId, setCustomTypeId] = useState<string | null>(null);
+  const [customTypes, setCustomTypes] = useState<CustomShiftType[]>([]);
+  const [isTypeSheetOpen, setIsTypeSheetOpen] = useState(false);
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("17:00");
   const [breakMinutes, setBreakMinutes] = useState(0);
@@ -194,6 +211,7 @@ export default function PresetEditorScreen() {
       if (existing) {
         setLabel(existing.label);
         setType(existing.type);
+        setCustomTypeId(existing.customTypeId ?? null);
         setStart(existing.start);
         setEnd(existing.end);
         setBreakMinutes(existing.breakMinutes);
@@ -204,6 +222,22 @@ export default function PresetEditorScreen() {
     };
   }, [presetId]);
 
+  // Types personnalisés de l'utilisateur — chips après les types standards.
+  // Best-effort : en cas d'échec réseau, les chips persos sont juste absentes.
+  useEffect(() => {
+    let cancelled = false;
+    listCustomTypes()
+      .then((types) => {
+        if (!cancelled) setCustomTypes(types);
+      })
+      .catch(() => {
+        // silencieux : l'éditeur reste utilisable avec les types natifs
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const existing = useMemo(
     () =>
       presetId && allPresets
@@ -213,8 +247,61 @@ export default function PresetEditorScreen() {
   );
   const isEditing = existing != null;
 
+  // Type sans horaires (repos, CP, perso non payé) : cartes HORAIRES et
+  // PAUSE masquées, aperçu sans heures payées.
+  const isTimed = presetHasTimes({ type, customTypeId }, customTypes);
+  const selectedCustomType = customTypeId
+    ? (customTypes.find((candidate) => candidate.id === customTypeId) ?? null)
+    : null;
+
+  // Un type hors liste standard (preset stocké legacy) reste représentable :
+  // sa chip est ajoutée dynamiquement, comme dans l'éditeur de jour.
+  const nativeTypeOptions = useMemo(() => {
+    const existingType = existing?.customTypeId == null ? existing?.type : undefined;
+    return existingType && !STANDARD_TYPE_OPTIONS.includes(existingType)
+      ? [...STANDARD_TYPE_OPTIONS, existingType]
+      : STANDARD_TYPE_OPTIONS;
+  }, [existing]);
+
+  function selectNativeType(option: PresetType) {
+    setCustomTypeId(null);
+    setType(option);
+  }
+
+  function selectCustomType(customType: CustomShiftType) {
+    setCustomTypeId(customType.id);
+    setType(customType.isPaid ? "work" : "off");
+  }
+
+  function handleTypeCreated(created: CustomShiftType) {
+    setCustomTypes((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    );
+    selectCustomType(created);
+    setIsTypeSheetOpen(false);
+  }
+
+  // Chips : types standards puis persos (sélection encre), même langage que
+  // l'éditeur de jour et le wizard manuel.
+  const typeChipOptions: TypeChipOption[] = [
+    ...nativeTypeOptions.map((option) => ({
+      key: option,
+      label: shiftTypeLabel[option],
+      selected: customTypeId === null && option === type,
+      onPress: () => selectNativeType(option),
+    })),
+    ...customTypes.map((customType) => ({
+      key: `custom-${customType.id}`,
+      label: customType.name,
+      selected: customTypeId === customType.id,
+      onPress: () => selectCustomType(customType),
+    })),
+  ];
+
   // Aperçu live : heures payées = amplitude − pause (plancher à 0).
   const paidMinutes = Math.max(0, timeToMinutes(end) - timeToMinutes(start) - breakMinutes);
+  // Libellé de l'aperçu pour un type sans horaires : nom du perso ou du natif.
+  const untimedTypeName = selectedCustomType?.name ?? shiftTypeLabel[type];
 
   async function handleSave() {
     if (!allPresets) return;
@@ -223,7 +310,7 @@ export default function PresetEditorScreen() {
       Alert.alert("Nom manquant", "Donne un nom à ce créneau type (ex. Matin marché).");
       return;
     }
-    if (end <= start) {
+    if (isTimed && end <= start) {
       Alert.alert("Horaires invalides", "La fin doit être après le début.");
       return;
     }
@@ -242,12 +329,12 @@ export default function PresetEditorScreen() {
     const next: ShiftPreset[] = existing
       ? allPresets.map((preset) =>
           preset.id === existing.id
-            ? { ...preset, label: trimmedLabel, type, start, end, breakMinutes }
+            ? { ...preset, label: trimmedLabel, type, customTypeId, start, end, breakMinutes }
             : preset,
         )
       : [
           ...allPresets,
-          { id: newPresetId(), label: trimmedLabel, type, start, end, breakMinutes },
+          { id: newPresetId(), label: trimmedLabel, type, customTypeId, start, end, breakMinutes },
         ];
     await savePresets(next);
     setIsSaving(false);
@@ -315,74 +402,56 @@ export default function PresetEditorScreen() {
 
           <View style={styles.fieldBlock}>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Type</Text>
-            <View style={styles.typeRow}>
-              {PRESET_TYPE_OPTIONS.map((option) => {
-                const selected = option === type;
-                return (
-                  <Pressable
-                    key={option}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => setType(option)}
-                    style={[
-                      styles.typeChip,
-                      selected
-                        ? { backgroundColor: colors.accent, borderColor: colors.accent }
-                        : { backgroundColor: colors.surface, borderColor: colors.border },
-                    ]}
-                  >
-                    {selected ? (
-                      <Ionicons name="checkmark" size={14} color={colors.onAccent} />
-                    ) : null}
-                    <Text
-                      style={[
-                        styles.typeChipLabel,
-                        selected
-                          ? [styles.typeChipLabelSelected, { color: colors.onAccent }]
-                          : { color: colors.textSoft },
-                      ]}
-                    >
-                      {shiftTypeLabel[option]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <TypeChipsRow options={typeChipOptions} onAddPress={() => setIsTypeSheetOpen(true)} />
           </View>
 
-          <View style={styles.fieldBlock}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Horaires</Text>
-            <View style={styles.timesRow}>
-              <View style={styles.timeCol}>
-                <TimePickerField value={start} onChange={setStart} label="Début" variant="card" />
+          {/* Types sans horaires (repos, CP, perso non payé) : pas de cartes
+              HORAIRES/PAUSE, l'aperçu affiche « Nom · Type » sans heures. */}
+          {isTimed ? (
+            <>
+              <View style={styles.fieldBlock}>
+                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Horaires</Text>
+                <View style={styles.timesRow}>
+                  <View style={styles.timeCol}>
+                    <TimePickerField
+                      value={start}
+                      onChange={setStart}
+                      label="Début"
+                      variant="card"
+                    />
+                  </View>
+                  <Ionicons name="arrow-forward" size={16} color={colors.textDisabled} />
+                  <View style={styles.timeCol}>
+                    <TimePickerField value={end} onChange={setEnd} label="Fin" variant="card" />
+                  </View>
+                </View>
               </View>
-              <Ionicons name="arrow-forward" size={16} color={colors.textDisabled} />
-              <View style={styles.timeCol}>
-                <TimePickerField value={end} onChange={setEnd} label="Fin" variant="card" />
-              </View>
-            </View>
-          </View>
 
-          <View style={styles.fieldBlock}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Pause</Text>
-            <PauseDurationChips
-              value={breakMinutes}
-              onChange={setBreakMinutes}
-              options={EDITOR_PAUSE_OPTIONS}
-            />
-          </View>
+              <View style={styles.fieldBlock}>
+                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Pause</Text>
+                <PauseDurationChips
+                  value={breakMinutes}
+                  onChange={setBreakMinutes}
+                  options={EDITOR_PAUSE_OPTIONS}
+                />
+              </View>
+            </>
+          ) : null}
 
           <View style={styles.fieldBlock}>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Aperçu</Text>
             <View style={[styles.previewRow, { backgroundColor: colors.accentMuted }]}>
               <View style={[styles.previewPill, { backgroundColor: colors.surface }]}>
                 <Text style={[styles.previewName, { color: colors.text }]} numberOfLines={1}>
-                  {label.trim() || "Sans nom"} · {start}–{end}
+                  {label.trim() || "Sans nom"} ·{" "}
+                  {isTimed ? `${start}–${end}` : untimedTypeName}
                 </Text>
               </View>
-              <Text style={[styles.previewHours, { color: colors.accent }]}>
-                {formatPaidHours(paidMinutes)}
-              </Text>
+              {isTimed ? (
+                <Text style={[styles.previewHours, { color: colors.accent }]}>
+                  {formatPaidHours(paidMinutes)}
+                </Text>
+              ) : null}
             </View>
           </View>
 
@@ -408,6 +477,11 @@ export default function PresetEditorScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Feuille « Nouveau type » : le type créé est sélectionné d'office */}
+      {isTypeSheetOpen ? (
+        <TypeSheet onClose={() => setIsTypeSheetOpen(false)} onCreated={handleTypeCreated} />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -444,31 +518,6 @@ const styles = StyleSheet.create({
     fontSize: typeScale.body,
     fontFamily: fonts.medium,
     minHeight: 52,
-  },
-  // Chips TYPE : sélection = fond accent + coche (décision maquette : le type
-  // d'un créneau type est vert, contrairement aux chips durée en encre).
-  typeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  typeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  typeChipLabel: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.medium,
-  },
-  typeChipLabelSelected: {
-    fontFamily: fonts.semiBold,
   },
   // Deux cartes blanches Début/Fin côte à côte, flèche entre les deux.
   timesRow: {

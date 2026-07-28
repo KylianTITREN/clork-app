@@ -435,6 +435,7 @@ const styles = StyleSheet.create({
   hatchStripe: {
     height: HATCH_STRIPE,
     backgroundColor: "#F4F2EC",
+    opacity: 0.55,
   },
   hatchedCard: {
     borderRadius: radius.lg,
