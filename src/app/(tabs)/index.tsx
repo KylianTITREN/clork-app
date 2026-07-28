@@ -778,9 +778,27 @@ export default function HomeScreen() {
             if (next === "week") setMonday(mondayOf(new Date()));
           }}
         />
-        <Text style={[styles.collapsedInfo, { color: colors.text }]} numberOfLines={1}>
-          {collapsedInfo}
-        </Text>
+        {view === "week" ? (
+          // Maquette « hero replié » : la navigation de semaine reste disponible.
+          <View style={styles.collapsedWeekNav}>
+            <Pressable onPress={() => setMonday((c) => addDays(c, -7))} hitSlop={10}>
+              <Ionicons name="chevron-back" size={16} color={colors.text} />
+            </Pressable>
+            <Text style={[styles.collapsedWeekLabel, { color: colors.text }]} numberOfLines={1}>
+              {weekLabel(monday)}
+            </Text>
+            <Pressable onPress={() => setMonday((c) => addDays(c, 7))} hitSlop={10}>
+              <Ionicons name="chevron-forward" size={16} color={colors.text} />
+            </Pressable>
+            <Text style={[styles.collapsedTotal, { color: colors.accent }]}>
+              {formatHours(weekHours)}
+            </Text>
+          </View>
+        ) : (
+          <Text style={[styles.collapsedInfo, { color: colors.text }]} numberOfLines={1}>
+            {collapsedInfo}
+          </Text>
+        )}
       </Animated.View>
 
       {!viewing ? (
@@ -966,6 +984,20 @@ const styles = StyleSheet.create({
     fontSize: typeScale.body,
     fontFamily: fonts.bold,
     letterSpacing: letterSpacing.heading,
+  },
+  collapsedWeekNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 2,
+  },
+  collapsedWeekLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.bold,
+  },
+  collapsedTotal: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.bold,
+    marginLeft: spacing.xs,
   },
   avatar: {
     width: 38,

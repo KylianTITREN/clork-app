@@ -2,8 +2,9 @@
 // bodySm/semiBold + sous-titre caption à gauche, toggle à droite ; réglage
 // conditionnel (heure sur fond neutre, jour en chips) sous la ligne du toggle.
 
+import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Switch, Text, View, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
@@ -38,12 +39,25 @@ export default function NotificationsSettingsScreen() {
 
   const [prefs, setPrefs] = useState<ReminderPrefs | null>(null);
   const [shifts, setShifts] = useState<ReminderShift[]>([]);
+  // Verrou : veille/matin n'ont de sens qu'avec MON planning importé.
+  // Le rappel scan hebdo reste actif (il sert justement au premier scan).
+  const [hasOwnPlanning, setHasOwnPlanning] = useState(true);
 
   const userId = session?.user.id;
 
   useEffect(() => {
     getReminderPrefs().then(setPrefs);
   }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from("shifts")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1)
+      .then(({ data }) => setHasOwnPlanning((data ?? []).length > 0));
+  }, [userId]);
 
   // Créneaux des 7 prochains jours, pour planifier veille + matin.
   useEffect(() => {
@@ -117,7 +131,26 @@ export default function NotificationsSettingsScreen() {
       >
         <SubPageHeader title="Notifications" />
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {!hasOwnPlanning ? (
+          <Pressable
+            onPress={() => router.navigate("/(tabs)/scan")}
+            style={[styles.lockBanner, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Text style={[styles.lockBannerText, { color: colors.textSoft }]}>
+              Ajoute d'abord TON planning — ces rappels se basent sur tes horaires.
+            </Text>
+            <Text style={[styles.lockBannerCta, { color: colors.accent }]}>Scanner ›</Text>
+          </Pressable>
+        ) : null}
+
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            !hasOwnPlanning && styles.cardLocked,
+          ]}
+          pointerEvents={hasOwnPlanning ? "auto" : "none"}
+        >
           {renderToggleRow(
             "La veille au soir",
             "« Demain : 09:00–17:00 (1h de pause) »",
@@ -133,7 +166,14 @@ export default function NotificationsSettingsScreen() {
           ) : null}
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            !hasOwnPlanning && styles.cardLocked,
+          ]}
+          pointerEvents={hasOwnPlanning ? "auto" : "none"}
+        >
           {renderToggleRow(
             "Le matin même",
             "Petit rappel avant de partir",
@@ -182,6 +222,28 @@ export default function NotificationsSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  cardLocked: {
+    opacity: 0.45,
+  },
+  lockBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  lockBannerText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 17,
+  },
+  lockBannerCta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
   safeArea: { flex: 1 },
   content: { padding: spacing.lg, gap: 12 },
   card: {
