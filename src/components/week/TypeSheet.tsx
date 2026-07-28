@@ -250,6 +250,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     gap: 14,
+    overflow: "hidden",
   },
   grabber: {
     alignSelf: "center",

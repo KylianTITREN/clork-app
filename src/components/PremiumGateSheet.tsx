@@ -96,6 +96,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     alignItems: "center",
     gap: spacing.sm + 2,
+    overflow: "hidden",
   },
   grabber: {
     width: 40,
