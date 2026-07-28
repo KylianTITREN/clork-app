@@ -120,8 +120,9 @@ export default function SignInScreen() {
               </Text>
             </View>
 
-            {/* Champ e-mail seul, directement sous le hero (maquette 4f). */}
-            <View style={styles.form}>
+            {/* Champ e-mail + bouton CENTRÉS entre hero et pied (préférence
+                Kylian, assumée contre la maquette qui les ancrait en haut). */}
+            <View style={[styles.form, styles.formCentered]}>
               <TextField
                 label="Email"
                 autoCapitalize="none"
@@ -234,6 +235,11 @@ const styles = StyleSheet.create({
     paddingTop: 22,
     paddingHorizontal: spacing.lg,
     gap: spacing.sm + 4,
+  },
+  formCentered: {
+    flex: 1,
+    justifyContent: "center",
+    paddingTop: 0,
   },
   footer: {
     marginTop: "auto",
