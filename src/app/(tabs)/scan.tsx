@@ -33,7 +33,8 @@ import { ReviewStep } from "@/components/scan/ReviewStep";
 import { SuccessView } from "@/components/scan/SuccessView";
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import { Button } from "@/components/ui/Button";
-import { Segmented } from "@/components/ui/Segmented";
+import { ChoiceChips } from "@/components/ui/ChoiceChips";
+import { TimePickerField } from "@/components/ui/TimePickerField";
 import { WizardFrame } from "@/components/ui/WizardFrame";
 import {
   fonts,
@@ -43,6 +44,7 @@ import {
   spacing,
   typeScale,
   useThemeColors,
+  type ShiftPeriod,
 } from "@/constants/tokens";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, isoDate, mondayOf, weekLabel } from "@/lib/dates";
@@ -112,10 +114,9 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   exif: false,
 };
 
-// --- Ajout manuel (maquette « Ajouter à la main ») ---------------------------
+// --- Ajout manuel (maquette écran 1 « Ajouter à la main ») -------------------
 
 type ManualType = "work" | "off" | "cp" | "training" | "meeting";
-type ManualMode = "single" | "range";
 
 const MANUAL_TYPES: readonly { value: ManualType; label: string }[] = [
   { value: "work", label: "Travail" },
@@ -124,6 +125,9 @@ const MANUAL_TYPES: readonly { value: ManualType; label: string }[] = [
   { value: "training", label: "Formation" },
   { value: "meeting", label: "Réunion" },
 ];
+
+// Types avec horaires (cartes Horaires + Pause visibles) ; Repos/CP = journée.
+const MANUAL_TIMED_TYPES: readonly ManualType[] = ["work", "training", "meeting"];
 
 // Garde-fou multi-jours (même règle que ShiftEditorModal) : jamais plus de 31.
 const MAX_RANGE_DAYS = 31;
@@ -144,39 +148,50 @@ const CARD_DATE_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   month: "short",
 });
 
-const RANGE_DATE_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
-  day: "numeric",
-  month: "long",
-});
-
 function cardDateLabel(iso: string): string {
   return CARD_DATE_FORMATTER.format(new Date(`${iso}T12:00:00`));
 }
 
-/** « du 12 au 20 août » (mois élidé au départ si identique), sinon « du 28 juillet au 3 août ». */
-function manualRangeLabel(from: string, to: string): string {
-  const sameMonth = from.slice(0, 7) === to.slice(0, 7);
-  const fromLabel = sameMonth
-    ? String(Number(from.slice(8, 10)))
-    : RANGE_DATE_FORMATTER.format(new Date(`${from}T12:00:00`));
-  return `du ${fromLabel} au ${RANGE_DATE_FORMATTER.format(new Date(`${to}T12:00:00`))}`;
+// Horaires par défaut du mode « Inventé » avant tout choix de créneau type.
+const MANUAL_DEFAULT_START = "09:00";
+const MANUAL_DEFAULT_END = "17:30";
+const MANUAL_DEFAULT_BREAK_MINUTES = 60;
+
+// Chips de pause de la maquette (le choix libre passe par « Autre… »).
+const MANUAL_PAUSE_PRESETS: readonly { minutes: number; label: string }[] = [
+  { minutes: 0, label: "Aucune" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 45, label: "45 min" },
+  { minutes: 60, label: "1h" },
+];
+const MAX_CUSTOM_PAUSE_MINUTES = 600;
+
+/** 75 → « 1h15 », 45 → « 45 min ». */
+function formatPauseMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
 }
 
-// Encart contextuel quand le type ne demande pas d'horaires.
-const MANUAL_NOTICE_WORDING: Record<Exclude<ManualType, "work">, { noun: string; label: string }> = {
-  off: { noun: "un repos", label: "Repos" },
-  cp: { noun: "un congé", label: "CP" },
-  training: { noun: "une formation", label: "Formation" },
-  meeting: { noun: "une réunion", label: "Réunion" },
-};
+/** « 7,5h payées » — amplitude − pause, recalculé live, jamais négatif. */
+function paidHoursLabel(start: string, end: string, pauseMinutes: number): string {
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  const paidMinutes = Math.max(0, eh * 60 + em - (sh * 60 + sm) - pauseMinutes);
+  const rounded = Math.round((paidMinutes / 60) * 10) / 10;
+  return `${String(rounded).replace(".", ",")}h payées`;
+}
 
-function manualTypeNotice(type: Exclude<ManualType, "work">, count: number): string {
-  const { noun, label } = MANUAL_NOTICE_WORDING[type];
-  const effect =
-    count > 1
-      ? `les ${count} jours passeront en ${label} d'un coup`
-      : `ce jour passera directement en ${label}`;
-  return `Pas d'horaires à saisir pour ${noun} — ${effect}.`;
+function timeToDate(value: string): Date {
+  const d = new Date();
+  const [h, m] = value.split(":").map(Number);
+  d.setHours(h || 9, m || 0, 0, 0);
+  return d;
+}
+
+function toHHMM(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 // Quota de scans du plan gratuit : 1 / 30 jours (compte), 1 / 7 jours (invité).
@@ -187,19 +202,25 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type ManualDateCardProps = {
   label: string;
-  value: string; // "YYYY-MM-DD"
+  value: string | null; // "YYYY-MM-DD"
   onChange: (value: string) => void;
   minimumDate?: string;
+  /** Affiché en textDisabled tant qu'aucune date n'est choisie (« même jour »). */
+  placeholder?: string;
+  /** Pilule fond background (« AU — optionnel ») au lieu de blanche bordée. */
+  muted?: boolean;
 };
 
-/** Grande carte date de la maquette (« DU · mer 12 août ») sur le picker natif. */
-function ManualDateCard({ label, value, onChange, minimumDate }: ManualDateCardProps) {
+/** Pilule date de la maquette (« DU · mer 29 juil. ») sur le picker natif. */
+function ManualDateCard({ label, value, onChange, minimumDate, placeholder, muted }: ManualDateCardProps) {
   const colors = useThemeColors();
   const [isOpen, setIsOpen] = useState(false);
-  const [draft, setDraft] = useState<Date>(() => new Date(`${value}T12:00:00`));
+  const [draft, setDraft] = useState<Date>(
+    () => new Date(`${value ?? minimumDate ?? isoDate(new Date())}T12:00:00`),
+  );
 
   function open() {
-    setDraft(new Date(`${value}T12:00:00`));
+    setDraft(new Date(`${value ?? minimumDate ?? isoDate(new Date())}T12:00:00`));
     setIsOpen(true);
   }
 
@@ -213,16 +234,21 @@ function ManualDateCard({ label, value, onChange, minimumDate }: ManualDateCardP
       <Pressable
         onPress={open}
         accessibilityRole="button"
-        style={[styles.dateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        style={[
+          styles.dateCard,
+          muted
+            ? { backgroundColor: colors.background, borderColor: "transparent" }
+            : { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
       >
         <Text style={[styles.dateCardLabel, { color: colors.textMuted }]}>{label}</Text>
         <Text
-          style={[styles.dateCardValue, { color: colors.text }]}
+          style={[styles.dateCardValue, { color: value ? colors.text : colors.textDisabled }]}
           numberOfLines={1}
           adjustsFontSizeToFit
           minimumFontScale={0.7}
         >
-          {cardDateLabel(value)}
+          {value ? cardDateLabel(value) : (placeholder ?? "—")}
         </Text>
       </Pressable>
 
@@ -265,6 +291,187 @@ function ManualDateCard({ label, value, onChange, minimumDate }: ManualDateCardP
   );
 }
 
+type ManualTimeZoneProps = {
+  value: string; // "HH:MM"
+  onChange: (value: string) => void;
+};
+
+/** Zone tappable du gros horaire (« 09:00 » / « 17:30 ») sur le picker natif. */
+function ManualTimeZone({ value, onChange }: ManualTimeZoneProps) {
+  const colors = useThemeColors();
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<Date>(() => timeToDate(value));
+
+  function open() {
+    setDraft(timeToDate(value));
+    setIsOpen(true);
+  }
+
+  function confirm() {
+    onChange(toHHMM(draft));
+    setIsOpen(false);
+  }
+
+  return (
+    <>
+      <Pressable onPress={open} accessibilityRole="button" hitSlop={8}>
+        <Text style={[styles.bigTimeValue, { color: colors.text }]}>{value}</Text>
+      </Pressable>
+
+      {isOpen ? (
+        Platform.OS === "ios" ? (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setIsOpen(false)}>
+            <Pressable style={styles.dateBackdrop} onPress={() => setIsOpen(false)} />
+            <View
+              style={[
+                styles.dateSheet,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                softShadow,
+              ]}
+            >
+              <DateTimePicker
+                value={draft}
+                mode="time"
+                display="spinner"
+                minuteInterval={5}
+                onChange={(_, date) => date && setDraft(date)}
+                locale="fr-FR"
+              />
+              <Button label="Valider" onPress={confirm} />
+            </View>
+          </Modal>
+        ) : (
+          <DateTimePicker
+            value={draft}
+            mode="time"
+            display="clock"
+            onChange={(event, date) => {
+              setIsOpen(false);
+              if (event.type === "set" && date) onChange(toHHMM(date));
+            }}
+          />
+        )
+      ) : null}
+    </>
+  );
+}
+
+type ManualPauseChipsProps = {
+  value: number; // minutes
+  onChange: (minutes: number) => void;
+};
+
+/**
+ * Chips de pause maquette — sélection ENCRE (le vert reste aux CTA/totaux).
+ * « Autre… » ouvre une saisie libre en minutes et affiche la valeur custom.
+ */
+function ManualPauseChips({ value, onChange }: ManualPauseChipsProps) {
+  const colors = useThemeColors();
+  const [isEditing, setIsEditing] = useState(false);
+  const [text, setText] = useState("");
+  const isCustomValue = !MANUAL_PAUSE_PRESETS.some((preset) => preset.minutes === value);
+
+  function openEditor() {
+    setText(isCustomValue ? String(value) : "");
+    setIsEditing(true);
+  }
+
+  function commit() {
+    const minutes = Math.round(Number(text));
+    if (Number.isFinite(minutes) && minutes >= 0 && minutes <= MAX_CUSTOM_PAUSE_MINUTES) {
+      onChange(minutes);
+    }
+    setIsEditing(false);
+  }
+
+  return (
+    <View style={styles.pauseChipsBlock}>
+      <View style={styles.pauseChipRow}>
+        {MANUAL_PAUSE_PRESETS.map(({ minutes, label }) => {
+          const selected = value === minutes;
+          return (
+            <Pressable
+              key={minutes}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => {
+                setIsEditing(false);
+                onChange(minutes);
+              }}
+              style={[
+                styles.pauseChip,
+                selected
+                  ? { backgroundColor: colors.ink, borderColor: colors.ink }
+                  : { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.pauseChipLabel,
+                  selected
+                    ? [styles.pauseChipLabelSelected, { color: colors.onInk }]
+                    : { color: colors.textSoft },
+                ]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+
+        <Pressable
+          onPress={openEditor}
+          accessibilityRole="button"
+          accessibilityState={{ selected: isCustomValue }}
+          style={[
+            styles.pauseChip,
+            isCustomValue
+              ? { backgroundColor: colors.ink, borderColor: colors.ink }
+              : { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text
+            style={[
+              styles.pauseChipLabel,
+              isCustomValue
+                ? [styles.pauseChipLabelSelected, { color: colors.onInk }]
+                : { color: colors.textSoft },
+            ]}
+          >
+            {isCustomValue ? formatPauseMinutes(value) : "Autre…"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {isEditing ? (
+        <View style={styles.pauseEditorRow}>
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            keyboardType="number-pad"
+            autoFocus
+            placeholder="minutes"
+            placeholderTextColor={colors.textDisabled}
+            onSubmitEditing={commit}
+            style={[
+              styles.pauseEditorInput,
+              { backgroundColor: colors.background, borderColor: colors.border, color: colors.text },
+            ]}
+          />
+          <Text style={[styles.pauseEditorUnit, { color: colors.textMuted }]}>min</Text>
+          <Pressable
+            onPress={commit}
+            accessibilityRole="button"
+            style={[styles.pauseEditorOk, { backgroundColor: colors.ink }]}
+          >
+            <Text style={[styles.pauseEditorOkLabel, { color: colors.onInk }]}>OK</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function paidOf(draft: DraftShift): number {
   if (draft.durationHours != null) return draft.durationHours;
   if (!draft.start || !draft.end) return 0;
@@ -283,10 +490,17 @@ export default function AddWizardScreen() {
   const [isJoining, setIsJoining] = useState(false);
   const [manualDate, setManualDate] = useState<string>(isoDate(new Date()));
   const [manualEndDate, setManualEndDate] = useState<string | null>(null);
-  const [manualMode, setManualMode] = useState<ManualMode>("single");
   const [manualType, setManualType] = useState<ManualType>("work");
   const [manualPresets, setManualPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
+  // null = « ✏️ Inventé » (saisie libre) ; sinon id du créneau type appliqué.
   const [manualPresetId, setManualPresetId] = useState<string | null>(null);
+  const [manualStart, setManualStart] = useState<string>(MANUAL_DEFAULT_START);
+  const [manualEnd, setManualEnd] = useState<string>(MANUAL_DEFAULT_END);
+  const [manualPause, setManualPause] = useState<number>(MANUAL_DEFAULT_BREAK_MINUTES);
+  const [manualPauseStart, setManualPauseStart] = useState<string | null>(null);
+  // Catégorie héritée du dernier créneau type appliqué (conservée si l'horaire
+  // est ensuite ajusté à la main — même logique que ShiftEditorModal).
+  const [manualPeriod, setManualPeriod] = useState<ShiftPeriod | null>(null);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [pickWeekChoice, setPickWeekChoice] = useState<string>(mondayOf(new Date()));
@@ -304,10 +518,26 @@ export default function AddWizardScreen() {
   );
 
   // Créneaux types rechargés à chaque entrée dans « Ajouter à la main » :
-  // une modif dans Profil → Créneaux types doit être reflétée ici.
+  // une modif dans Profil → Créneaux types doit être reflétée ici. Le premier
+  // créneau est pré-appliqué (maquette : un créneau sélectionné d'office).
   useEffect(() => {
     if (state.step !== "manual") return;
-    loadPresets().then(setManualPresets);
+    let cancelled = false;
+    loadPresets().then((presets) => {
+      if (cancelled) return;
+      setManualPresets(presets);
+      const first = presets[0];
+      if (first) {
+        setManualPresetId(first.id);
+        setManualStart(first.start);
+        setManualEnd(first.end);
+        setManualPause(first.breakMinutes);
+        setManualPeriod(first.period ?? null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [state.step]);
 
   // Quota réel du sous-titre (« 1 scan restant ce mois. ») — best-effort :
@@ -525,34 +755,52 @@ export default function AddWizardScreen() {
   function openManualStep() {
     setManualDate(isoDate(new Date()));
     setManualEndDate(null);
-    setManualMode("single");
     setManualType("work");
     setManualPresetId(null);
+    setManualStart(MANUAL_DEFAULT_START);
+    setManualEnd(MANUAL_DEFAULT_END);
+    setManualPause(MANUAL_DEFAULT_BREAK_MINUTES);
+    setManualPauseStart(null);
+    setManualPeriod(null);
     setState({ step: "manual" });
   }
 
   function handleManualStartChange(next: string) {
     setManualDate(next);
-    // La fin doit rester après le début (plage cohérente).
-    if (manualEndDate && manualEndDate <= next) setManualEndDate(addDays(next, 1));
+    // La fin doit rester après le début : sinon la plage retombe sur « même jour ».
+    if (manualEndDate && manualEndDate <= next) setManualEndDate(null);
+  }
+
+  /** Un créneau type remplit heures, pause et catégorie en un tap. */
+  function applyManualPreset(preset: ShiftPreset) {
+    setManualPresetId(preset.id);
+    setManualStart(preset.start);
+    setManualEnd(preset.end);
+    setManualPause(preset.breakMinutes);
+    setManualPeriod(preset.period ?? null);
+  }
+
+  /** Ajuster un horaire à la main fait basculer la pilule sur « Inventé ». */
+  function handleManualTimeChange(edge: "start" | "end", value: string) {
+    if (edge === "start") setManualStart(value);
+    else setManualEnd(value);
+    setManualPresetId(null);
   }
 
   // Écrit directement en base, comme ShiftEditorModal en mode create :
-  // une ligne shifts par date, horaires du créneau type si Travail.
+  // une ligne shifts par date (« AU » optionnel = plage multi-dates, ≤ 31 j),
+  // horaires + pause du gros horaire pour les types travaillés.
   async function saveManualDays() {
     if (!userId) return;
-    const dates =
-      manualMode === "range" && manualEndDate && manualEndDate > manualDate
-        ? datesBetween(manualDate, manualEndDate)
-        : [manualDate];
-    const preset =
-      manualType === "work"
-        ? (manualPresets.find((p) => p.id === manualPresetId) ?? null)
-        : null;
-    if (manualType === "work" && !preset) {
-      Alert.alert("Choisis un créneau", "Sélectionne un de tes créneaux types pour les horaires.");
+    const isTimed = MANUAL_TIMED_TYPES.includes(manualType);
+    if (isTimed && manualEnd <= manualStart) {
+      Alert.alert("Horaire invalide", "La fin doit être après le début.");
       return;
     }
+    const dates =
+      manualEndDate && manualEndDate > manualDate
+        ? datesBetween(manualDate, manualEndDate)
+        : [manualDate];
     setIsSaving(true);
     try {
       const rows = dates.map((day) => ({
@@ -560,12 +808,12 @@ export default function AddWizardScreen() {
         source: "manual",
         date: day,
         type: manualType,
-        start_at: preset ? new Date(`${day}T${preset.start}:00`).toISOString() : null,
-        end_at: preset ? new Date(`${day}T${preset.end}:00`).toISOString() : null,
-        break_minutes: preset ? preset.breakMinutes : 0,
-        break_start: null,
+        start_at: isTimed ? new Date(`${day}T${manualStart}:00`).toISOString() : null,
+        end_at: isTimed ? new Date(`${day}T${manualEnd}:00`).toISOString() : null,
+        break_minutes: isTimed ? manualPause : 0,
+        break_start: isTimed && manualPause > 0 ? manualPauseStart : null,
         note: null,
-        period: preset?.period ?? null,
+        period: isTimed ? manualPeriod : null,
         is_edited: true,
       }));
       const { error } = await supabase.from("shifts").insert(rows);
@@ -878,16 +1126,8 @@ export default function AddWizardScreen() {
   }
 
   if (state.step === "manual") {
-    const isWork = manualType === "work";
-    const dayCount =
-      manualMode === "range" && manualEndDate && manualEndDate > manualDate
-        ? datesBetween(manualDate, manualEndDate).length
-        : 1;
-    const typeLabel = MANUAL_TYPES.find((t) => t.value === manualType)?.label ?? "";
-    const recapValue =
-      manualMode === "range" && manualEndDate && dayCount > 1
-        ? `${typeLabel} · ${manualRangeLabel(manualDate, manualEndDate)} · ${dayCount} jours`
-        : `${typeLabel} · ${cardDateLabel(manualDate)}`;
+    const isTimed = MANUAL_TIMED_TYPES.includes(manualType);
+    const cardSurface = { backgroundColor: colors.surface, borderColor: colors.border };
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
         <ScrollView
@@ -900,108 +1140,73 @@ export default function AddWizardScreen() {
             Un jour ou une suite de jours
           </Text>
 
-          {/* QUAND ? — un jour ou une plage */}
-          <View style={styles.manualLabelRow}>
-            <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>Quand ?</Text>
-            <Segmented
-              options={[
-                { value: "single", label: "Un jour" },
-                { value: "range", label: "Plusieurs jours" },
-              ]}
-              value={manualMode}
-              onChange={(mode) => {
-                setManualMode(mode);
-                if (mode === "range" && (!manualEndDate || manualEndDate <= manualDate)) {
-                  setManualEndDate(addDays(manualDate, 1));
-                }
-              }}
-            />
-          </View>
-          {manualMode === "range" ? (
-            <>
-              <View style={styles.dateRow}>
-                <ManualDateCard label="Du" value={manualDate} onChange={handleManualStartChange} />
-                <Ionicons name="arrow-forward" size={16} color={colors.textDisabled} />
-                <ManualDateCard
-                  label="Au"
-                  value={manualEndDate ?? addDays(manualDate, 1)}
-                  onChange={setManualEndDate}
-                  minimumDate={addDays(manualDate, 1)}
-                />
-              </View>
-              <Text style={[styles.dayCount, { color: colors.accent }]}>
-                {dayCount} jour{dayCount > 1 ? "s" : ""}
-              </Text>
-            </>
-          ) : (
+          {/* Carte 1 — dates : « DU » + « AU — optionnel » */}
+          <View style={[styles.manualCard, cardSurface]}>
             <View style={styles.dateRow}>
-              <ManualDateCard label="Le" value={manualDate} onChange={handleManualStartChange} />
+              <ManualDateCard label="Du" value={manualDate} onChange={handleManualStartChange} />
+              <ManualDateCard
+                label="Au — optionnel"
+                value={manualEndDate}
+                placeholder="même jour"
+                muted
+                onChange={setManualEndDate}
+                minimumDate={addDays(manualDate, 1)}
+              />
             </View>
-          )}
+          </View>
+          <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
+            Une plage crée le même créneau sur chaque jour — pratique pour les CP.
+          </Text>
 
-          {/* C'EST QUOI ? — type du/des jour(s) */}
-          <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>C'est quoi ?</Text>
-          <View style={styles.typeChipRow}>
-            {MANUAL_TYPES.map((option) => {
-              const selected = option.value === manualType;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setManualType(option.value)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  style={[
-                    styles.typeChip,
-                    selected
-                      ? { backgroundColor: colors.accent, borderColor: colors.accent }
-                      : { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.typeChipLabel,
-                      selected
-                        ? [styles.typeChipLabelSelected, { color: colors.onAccent }]
-                        : { color: colors.textSoft },
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                  {selected ? <Ionicons name="checkmark" size={14} color={colors.onAccent} /> : null}
-                </Pressable>
-              );
-            })}
+          {/* Carte 2 — type : sélection encre */}
+          <View style={[styles.manualCard, cardSurface]}>
+            <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>Type</Text>
+            <ChoiceChips options={MANUAL_TYPES} value={manualType} onChange={setManualType} />
           </View>
 
-          {/* Encart contextuel : pas d'horaires pour les types non travaillés */}
-          {!isWork ? (
-            <View style={[styles.noticeCard, { backgroundColor: colors.accentMuted }]}>
-              <View style={[styles.noticeDot, { backgroundColor: colors.accent }]} />
-              <Text style={[styles.noticeText, { color: colors.accentDeep }]}>
-                {manualTypeNotice(manualType, dayCount)}
-              </Text>
-            </View>
-          ) : null}
-
-          {/* Créneaux types : actifs si Travail, grisés sinon */}
-          <View style={[styles.presetBox, { borderColor: colors.border }]}>
-            <Text style={[styles.presetBoxLabel, { color: colors.textDisabled }]}>
-              Si Travail : tes créneaux types apparaissent ici
-            </Text>
-            <View style={[styles.presetPillRow, !isWork && styles.presetPillRowDisabled]}>
-              {manualPresets.map((preset) => {
-                const selected = isWork && manualPresetId === preset.id;
-                return (
+          {isTimed ? (
+            <>
+              {/* Carte 3 — horaires : créneaux types + gros horaire */}
+              <View style={[styles.manualCard, cardSurface]}>
+                <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
+                  Horaires — créneaux types
+                </Text>
+                <View style={styles.presetPillRow}>
+                  {manualPresets.map((preset) => {
+                    const selected = manualPresetId === preset.id;
+                    return (
+                      <Pressable
+                        key={preset.id}
+                        onPress={() => applyManualPreset(preset)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        style={[
+                          styles.presetPill,
+                          selected
+                            ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
+                            : { backgroundColor: colors.surface, borderColor: colors.border },
+                        ]}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.presetPillLabel,
+                            { color: selected ? colors.text : colors.textSoft },
+                          ]}
+                        >
+                          {preset.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                   <Pressable
-                    key={preset.id}
-                    disabled={!isWork}
-                    onPress={() => setManualPresetId(preset.id)}
+                    onPress={() => setManualPresetId(null)}
                     accessibilityRole="button"
-                    accessibilityState={{ selected, disabled: !isWork }}
+                    accessibilityState={{ selected: manualPresetId === null }}
                     style={[
                       styles.presetPill,
-                      selected
-                        ? { backgroundColor: colors.accent, borderColor: colors.accent }
+                      manualPresetId === null
+                        ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
                         : { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
@@ -1009,37 +1214,56 @@ export default function AddWizardScreen() {
                       numberOfLines={1}
                       style={[
                         styles.presetPillLabel,
-                        { color: selected ? colors.onAccent : colors.text },
+                        { color: manualPresetId === null ? colors.text : colors.textSoft },
                       ]}
                     >
-                      {preset.start}–{preset.end}
+                      ✏️ Inventé
                     </Text>
                   </Pressable>
-                );
-              })}
-            </View>
-          </View>
+                </View>
 
-          {/* Récap */}
-          <View style={[styles.recapRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.recapLabel, { color: colors.textMuted }]}>Récap</Text>
-            <Text
-              style={[styles.recapValue, { color: colors.text }]}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-            >
-              {recapValue}
-            </Text>
-          </View>
+                <View style={[styles.bigTimeBox, { backgroundColor: colors.background }]}>
+                  <ManualTimeZone
+                    value={manualStart}
+                    onChange={(value) => handleManualTimeChange("start", value)}
+                  />
+                  <Text style={[styles.bigTimeArrow, { color: colors.textMuted }]}>→</Text>
+                  <ManualTimeZone
+                    value={manualEnd}
+                    onChange={(value) => handleManualTimeChange("end", value)}
+                  />
+                </View>
+                <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
+                  Un créneau type remplit heures et pause en un tap.
+                </Text>
+              </View>
+
+              {/* Carte 4 — pause : durée + total payé en vert */}
+              <View style={[styles.manualCard, cardSurface]}>
+                <View style={styles.pauseHeaderRow}>
+                  <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
+                    Pause — durée
+                  </Text>
+                  <Text style={[styles.paidHours, { color: colors.accent }]}>
+                    {paidHoursLabel(manualStart, manualEnd, manualPause)}
+                  </Text>
+                </View>
+                <ManualPauseChips value={manualPause} onChange={setManualPause} />
+                {manualPause > 0 ? (
+                  <TimePickerField
+                    value={manualPauseStart}
+                    onChange={setManualPauseStart}
+                    placeholder="12:30"
+                    label="Prise à"
+                    variant="row"
+                  />
+                ) : null}
+              </View>
+            </>
+          ) : null}
 
           <View style={styles.flexSpacer} />
-          <Button
-            label={dayCount > 1 ? `Ajouter ces ${dayCount} jours` : "Ajouter ce jour"}
-            onPress={saveManualDays}
-            isLoading={isSaving}
-          />
-          <Button label="Annuler" variant="ghost" onPress={() => setState({ step: "method" })} />
+          <Button label="Ajouter à ma semaine" onPress={saveManualDays} isLoading={isSaving} />
         </ScrollView>
       </WizardFrame>
     );
@@ -1305,11 +1529,16 @@ const styles = StyleSheet.create({
   flexSpacer: {
     flexGrow: 1,
   },
-  manualLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: spacing.xs,
+  manualCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 12,
+  },
+  manualCaption: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 18,
   },
   manualSectionLabel: {
     fontSize: typeScale.tiny,
@@ -1355,106 +1584,100 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.sm,
   },
-  dayCount: {
-    textAlign: "center",
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
-  },
-  typeChipRow: {
+  presetPillRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 7,
   },
-  typeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
+  presetPill: {
     borderRadius: 10,
     borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 40,
     justifyContent: "center",
   },
-  typeChipLabel: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.medium,
-  },
-  typeChipLabelSelected: {
-    fontFamily: fonts.semiBold,
-  },
-  noticeCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderRadius: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 13,
-  },
-  noticeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  noticeText: {
-    flex: 1,
-    fontSize: typeScale.caption,
-    fontFamily: fonts.medium,
-    lineHeight: 18,
-  },
-  presetBox: {
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    gap: 8,
-  },
-  presetBoxLabel: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.semiBold,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  presetPillRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  presetPillRowDisabled: {
-    opacity: 0.4,
-  },
-  presetPill: {
-    flexGrow: 1,
-    flexBasis: "28%",
-    alignItems: "center",
-    borderRadius: 9,
-    borderWidth: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
   presetPillLabel: {
-    fontSize: typeScale.tiny,
+    fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
-  recapRow: {
+  bigTimeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    borderRadius: radius.sm,
+    paddingVertical: 14,
+  },
+  bigTimeValue: {
+    fontSize: 29,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.6,
+  },
+  bigTimeArrow: {
+    fontSize: 20,
+    fontFamily: fonts.medium,
+  },
+  pauseHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
   },
-  recapLabel: {
+  paidHours: {
     fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
+  },
+  pauseChipsBlock: {
+    gap: spacing.sm,
+  },
+  pauseChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+  },
+  pauseChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  pauseChipLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
+  },
+  pauseChipLabelSelected: {
     fontFamily: fonts.semiBold,
   },
-  recapValue: {
-    flexShrink: 1,
+  pauseEditorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  pauseEditorInput: {
+    width: 96,
+    borderRadius: radius.input,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    fontSize: typeScale.body,
+    fontFamily: fonts.medium,
+  },
+  pauseEditorUnit: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  pauseEditorOk: {
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  pauseEditorOkLabel: {
     fontSize: typeScale.bodySm,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.semiBold,
   },
   codeInput: {
     borderRadius: radius.input,

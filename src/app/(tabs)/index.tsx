@@ -19,10 +19,10 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
 import { Segmented } from "@/components/ui/Segmented";
-import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import {
   fonts,
   letterSpacing,
@@ -99,7 +99,8 @@ export default function HomeScreen() {
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
-  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  // Écran plein « Édition d'un jour » : date + créneaux existants du jour.
+  const [dayEditor, setDayEditor] = useState<{ date: string; shifts: Shift[] } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const plan = usePlan();
   const [displayName, setDisplayName] = useState("");
@@ -375,16 +376,8 @@ export default function HomeScreen() {
       : `${formatHours(weekHours)} payées`;
 
   function openDayEditor(date: string, dayShifts: Shift[]) {
-    if (viewing) return;
-    if (dayShifts.length === 1) {
-      setEditorTarget({ mode: "edit", shift: dayShifts[0] });
-    } else if (dayShifts.length === 0 && userId) {
-      setEditorTarget({ mode: "create", date, userId });
-    } else {
-      // Multi-créneaux : la vue semaine déplie le jour pour choisir.
-      setView("week");
-      setExpandedDay(date);
-    }
+    if (viewing || !userId) return;
+    setDayEditor({ date, shifts: dayShifts });
   }
 
   // --- Rendus partagés ---------------------------------------------------------
@@ -645,8 +638,8 @@ export default function HomeScreen() {
                     status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
                     readOnly={!!viewing}
                     onPress={() =>
-                      dayShifts.length === 0 && !viewing && userId
-                        ? setEditorTarget({ mode: "create", date, userId })
+                      dayShifts.length === 0
+                        ? openDayEditor(date, dayShifts)
                         : setExpandedDay(isExpanded ? null : date)
                     }
                   />
@@ -721,7 +714,7 @@ export default function HomeScreen() {
                     ) : null}
                     {!viewing ? (
                       <Pressable
-                        onPress={() => setEditorTarget({ mode: "edit", shift: first })}
+                        onPress={() => openDayEditor(date, dayShifts)}
                         style={[styles.modifyButton, { backgroundColor: colors.ink }]}
                       >
                         <Text style={[styles.modifyLabel, { color: colors.onInk }]}>Modifier ce jour</Text>
@@ -841,11 +834,13 @@ export default function HomeScreen() {
         </Modal>
       ) : null}
 
-      {editorTarget ? (
-        <ShiftEditorModal
-          target={editorTarget}
+      {dayEditor && userId ? (
+        <DayEditorScreen
+          date={dayEditor.date}
+          shifts={dayEditor.shifts}
+          userId={userId}
           onClose={(didChange) => {
-            setEditorTarget(null);
+            setDayEditor(null);
             if (didChange) loadShifts();
           }}
         />

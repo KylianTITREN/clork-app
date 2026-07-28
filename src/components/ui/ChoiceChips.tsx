@@ -10,8 +10,9 @@ type ChoiceChipsProps<T extends string | number> = {
 };
 
 /**
- * Rangée de chips à choix unique — langage v2 : sélection = fond primaire
- * texte blanc, sinon carte blanche bordée texte #55524A. Cibles ≥ 44px.
+ * Rangée de chips à choix unique — langage v2 : sélection = ENCRE (fond ink,
+ * texte onInk), sinon carte blanche bordée texte #55524A. Le vert est réservé
+ * aux CTA/validation (décision maquette). Cibles ≥ 44px.
  */
 export function ChoiceChips<T extends string | number>({
   options,
@@ -33,7 +34,7 @@ export function ChoiceChips<T extends string | number>({
             style={[
               styles.chip,
               selected
-                ? { backgroundColor: colors.accent, borderColor: colors.accent }
+                ? { backgroundColor: colors.ink, borderColor: colors.ink }
                 : { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
@@ -41,7 +42,7 @@ export function ChoiceChips<T extends string | number>({
               style={[
                 styles.label,
                 selected
-                  ? [styles.labelSelected, { color: colors.onAccent }]
+                  ? [styles.labelSelected, { color: colors.onInk }]
                   : { color: colors.textSoft },
               ]}
             >
@@ -63,8 +64,8 @@ const styles = StyleSheet.create({
   chip: {
     borderRadius: 10,
     borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     minHeight: 44,
     justifyContent: "center",
   },
