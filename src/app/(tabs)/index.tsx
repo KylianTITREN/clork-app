@@ -267,9 +267,16 @@ export default function HomeScreen() {
   );
 
   // Écran « L'équipe » pleine page : l'uploader consulté (mode conjoint inclus)
-  // est passé en param ; l'écran gère lui-même l'état « pas de scan validé ».
+  // et la SEMAINE consultée (navigation ‹ › de la vue semaine) sont passés en
+  // params ; l'écran gère lui-même « pas de scan » et le verrou Premium.
   function openEquipe() {
-    router.push({ pathname: "/equipe", params: { ownerId: viewing?.id ?? userId ?? "" } } as never);
+    router.push({
+      pathname: "/equipe",
+      params: {
+        ownerId: viewing?.id ?? userId ?? "",
+        week: view === "week" ? monday : mondayOf(new Date()),
+      },
+    } as never);
   }
 
   async function handleExport() {

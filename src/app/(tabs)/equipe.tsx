@@ -61,6 +61,54 @@ function dayNumber(iso: string): string {
   return String(Number(iso.slice(8)));
 }
 
+const TIME_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+/** "09:00" / "9h30" → minutes depuis minuit (null si illisible). */
+function minutesOf(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = /^(\d{1,2})[:hH](\d{2})?$/.exec(value.trim());
+  return match ? Number(match[1]) * 60 + Number(match[2] ?? 0) : null;
+}
+
+/** Heures de la semaine : total extrait, sinon somme des jours/créneaux. */
+function weeklyHoursOf(employee: ExtractionEmployee): number | null {
+  if (employee.total_hours != null) return employee.total_hours;
+  let total = 0;
+  let found = false;
+  for (const day of employee.days) {
+    if (day.duration_hours != null) {
+      total += day.duration_hours;
+      found = true;
+      continue;
+    }
+    for (const slot of day.shifts) {
+      const start = minutesOf(slot.start);
+      const end = minutesOf(slot.end);
+      if (start != null && end != null && end > start) {
+        total += (end - start) / 60;
+        found = true;
+      }
+    }
+  }
+  return found ? total : null;
+}
+
+/** Clés canoniques « date|min-min » des créneaux TRAVAIL d'une ligne extraite. */
+function extractionSlotKeys(employee: ExtractionEmployee, monday: string): Set<string> {
+  const keys = new Set<string>();
+  for (const day of employee.days) {
+    if (day.status !== "work") continue;
+    for (const slot of day.shifts) {
+      const start = minutesOf(slot.start);
+      const end = minutesOf(slot.end);
+      if (start != null && end != null) {
+        keys.add(`${addDays(monday, day.day_index)}|${start}-${end}`);
+      }
+    }
+  }
+  return keys;
+}
+
 type DaySchedule = {
   label: string;
   isWork: boolean;
@@ -90,7 +138,7 @@ export default function EquipeScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const params = useLocalSearchParams<{ ownerId?: string }>();
+  const params = useLocalSearchParams<{ ownerId?: string; week?: string }>();
   const plan = usePlan();
   const isPremium = isPremiumPlan(plan);
 
@@ -98,7 +146,11 @@ export default function EquipeScreen() {
   // inclus) ; repli sur mon propre compte si le param manque.
   const ownerId = params.ownerId || session?.user.id || null;
   const isOwn = !ownerId || ownerId === session?.user.id;
-  const monday = mondayOf(new Date());
+  // Semaine CONSULTÉE, passée par l'accueil (navigation ‹ › de la vue
+  // semaine) — pas forcément la semaine courante.
+  const monday = /^\d{4}-\d{2}-\d{2}$/.test(params.week ?? "")
+    ? (params.week as string)
+    : mondayOf(new Date());
 
   const [scan, setScan] = useState<TeamScan | null>(null);
   // Planning suivi + personne suivie non-premium : verrou SANS déblocage
@@ -106,14 +158,15 @@ export default function EquipeScreen() {
   const [isBlockedByOwnerPlan, setIsBlockedByOwnerPlan] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSharing, setIsSharing] = useState(false);
-  // Défaut = aujourd'hui si dans la semaine du planning, sinon lundi.
+  // Défaut = aujourd'hui si dans la semaine consultée, sinon lundi.
   const [selectedIndex, setSelectedIndex] = useState(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const index = Array.from({ length: 7 }, (_, i) => addDays(mondayOf(new Date()), i)).indexOf(
-      today,
-    );
+    const index = Array.from({ length: 7 }, (_, i) => addDays(monday, i)).indexOf(today);
     return index === -1 ? 0 : index;
   });
+  // Le propriétaire a corrigé ses horaires après le scan → le scan s'est
+  // peut-être trompé ailleurs aussi (bandeau d'avertissement).
+  const [ownerEdited, setOwnerEdited] = useState(false);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const load = useCallback(async () => {
@@ -160,6 +213,35 @@ export default function EquipeScreen() {
         ?.row_index ?? null;
     setScan({ id: data.id, employees, myRow });
     setIsLoading(false);
+
+    // Fiabilité : si les créneaux ACTUELS du propriétaire ne correspondent
+    // plus à sa ligne extraite (correction après scan), le scan s'est
+    // peut-être trompé pour l'équipe aussi → bandeau. Best-effort.
+    const mine = employees.find((e) => e.row_index === myRow);
+    if (!mine) {
+      setOwnerEdited(false);
+      return;
+    }
+    const { data: ownerShifts } = await supabase
+      .from("shifts")
+      .select("date, start_at, end_at")
+      .eq("user_id", ownerId)
+      .eq("type", "work")
+      .gte("date", monday)
+      .lte("date", addDays(monday, 6));
+    const liveKeys = new Set(
+      (ownerShifts ?? [])
+        .filter((s) => s.start_at && s.end_at)
+        .map((s) => {
+          const start = minutesOf(TIME_FORMATTER.format(new Date(s.start_at as string)));
+          const end = minutesOf(TIME_FORMATTER.format(new Date(s.end_at as string)));
+          return `${s.date}|${start}-${end}`;
+        }),
+    );
+    const scanKeys = extractionSlotKeys(mine, monday);
+    const matches =
+      liveKeys.size === scanKeys.size && [...scanKeys].every((key) => liveKeys.has(key));
+    setOwnerEdited(!matches);
   }, [ownerId, isOwn, monday]);
 
   useFocusEffect(
@@ -274,8 +356,12 @@ export default function EquipeScreen() {
           <Text style={[styles.emptyTitle, { color: colors.text }]}>Pas de planning d'équipe</Text>
           <Text style={[styles.emptyText, { color: colors.textMuted }]}>
             {isOwn
-              ? "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues."
-              : "Aucun scan validé cette semaine sur ce planning suivi."}
+              ? `Aucun scan validé pour la semaine du ${WEEK_OF_FORMATTER.format(
+                  new Date(`${monday}T12:00:00`),
+                )} — scanne le planning pour voir les horaires des collègues.`
+              : `Pas de planning d'équipe pour la semaine du ${WEEK_OF_FORMATTER.format(
+                  new Date(`${monday}T12:00:00`),
+                )} sur ce planning suivi.`}
           </Text>
           {isOwn ? (
             <Button
@@ -329,6 +415,18 @@ export default function EquipeScreen() {
           })}
         </View>
 
+        {/* Le planning a été corrigé après le scan : les autres lignes du
+            scan sont peut-être fausses aussi — on prévient, sans bloquer. */}
+        {ownerEdited ? (
+          <View style={[styles.warnCard, { backgroundColor: colors.shiftCpSoft }]}>
+            <Ionicons name="alert-circle" size={16} color={colors.shiftCp} />
+            <Text style={[styles.warnText, { color: colors.shiftCp }]}>
+              Des horaires ont été corrigés après ce scan — les infos de l'équipe sont
+              peut-être erronées.
+            </Text>
+          </View>
+        ) : null}
+
         <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{sectionLabel}</Text>
 
         {/* Une carte par employé du scan, moi en premier. */}
@@ -373,6 +471,9 @@ export default function EquipeScreen() {
             const schedule = dayScheduleOf(
               employee.days.find((d) => d.day_index === selectedIndex),
             );
+            // Total extrait quand il existe, sinon recalculé depuis les jours
+            // (certains plannings n'impriment pas la colonne des totaux).
+            const weekHours = weeklyHoursOf(employee);
             const isOpen = expandedRow === employee.row_index;
             return (
               <Pressable
@@ -401,9 +502,11 @@ export default function EquipeScreen() {
                       ) : null}
                     </Text>
                     <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
-                      {employee.total_hours != null
-                        ? `${employee.total_hours}h cette semaine`
-                        : "—"}
+                      {weekHours != null
+                        ? `${weekHours.toLocaleString("fr-FR", {
+                            maximumFractionDigits: 1,
+                          })}h cette semaine`
+                        : "Heures non détaillées"}
                     </Text>
                   </View>
                   <View
@@ -589,6 +692,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     letterSpacing: 0.8,
     textTransform: "uppercase",
+  },
+  warnCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: radius.input,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  warnText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 16,
   },
   cardList: {
     gap: spacing.sm,
