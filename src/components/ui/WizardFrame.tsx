@@ -52,7 +52,7 @@ export function WizardFrame({
           accessibilityLabel={closeIcon === "close" ? "Fermer" : "Retour"}
           onPress={onClose}
           hitSlop={12}
-          style={[styles.closeButton, { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: closeIcon === "close" ? 11 : 18 }]}
+          style={[styles.closeButton, { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 11 }]}
         >
           <Ionicons
             name={closeIcon === "close" ? "close" : "chevron-back"}

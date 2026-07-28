@@ -19,7 +19,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TimePickerField } from "@/components/ui/TimePickerField";
@@ -363,6 +363,7 @@ type DayEditorScreenProps = {
 
 export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScreenProps) {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const [type, setType] = useState<ShiftType>(() => shifts[0]?.type ?? "work");
   const [slots, setSlots] = useState<SlotDraft[]>(() => hydrateSlots(shifts));
   const [isSaving, setIsSaving] = useState(false);
@@ -577,9 +578,16 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
 
   return (
     <Modal visible animationType="slide" onRequestClose={() => onClose(false)}>
-      <SafeAreaView
-        edges={["top", "bottom"]}
-        style={[styles.safeArea, { backgroundColor: colors.background }]}
+      {/* Insets MANUELS : SafeAreaView rend 0 dans un Modal RN (notch). */}
+      <View
+        style={[
+          styles.safeArea,
+          {
+            backgroundColor: colors.background,
+            paddingTop: Math.max(insets.top, 12) + 4,
+            paddingBottom: insets.bottom,
+          },
+        ]}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -738,7 +746,7 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
 
             {/* Total payé du jour (+ coupure entre créneaux) */}
             {isTimed && completeSlots.length > 0 ? (
-              <View style={styles.totalRow}>
+              <View style={[styles.totalRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Text style={[styles.totalLabel, { color: colors.textSoft }]} numberOfLines={1}>
                   {coupure ? `Total du jour · coupure ${coupure}` : "Total du jour"}
                 </Text>
@@ -763,7 +771,7 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
             ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -786,7 +794,7 @@ const styles = StyleSheet.create({
   backButton: {
     width: 36,
     height: 36,
-    borderRadius: radius.pill,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -924,14 +932,17 @@ const styles = StyleSheet.create({
   },
   totalRow: {
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
   },
   totalLabel: {
     flex: 1,
-    fontSize: typeScale.bodySm,
+    fontSize: typeScale.caption,
     fontFamily: fonts.medium,
   },
   totalValue: {

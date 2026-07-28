@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
   back: {
     width: 36,
     height: 36,
-    borderRadius: radius.pill,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",

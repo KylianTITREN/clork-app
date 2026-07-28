@@ -566,8 +566,9 @@ export default function AddWizardScreen() {
   }, [userId, state.step, plan, isGuest]);
 
   function closeWizard() {
+    // Ferme la modale plein écran (retour à l'accueil, rechargé au focus).
     if (router.canGoBack()) router.back();
-    else router.navigate("/(tabs)");
+    else router.replace("/(tabs)");
   }
 
   async function loadProfile(id: string): Promise<Profile | null> {
@@ -821,7 +822,7 @@ export default function AddWizardScreen() {
         Alert.alert("Enregistrement impossible", error.message);
         return;
       }
-      router.navigate("/(tabs)");
+      closeWizard();
     } finally {
       setIsSaving(false);
     }
@@ -953,7 +954,7 @@ export default function AddWizardScreen() {
         <SuccessView
           slotCount={state.slotCount}
           totalHours={state.totalHours}
-          onSeeWeek={() => router.navigate("/(tabs)")}
+          onSeeWeek={() => closeWizard()}
           onExport={() => handleExportWeek(state.monday)}
           onShare={() => state.scanId && handleShare(state.scanId)}
           onUndo={() => confirmUndoImport(state.savedIds)}

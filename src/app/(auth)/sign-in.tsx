@@ -193,8 +193,10 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.hero,
   },
   form: {
+    flex: 1,
+    justifyContent: "center",
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
+    paddingBottom: spacing.xl,
     gap: spacing.md,
   },
   footer: {
