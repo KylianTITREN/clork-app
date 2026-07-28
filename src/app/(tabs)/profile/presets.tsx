@@ -47,13 +47,14 @@ import {
 
 // Types standard proposés en chips (même langage que l'éditeur de jour) ;
 // les types persos de l'utilisateur suivent, puis la chip « + Autre… ».
+// Liste canonique v2 — LA MÊME que l'éditeur de jour et l'ajout manuel
+// (les besoins spécifiques passent par les types persos « + Autre… »).
 const STANDARD_TYPE_OPTIONS: readonly PresetType[] = [
   "work",
   "off",
   "cp",
   "training",
   "meeting",
-  "overtime",
 ];
 
 /** Limite de créneaux types du plan gratuit (au-delà : Premium). */
