@@ -646,6 +646,8 @@ export default function HomeScreen() {
                 );
               }
               // Jour déplié : détails + équipe + « Modifier ce jour ».
+              // Ouvre/ferme = référence aux HORAIRES DU MAGASIN (repli : mêmes
+              // horaires que moi) ; « avec » si j'ouvre/ferme aussi, sinon « par ».
               const mates = team
                 ? findShiftMates(
                     team.employees,
@@ -653,8 +655,9 @@ export default function HomeScreen() {
                     date,
                     first.start_at ? toLocalTime(first.start_at) : null,
                     first.end_at ? toLocalTime(first.end_at) : null,
+                    storeHours,
                   )
-                : { openers: [], closers: [] };
+                : { openers: [], closers: [], iOpen: false, iClose: false };
               return (
                 <Pressable
                   key={date}
@@ -690,7 +693,9 @@ export default function HomeScreen() {
                     </View>
                     {mates.openers.length > 0 ? (
                       <View style={styles.matesRow}>
-                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>Ouverture avec</Text>
+                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>
+                          {mates.iOpen ? "Ouverture avec" : "Ouverture par"}
+                        </Text>
                         {mates.openers.slice(0, 3).map((name) => (
                           <View key={name} style={[styles.mateChip, { backgroundColor: colors.background }]}>
                             <Text style={[styles.mateChipText, { color: colors.text }]} numberOfLines={1}>
@@ -702,7 +707,9 @@ export default function HomeScreen() {
                     ) : null}
                     {mates.closers.length > 0 ? (
                       <View style={styles.matesRow}>
-                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>Fermeture par</Text>
+                        <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>
+                          {mates.iClose ? "Fermeture avec" : "Fermeture par"}
+                        </Text>
                         {mates.closers.slice(0, 3).map((name) => (
                           <View key={name} style={[styles.mateChip, { backgroundColor: colors.background }]}>
                             <Text style={[styles.mateChipText, { color: colors.text }]} numberOfLines={1}>
