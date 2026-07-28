@@ -53,11 +53,23 @@ export function usePlan(): Plan {
 }
 
 /** Popin « fonction Premium » commune à tous les verrous UI. */
+// Pont vers la feuille Premium (maquette 4e) : le host monté dans le layout
+// s'abonne ici ; repli sur une Alert si aucune feuille n'est montée.
+let premiumGateListener: ((feature: string) => void) | null = null;
+
+export function setPremiumGateListener(
+  listener: ((feature: string) => void) | null,
+): void {
+  premiumGateListener = listener;
+}
+
 export function showPremiumGate(feature: string): void {
+  if (premiumGateListener) {
+    premiumGateListener(feature);
+    return;
+  }
   Alert.alert(
-    "Fonction Premium ⭐",
-    `${feature} fait partie de Clork Premium.\n\n` +
-      "L'abonnement arrive bientôt — en attendant, un code d'accès reçu de " +
-      "l'équipe Clork se saisit dans Profil → Compte.",
+    "Fonction Premium",
+    `${feature} fait partie de Clork Premium. Un code d'accès se saisit dans Profil → Compte.`,
   );
 }

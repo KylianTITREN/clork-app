@@ -1,10 +1,11 @@
-// Partage & suivi v2 (maquette 4d) :
-// - Connecté : carte SOMBRE « Mon code de suivi » (régénérable, envoyer),
-//   « Suivre un planning » (champ code + lien plannings suivis), « Code équipe
-//   de la semaine » (récupérer ses horaires d'un scan commun sans re-scanner).
-// - Invité : seul « Suivre un planning » est actif ; « Mon code » est
-//   neutralisé (il faut un compte — c'est lui qui héberge le code) ; « Code
-//   équipe » grisé 🔒.
+// Partage & suivi v2 (maquettes 4d de Kylian) :
+// - CONNECTÉ : carte SOMBRE « MON CODE DE SUIVI » (code géant vert clair,
+//   « Envoyer mon code ») · « Suivre un planning » (raccourci accueil, liste
+//   des suivis → écran Plannings suivis) · « Code équipe de la semaine »
+//   (code affiché + bouton encre « Partager »).
+// - SANS COMPTE : « Suivre un planning » EN PREMIER (aucun compte nécessaire),
+//   « Mon code de suivi » neutralisé (hachures, ••••••, CTA compte),
+//   « Code équipe » grisé 🔒.
 
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -23,22 +24,21 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { NavRow } from "@/components/profile/NavRow";
-import { Section } from "@/components/profile/Section";
-import { SubPageHeader } from "@/components/profile/SubPageHeader";
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { Button } from "@/components/ui/Button";
+import {
+  fonts,
+  letterSpacing,
+  radius,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 import { followUser, listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { fetchPlan, isPremiumPlan, showPremiumGate } from "@/lib/plan-service";
 import { createShare } from "@/lib/share-service";
 import { mondayOf } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
-
-function randomFollowCode(): string {
-  // 6 caractères lisibles (pas de 0/O ni 1/I).
-  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
-  return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-}
 
 export default function SharingSettingsScreen() {
   const colors = useThemeColors();
@@ -47,7 +47,7 @@ export default function SharingSettingsScreen() {
   const [followCode, setFollowCode] = useState("");
   const [followInput, setFollowInput] = useState("");
   const [followed, setFollowed] = useState<FollowedUser[]>([]);
-  const [weekScanId, setWeekScanId] = useState<string | null>(null);
+  const [teamCode, setTeamCode] = useState<string | null>(null);
 
   const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
@@ -63,17 +63,25 @@ export default function SharingSettingsScreen() {
       if (data) setFollowCode(data.follow_code ?? "");
     }
     listFollowed().then(setFollowed);
-    // Scan validé de la semaine courante → source du code équipe.
-    const { data: scan } = await supabase
-      .from("scans")
-      .select("id")
-      .eq("uploader_id", userId)
-      .eq("week_start", mondayOf(new Date()))
-      .eq("status", "validated")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ id: string }>();
-    setWeekScanId(scan?.id ?? null);
+    if (!isGuest) {
+      // Code équipe : scan validé de la semaine → code affiché directement.
+      const { data: scan } = await supabase
+        .from("scans")
+        .select("id")
+        .eq("uploader_id", userId)
+        .eq("week_start", mondayOf(new Date()))
+        .eq("status", "validated")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ id: string }>();
+      if (scan?.id) {
+        createShare(scan.id)
+          .then(setTeamCode)
+          .catch(() => setTeamCode(null));
+      } else {
+        setTeamCode(null);
+      }
+    }
   }, [userId, isGuest]);
 
   useEffect(() => {
@@ -85,29 +93,6 @@ export default function SharingSettingsScreen() {
       message:
         `Suis mon planning sur Clork 💛 Ouvre Profil → Partage & suivi → « Suivre un planning » et saisis mon code : ${followCode.toUpperCase()}`,
     });
-  }
-
-  function handleRegenerate() {
-    Alert.alert(
-      "Régénérer mon code ?",
-      "L'ancien code ne fonctionnera plus pour de nouveaux suivis.",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Régénérer",
-          onPress: async () => {
-            if (!userId) return;
-            const next = randomFollowCode();
-            const { error } = await supabase
-              .from("profiles")
-              .update({ follow_code: next })
-              .eq("id", userId);
-            if (error) Alert.alert("Impossible", error.message);
-            else setFollowCode(next);
-          },
-        },
-      ],
-    );
   }
 
   async function handleFollow() {
@@ -123,29 +108,70 @@ export default function SharingSettingsScreen() {
   }
 
   async function handleShareTeamCode() {
-    if (isGuest) return;
-    if (!weekScanId) {
-      Alert.alert(
-        "Pas de scan cette semaine",
-        "Scanne et valide le planning de la semaine pour générer le code équipe.",
-      );
-      return;
-    }
+    if (!teamCode) return;
     if (!isPremiumPlan(await fetchPlan())) {
       showPremiumGate("Le partage de planning par code");
       return;
     }
-    try {
-      const code = await createShare(weekScanId);
-      await Share.share({
-        message:
-          `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
-          `Ouvre l'app → Ajouter → « J'ai reçu un code » et saisis : ${code.toUpperCase()}`,
-      });
-    } catch (error) {
-      Alert.alert("Partage impossible", error instanceof Error ? error.message : "Erreur inconnue");
-    }
+    await Share.share({
+      message:
+        `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
+        `Ouvre l'app → Ajouter → « J'ai reçu un code » et saisis : ${teamCode.toUpperCase()}`,
+    });
   }
+
+  const followCard = (
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Text style={[styles.cardTitle, { color: colors.text }]}>Suivre un planning</Text>
+      <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+        {isGuest
+          ? "Saisis le code reçu — aucun compte nécessaire"
+          : "Il apparaîtra en raccourci sur ton accueil"}
+      </Text>
+      <View style={styles.codeRow}>
+        <TextInput
+          value={followInput}
+          onChangeText={setFollowInput}
+          placeholder="CODE REÇU"
+          placeholderTextColor={colors.textDisabled}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          style={[styles.followInput, { backgroundColor: colors.background, color: colors.text }]}
+        />
+        <Pressable
+          onPress={handleFollow}
+          disabled={!followInput.trim()}
+          accessibilityLabel="Suivre ce code"
+          style={[
+            styles.followGo,
+            { backgroundColor: colors.accent, opacity: followInput.trim() ? 1 : 0.4 },
+          ]}
+        >
+          <Ionicons name="arrow-forward" size={18} color={colors.onAccent} />
+        </Pressable>
+      </View>
+      {followed.map((user) => (
+        <Pressable
+          key={user.id}
+          onPress={() => router.push("/profile/suivis" as Parameters<typeof router.push>[0])}
+          style={[styles.followedRow, { backgroundColor: colors.background }]}
+        >
+          <View style={[styles.followedAvatar, { backgroundColor: colors.accentMuted }]}>
+            <Text style={[styles.followedInitial, { color: colors.accent }]}>
+              {user.displayName.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <Text style={[styles.followedName, { color: colors.text }]} numberOfLines={1}>
+            {user.displayName}
+          </Text>
+          <Text style={[styles.followedMeta, { color: colors.textMuted }]}>
+            {user.isDefaultView ? "suivie · vue par défaut" : "suivie"}
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textDisabled} />
+        </Pressable>
+      ))}
+    </View>
+  );
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -153,130 +179,121 @@ export default function SharingSettingsScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
-          contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
         >
-          <SubPageHeader title="Partage & suivi" />
-
-          {/* Carte sombre : mon code de suivi */}
-          <View style={[styles.darkCard, { backgroundColor: colors.ink }]}>
-            <Text style={[styles.darkKicker, { color: colors.onInk, opacity: 0.65 }]}>
-              MON CODE DE SUIVI
-            </Text>
-            {isGuest ? (
-              <>
-                <Text style={[styles.darkCode, { color: colors.onInk, opacity: 0.4 }]}>••••••</Text>
-                <Text style={[styles.darkHint, { color: colors.onInk, opacity: 0.7 }]}>
-                  Il faut un compte — c'est lui qui héberge ton code.
-                </Text>
-                <Pressable
-                  onPress={() => router.push("/profile")}
-                  style={[styles.darkCta, { backgroundColor: colors.accent }]}
-                >
-                  <Text style={[styles.darkCtaLabel, { color: colors.onAccent }]}>
-                    Créer mon compte gratuit
-                  </Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <View style={styles.darkCodeRow}>
-                  <Text style={[styles.darkCode, { color: colors.accentSoft }]}>
-                    {followCode.toUpperCase() || "……"}
-                  </Text>
-                  <Pressable
-                    onPress={handleRegenerate}
-                    hitSlop={8}
-                    accessibilityLabel="Régénérer mon code"
-                    style={styles.regenButton}
-                  >
-                    <Ionicons name="refresh" size={17} color={colors.onInk} />
-                  </Pressable>
-                </View>
-                <Text style={[styles.darkHint, { color: colors.onInk, opacity: 0.7 }]}>
-                  Ton/ta partenaire voit ton planning en lecture seule.
-                </Text>
-                <Pressable
-                  onPress={handleShareFollowCode}
-                  style={[styles.darkCta, { backgroundColor: colors.accent }]}
-                >
-                  <Text style={[styles.darkCtaLabel, { color: colors.onAccent }]}>
-                    Envoyer mon code
-                  </Text>
-                </Pressable>
-              </>
-            )}
+          {/* En-tête : retour carré + titre (+ « Sans compte » en invité). */}
+          <View style={styles.header}>
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.navigate("/(tabs)/profile"))}
+              hitSlop={12}
+              accessibilityLabel="Retour"
+              style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+            </Pressable>
+            <View>
+              <Text style={[styles.title, { color: colors.text }]}>Partage & suivi</Text>
+              {isGuest ? (
+                <Text style={[styles.titleSub, { color: colors.textMuted }]}>Sans compte</Text>
+              ) : null}
+            </View>
           </View>
 
-          {/* Suivre un planning — actif même sans compte */}
-          <Section
-            icon="eye"
-            iconBg={colors.shiftRhSoft}
-            iconColor={colors.shiftRh}
-            title="Suivre un planning"
-            subtitle="Saisis le code reçu — le planning apparaît sur ton accueil"
-          >
-            <View style={styles.codeRow}>
-              <TextInput
-                value={followInput}
-                onChangeText={setFollowInput}
-                placeholder="Code (ex: K7M2PX)"
-                placeholderTextColor={colors.textDisabled}
-                autoCapitalize="characters"
-                autoCorrect={false}
+          {isGuest ? (
+            <>
+              {followCard}
+
+              {/* Mon code — neutralisé (hachures) */}
+              <View style={[styles.hatchedCard, { borderColor: colors.border }]}>
+                <Text style={[styles.darkKicker, { color: colors.textMuted }]}>
+                  MON CODE DE SUIVI
+                </Text>
+                <Text style={[styles.maskedCode, { color: colors.textDisabled }]}>• • • • • •</Text>
+                <Text style={[styles.hatchedText, { color: colors.textMuted }]}>
+                  Pour partager TON planning, il faut un compte —{"\n"}c'est lui qui héberge ton code.
+                </Text>
+                <Button
+                  label="Créer mon compte gratuit"
+                  variant="dark"
+                  style={{ alignSelf: "stretch" }}
+                  onPress={() => router.navigate("/(tabs)/profile")}
+                />
+              </View>
+
+              {/* Code équipe — verrouillé */}
+              <View
                 style={[
-                  styles.followInput,
-                  { backgroundColor: colors.background, borderColor: colors.border, color: colors.text },
+                  styles.card,
+                  styles.lockedCard,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
-              />
-              <Pressable
-                onPress={handleFollow}
-                disabled={!followInput.trim()}
-                accessibilityLabel="Suivre ce code"
-                style={[styles.codeShare, { backgroundColor: colors.accent, opacity: followInput.trim() ? 1 : 0.4 }]}
               >
-                <Ionicons name="arrow-forward" size={18} color={colors.onAccent} />
-              </Pressable>
-            </View>
-          </Section>
+                <View style={styles.lockedRow}>
+                  <View style={styles.lockedText}>
+                    <Text style={[styles.cardTitle, { color: colors.textMuted }]}>
+                      Code équipe de la semaine
+                    </Text>
+                    <Text style={[styles.cardSubtitle, { color: colors.textDisabled }]}>
+                      Disponible avec un compte
+                    </Text>
+                  </View>
+                  <View style={[styles.lockBadge, { backgroundColor: colors.background }]}>
+                    <Ionicons name="lock-closed" size={13} color={colors.textDisabled} />
+                  </View>
+                </View>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Carte sombre : mon code */}
+              <View style={[styles.darkCard, { backgroundColor: colors.ink }]}>
+                <Text style={[styles.darkKicker, { color: colors.onInk, opacity: 0.6 }]}>
+                  MON CODE DE SUIVI
+                </Text>
+                <Text style={[styles.darkCode, { color: colors.accentSoft }]}>
+                  {followCode ? followCode.toUpperCase().split("").join(" ") : "· · · · · ·"}
+                </Text>
+                <Text style={[styles.darkHint, { color: colors.onInk, opacity: 0.65 }]}>
+                  Ton/ta partenaire le saisit une fois —{"\n"}ton planning apparaît chez lui/elle, en
+                  lecture seule.
+                </Text>
+                <Button
+                  label="Envoyer mon code"
+                  style={{ alignSelf: "stretch" }}
+                  onPress={handleShareFollowCode}
+                />
+              </View>
 
-          {followed.length > 0 ? (
-            <NavRow
-              icon="people"
-              iconBg={colors.accentMuted}
-              iconColor={colors.accent}
-              title="Plannings suivis"
-              subtitle={`${followed.length} suivi${followed.length > 1 ? "s" : ""} · vue par défaut, ne plus suivre`}
-              // Cast : la route typée est générée par Metro au prochain start.
-              onPress={() => router.push("/profile/suivis" as Parameters<typeof router.push>[0])}
-            />
-          ) : null}
+              {followCard}
 
-          {/* Code équipe de la semaine */}
-          <Pressable
-            onPress={handleShareTeamCode}
-            disabled={isGuest}
-            style={[
-              styles.teamCard,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-              isGuest && { opacity: 0.5 },
-            ]}
-          >
-            <View style={[styles.teamIcon, { backgroundColor: colors.accentMuted }]}>
-              <Ionicons name={isGuest ? "lock-closed" : "people-outline"} size={18} color={colors.accent} />
-            </View>
-            <View style={styles.teamText}>
-              <Text style={[styles.teamTitle, { color: colors.text }]}>Code équipe de la semaine</Text>
-              <Text style={[styles.teamSub, { color: colors.textMuted }]}>
-                {isGuest
-                  ? "Compte requis pour partager le scan à l'équipe."
-                  : weekScanId
-                    ? "Tes collègues récupèrent leurs horaires sans re-scanner."
-                    : "Scanne le planning de la semaine pour l'activer."}
-              </Text>
-            </View>
-            <Ionicons name="share-outline" size={18} color={isGuest ? colors.textDisabled : colors.accent} />
-          </Pressable>
+              {/* Code équipe */}
+              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>
+                  Code équipe de la semaine
+                </Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+                  Tes collègues récupèrent leurs horaires sans re-scanner
+                </Text>
+                {teamCode ? (
+                  <View style={[styles.teamRow, { backgroundColor: colors.background }]}>
+                    <Text style={[styles.teamCode, { color: colors.text }]}>
+                      {teamCode.toUpperCase()}
+                    </Text>
+                    <Pressable
+                      onPress={handleShareTeamCode}
+                      style={[styles.teamShare, { backgroundColor: colors.ink }]}
+                    >
+                      <Text style={[styles.teamShareLabel, { color: colors.onInk }]}>Partager</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Text style={[styles.cardSubtitle, { color: colors.textDisabled }]}>
+                    Scanne et valide le planning de la semaine pour l'activer.
+                  </Text>
+                )}
+              </View>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -286,83 +303,169 @@ export default function SharingSettingsScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.md },
-  darkCard: {
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
-  darkKicker: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.semiBold,
-    letterSpacing: 0.8,
-  },
-  darkCodeRow: {
+  content: { padding: spacing.lg, gap: spacing.md - 4 },
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: spacing.md,
+    marginBottom: spacing.sm,
   },
-  darkCode: {
-    fontSize: 34,
-    fontFamily: fonts.bold,
-    letterSpacing: 6,
-  },
-  regenButton: {
+  backButton: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 11,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(247,246,242,0.12)",
   },
-  darkHint: {
+  title: {
+    fontSize: typeScale.title - 4,
+    fontFamily: fonts.bold,
+    letterSpacing: letterSpacing.title,
+  },
+  titleSub: {
     fontSize: typeScale.caption,
     fontFamily: fonts.medium,
   },
-  darkCta: {
-    alignItems: "center",
-    borderRadius: radius.sm,
-    paddingVertical: 13,
-    marginTop: spacing.xs,
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md + 2,
+    gap: spacing.sm + 2,
   },
-  darkCtaLabel: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.semiBold,
+  cardTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
+  },
+  cardSubtitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    marginTop: -6,
   },
   codeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  codeShare: { width: 44, height: 44, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
   followInput: {
     flex: 1,
     borderRadius: radius.input,
-    borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 4,
-    fontSize: typeScale.body,
-    fontFamily: fonts.bold,
+    paddingVertical: spacing.sm + 5,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
     letterSpacing: 2,
   },
-  teamCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm + 2,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-  },
-  teamIcon: {
-    width: 38,
-    height: 38,
+  followGo: {
+    width: 46,
+    height: 46,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
-  teamText: { flex: 1, gap: 2 },
-  teamTitle: {
-    fontSize: typeScale.bodySm,
+  followedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 2,
+    borderRadius: radius.input,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm + 2,
+  },
+  followedAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  followedInitial: {
+    fontSize: typeScale.caption,
     fontFamily: fonts.bold,
   },
-  teamSub: {
+  followedName: {
+    flex: 1,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  followedMeta: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+  },
+  hatchedCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    padding: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm + 2,
+  },
+  maskedCode: {
+    fontSize: typeScale.heading,
+    fontFamily: fonts.bold,
+    letterSpacing: 4,
+  },
+  hatchedText: {
     fontSize: typeScale.caption,
     fontFamily: fonts.medium,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  lockedCard: {
+    opacity: 0.75,
+  },
+  lockedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  lockedText: { flex: 1, gap: spacing.sm + 2 },
+  lockBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  darkCard: {
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm + 2,
+  },
+  darkKicker: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
+    letterSpacing: 1,
+  },
+  darkCode: {
+    fontSize: 34,
+    fontFamily: fonts.bold,
+    letterSpacing: 2,
+  },
+  darkHint: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  teamRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  teamCode: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: 2,
+  },
+  teamShare: {
+    borderRadius: 9,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  teamShareLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
   },
 });

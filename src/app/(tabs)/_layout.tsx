@@ -1,6 +1,7 @@
 import { Stack } from "expo-router";
 import { useEffect } from "react";
 
+import { PremiumGateSheet } from "@/components/PremiumGateSheet";
 import { registerPushToken } from "@/lib/notifications";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -17,10 +18,14 @@ export default function AppLayout() {
   }, [session?.user.id]);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="profile" />
-      <Stack.Screen name="scan" options={{ presentation: "fullScreenModal" }} />
-    </Stack>
+    <>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen name="scan" options={{ presentation: "fullScreenModal" }} />
+      </Stack>
+      {/* Porte Premium v2 : feuille du bas globale (remplace l'Alert). */}
+      <PremiumGateSheet />
+    </>
   );
 }
