@@ -103,6 +103,7 @@ export default function HomeScreen() {
   const [dayEditor, setDayEditor] = useState<{ date: string; shifts: Shift[] } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const plan = usePlan();
+  const isPremium = isPremiumPlan(plan);
   const [displayName, setDisplayName] = useState("");
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
@@ -282,10 +283,8 @@ export default function HomeScreen() {
       );
       return;
     }
-    if (!isPremiumPlan(plan)) {
-      showPremiumGate("Le planning de toute l'équipe");
-      return;
-    }
+    // Non-premium : la feuille s'ouvre quand même — les collègues passent en
+    // silhouettes (verrou visible), seule ma ligne reste en clair.
     setColleagues(employees);
   }
 
@@ -794,9 +793,16 @@ export default function HomeScreen() {
           <Pressable style={styles.sheetBackdrop} onPress={() => setColleagues(null)} />
           <View style={[styles.sheet, { backgroundColor: colors.background }]}>
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.text }]}>
-                L'équipe · {weekLabel(monday)}
-              </Text>
+              <View style={styles.sheetHeadings}>
+                <Text style={[styles.sheetTitle, { color: colors.text }]}>
+                  L'équipe · {weekLabel(monday)}
+                </Text>
+                {!isPremium ? (
+                  <Text style={[styles.sheetSubtitle, { color: colors.textMuted }]}>
+                    Les collègues passent en silhouettes, ta ligne reste visible
+                  </Text>
+                ) : null}
+              </View>
               <Pressable
                 onPress={() => setColleagues(null)}
                 hitSlop={10}
@@ -807,7 +813,49 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={styles.sheetList}>
-              {colleagues.map((employee) => {
+              {colleagues.map((employee, index) => {
+                // Non-premium : seule MA ligne (matching best-effort de loadTeam)
+                // reste en clair — les autres deviennent des silhouettes.
+                const isMe = team?.myRow != null && employee.row_index === team.myRow;
+                if (!isPremium && !isMe) {
+                  return (
+                    <View
+                      key={employee.row_index}
+                      style={[
+                        styles.colleagueRow,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                      ]}
+                    >
+                      <View style={styles.ghostRow}>
+                        <View
+                          style={[
+                            styles.ghostDot,
+                            {
+                              backgroundColor:
+                                index % 2 === 0 ? colors.accentMuted : colors.shiftMeetingSoft,
+                            },
+                          ]}
+                        />
+                        <View style={styles.ghostBars}>
+                          <View
+                            style={[
+                              styles.ghostBar,
+                              styles.ghostBarLong,
+                              { backgroundColor: colors.surfaceMuted },
+                            ]}
+                          />
+                          <View
+                            style={[
+                              styles.ghostBar,
+                              styles.ghostBarShort,
+                              { backgroundColor: colors.surfaceMuted },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
                 const isOpen = expandedColleague === employee.row_index;
                 return (
                   <Pressable
@@ -852,6 +900,20 @@ export default function HomeScreen() {
                 );
               })}
             </ScrollView>
+            {!isPremium ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => showPremiumGate("Les horaires de tes collègues")}
+                style={[styles.premiumBanner, { backgroundColor: colors.background }]}
+              >
+                <Text style={[styles.premiumBannerText, { color: colors.textSoft }]}>
+                  Les horaires de tes collègues sont réservés à Premium
+                </Text>
+                <Text style={[styles.premiumBannerCta, { color: colors.accent }]}>
+                  Débloquer ›
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </Modal>
       ) : null}
@@ -1171,10 +1233,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
   },
+  sheetHeadings: {
+    flex: 1,
+    gap: 2,
+    paddingRight: spacing.sm,
+  },
   sheetTitle: {
     fontSize: typeScale.heading,
     fontFamily: fonts.bold,
     letterSpacing: letterSpacing.heading,
+  },
+  sheetSubtitle: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
   },
   sheetClose: {
     width: 32,
@@ -1224,5 +1295,52 @@ const styles = StyleSheet.create({
   colleagueDay: {
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
+  },
+  // Silhouette de collègue (verrou Premium) : pastille pastel + 2 barres grises.
+  ghostRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 4,
+  },
+  ghostDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  ghostBars: {
+    flex: 1,
+    gap: 6,
+  },
+  ghostBar: {
+    borderRadius: 4,
+  },
+  ghostBarLong: {
+    height: 12,
+    width: "60%",
+  },
+  ghostBarShort: {
+    height: 10,
+    width: "35%",
+  },
+  // Bandeau verrou (maquette 4e) : fond neutre r11, texte + « Débloquer › ».
+  premiumBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  premiumBannerText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  premiumBannerCta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
 });

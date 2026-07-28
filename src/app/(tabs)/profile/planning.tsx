@@ -358,11 +358,12 @@ export default function PlanningSettingsScreen() {
   );
 
   const plan = usePlan();
+  const isPremium = isPremiumPlan(plan);
 
   /** Création gérée par l'éditeur plein écran ; gates plan/maximum ici. */
   function handleAddPreset() {
-    if (!isPremiumPlan(plan) && presets.length >= FREE_PRESET_LIMIT) {
-      showPremiumGate("Plus de 3 créneaux types");
+    if (!isPremium && presets.length >= FREE_PRESET_LIMIT) {
+      showPremiumGate("Les créneaux types illimités");
       return;
     }
     if (presets.length >= MAX_PRESETS) {
@@ -458,7 +459,14 @@ export default function PlanningSettingsScreen() {
             </Text>
           </SettingsCard>
 
-          <SettingsCard title="Créneaux types" subtitle="Proposés en un tap à l'ajout manuel">
+          <SettingsCard
+            title="Créneaux types"
+            subtitle={
+              isPremium
+                ? "Proposés en un tap à l'ajout manuel"
+                : `Proposés en un tap à l'ajout manuel · Limite gratuite : ${FREE_PRESET_LIMIT}`
+            }
+          >
             {presets.map((preset) => {
               const presetBreak = formatPresetBreak(preset.breakMinutes);
               return (
@@ -491,7 +499,16 @@ export default function PlanningSettingsScreen() {
               ]}
             >
               <Ionicons name="add" size={16} color={colors.text} />
-              <Text style={[styles.addLabel, { color: colors.text }]}>Ajouter un créneau type</Text>
+              {isPremium ? (
+                <Text style={[styles.addLabel, { color: colors.text }]}>
+                  Ajouter un créneau type
+                </Text>
+              ) : (
+                <Text style={[styles.addLabel, { color: colors.text }]}>
+                  Ajouter ({FREE_PRESET_LIMIT} max en gratuit) ·{" "}
+                  <Text style={[styles.addLabelPremium, { color: colors.accent }]}>Premium</Text>
+                </Text>
+              )}
             </Pressable>
           </SettingsCard>
 
@@ -719,6 +736,9 @@ const styles = StyleSheet.create({
   addLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
+  },
+  addLabelPremium: {
+    fontFamily: fonts.bold,
   },
   // Export calendrier (logique inchangée, habillage carte v2).
   calRow: {

@@ -34,7 +34,7 @@ import {
   useThemeColors,
 } from "@/constants/tokens";
 import { followUser, listFollowed, type FollowedUser } from "@/lib/follow-service";
-import { fetchPlan, isPremiumPlan, showPremiumGate } from "@/lib/plan-service";
+import { fetchPlan, isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { createShare } from "@/lib/share-service";
 import { mondayOf } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
@@ -73,6 +73,8 @@ export default function SharingSettingsScreen() {
 
   const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
+  const plan = usePlan();
+  const isPremium = isPremiumPlan(plan);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -304,17 +306,33 @@ export default function SharingSettingsScreen() {
                   Tes collègues récupèrent leurs horaires sans re-scanner
                 </Text>
                 {teamCode ? (
-                  <View style={[styles.teamRow, { backgroundColor: colors.background }]}>
-                    <Text style={[styles.teamCode, { color: colors.text }]}>
-                      {teamCode.toUpperCase()}
-                    </Text>
+                  isPremium ? (
+                    <View style={[styles.teamRow, { backgroundColor: colors.background }]}>
+                      <Text style={[styles.teamCode, { color: colors.text }]}>
+                        {teamCode.toUpperCase()}
+                      </Text>
+                      <Pressable
+                        onPress={handleShareTeamCode}
+                        style={[styles.teamShare, { backgroundColor: colors.ink }]}
+                      >
+                        <Text style={[styles.teamShareLabel, { color: colors.onInk }]}>Partager</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    // Verrou Premium (maquette 4e) : le code n'est jamais lisible.
                     <Pressable
-                      onPress={handleShareTeamCode}
-                      style={[styles.teamShare, { backgroundColor: colors.ink }]}
+                      accessibilityRole="button"
+                      onPress={() => showPremiumGate("Le partage de planning par code")}
+                      style={[styles.premiumBanner, { backgroundColor: colors.background }]}
                     >
-                      <Text style={[styles.teamShareLabel, { color: colors.onInk }]}>Partager</Text>
+                      <Text style={[styles.premiumBannerText, { color: colors.textSoft }]}>
+                        Le partage par code est une fonction Premium
+                      </Text>
+                      <Text style={[styles.premiumBannerCta, { color: colors.accent }]}>
+                        Débloquer ›
+                      </Text>
                     </Pressable>
-                  </View>
+                  )
                 ) : (
                   <Text style={[styles.cardSubtitle, { color: colors.textDisabled }]}>
                     Scanne et valide le planning de la semaine pour l'activer.
@@ -517,5 +535,24 @@ const styles = StyleSheet.create({
   teamShareLabel: {
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
+  },
+  // Bandeau verrou (maquette 4e) : fond neutre r11, texte + « Débloquer › ».
+  premiumBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    borderRadius: radius.input,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  premiumBannerText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+  },
+  premiumBannerCta: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.bold,
   },
 });
