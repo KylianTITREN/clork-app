@@ -151,13 +151,17 @@ export default function HomeScreen() {
   }, [userId, monday, sunday, viewing, followedList, colors.accent, colors.onAccent]);
 
   const loadTeam = useCallback(async () => {
-    if (!userId || viewing) {
+    if (!userId) {
       setTeam(null);
       return;
     }
+    // Mode conjoint : l'équipe affichée est celle de la personne CONSULTÉE
+    // (son scan validé — policy « followers can read validated »).
+    const teamOwnerId = viewing?.id ?? userId;
     const { data: scan } = await supabase
       .from("scans")
       .select("raw_extraction")
+      .eq("uploader_id", teamOwnerId)
       .eq("week_start", monday)
       .eq("status", "validated")
       .order("created_at", { ascending: false })
@@ -168,10 +172,11 @@ export default function HomeScreen() {
       setTeam(null);
       return;
     }
+    // Ligne de référence : la mienne, ou celle de la personne suivie.
     const { data: profile } = await supabase
       .from("profiles")
       .select("employee_aliases, display_name")
-      .eq("id", userId)
+      .eq("id", teamOwnerId)
       .single<{ employee_aliases: string[]; display_name: string }>();
     const myRow =
       findTargetEmployee(employees, profile?.employee_aliases ?? [], profile?.display_name ?? "")
@@ -269,9 +274,11 @@ export default function HomeScreen() {
   );
 
   async function openColleagues() {
+    const teamOwnerId = viewing?.id ?? userId;
     const { data } = await supabase
       .from("scans")
       .select("id, raw_extraction")
+      .eq("uploader_id", teamOwnerId ?? "")
       .eq("week_start", monday)
       .eq("status", "validated")
       .order("created_at", { ascending: false })
