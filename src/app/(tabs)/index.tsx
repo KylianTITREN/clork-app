@@ -408,15 +408,10 @@ export default function HomeScreen() {
       <Pressable
         accessibilityLabel="Profil"
         onPress={() => router.navigate("/(tabs)/profile")}
-        style={[
-          styles.avatar,
-          isGuest
-            ? { backgroundColor: colors.surfaceMuted, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.textDisabled }
-            : { backgroundColor: colors.accent },
-        ]}
+        style={[styles.avatar, { backgroundColor: colors.accent }]}
       >
         {isGuest ? (
-          <Ionicons name="help" size={17} color={colors.textMuted} />
+          <Ionicons name="person-outline" size={18} color={colors.onAccent} />
         ) : (
           <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
         )}

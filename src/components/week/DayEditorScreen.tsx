@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TimePickerField } from "@/components/ui/TimePickerField";
+import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import {
   fonts,
   letterSpacing,
@@ -33,6 +34,7 @@ import {
   useThemeColors,
   type ShiftType,
 } from "@/constants/tokens";
+import { listCustomTypes, type CustomShiftType } from "@/lib/custom-types-service";
 import { mondayOf, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import type { Shift } from "@/lib/types";
@@ -365,6 +367,12 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [type, setType] = useState<ShiftType>(() => shifts[0]?.type ?? "work");
+  // Type personnalisé du jour (chips persos) : null = type natif sélectionné.
+  const [customTypeId, setCustomTypeId] = useState<string | null>(
+    () => shifts[0]?.custom_type_id ?? null,
+  );
+  const [customTypes, setCustomTypes] = useState<CustomShiftType[]>([]);
+  const [isTypeSheetOpen, setIsTypeSheetOpen] = useState(false);
   const [slots, setSlots] = useState<SlotDraft[]>(() => hydrateSlots(shifts));
   const [isSaving, setIsSaving] = useState(false);
   // Horaires du magasin (profil) : badge « Tu ouvres » / « Tu fermes ».
@@ -387,6 +395,24 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
       });
   }, [userId]);
 
+  // Types personnalisés de l'utilisateur — chips après les types standards.
+  // Best-effort : en cas d'échec réseau, les chips persos sont juste absentes.
+  useEffect(() => {
+    let cancelled = false;
+    listCustomTypes()
+      .then((types) => {
+        if (!cancelled) setCustomTypes(types);
+      })
+      .catch(() => {
+        // silencieux : l'édition du jour reste possible avec les types natifs
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Un type perso payé est enregistré type="work", non payé type="off" :
+  // la logique horaires suit donc `type` comme pour Travail/Repos.
   const isTimed = TIMED_DAY_TYPES.includes(type);
   const hadExistingShifts = shifts.length > 0;
 
@@ -394,6 +420,40 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
     const initial = shifts[0]?.type;
     return initial && !DAY_TYPES.includes(initial) ? [...DAY_TYPES, initial] : DAY_TYPES;
   }, [shifts]);
+
+  function selectNativeType(option: ShiftType) {
+    setCustomTypeId(null);
+    setType(option);
+  }
+
+  function selectCustomType(customType: CustomShiftType) {
+    setCustomTypeId(customType.id);
+    setType(customType.isPaid ? "work" : "off");
+  }
+
+  function handleTypeCreated(created: CustomShiftType) {
+    setCustomTypes((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    );
+    selectCustomType(created);
+    setIsTypeSheetOpen(false);
+  }
+
+  // Chips : types standards puis persos (sélection encre), même langage.
+  const typeChipOptions: TypeChipOption[] = [
+    ...typeOptions.map((option) => ({
+      key: option,
+      label: shiftTypeLabel[option],
+      selected: customTypeId === null && option === type,
+      onPress: () => selectNativeType(option),
+    })),
+    ...customTypes.map((customType) => ({
+      key: `custom-${customType.id}`,
+      label: customType.name,
+      selected: customTypeId === customType.id,
+      onPress: () => selectCustomType(customType),
+    })),
+  ];
 
   const rawTitle = DAY_FORMATTER.format(new Date(`${date}T12:00:00`));
   const title = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
@@ -499,6 +559,7 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
           start_at: new Date(`${date}T${slot.start}:00`).toISOString(),
           end_at: new Date(`${date}T${slot.end}:00`).toISOString(),
           type,
+          custom_type_id: customTypeId,
           break_minutes: slot.pauseMinutes,
           break_start: slot.pauseMinutes > 0 ? slot.pauseStart : null,
           is_edited: true,
@@ -516,6 +577,7 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
         start_at: null,
         end_at: null,
         type,
+        custom_type_id: customTypeId,
         break_minutes: 0,
         break_start: null,
         is_edited: true,
@@ -631,36 +693,10 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
               style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
               <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Type</Text>
-              <View style={styles.chipsRow}>
-                {typeOptions.map((option) => {
-                  const selected = option === type;
-                  return (
-                    <Pressable
-                      key={option}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      onPress={() => setType(option)}
-                      style={[
-                        styles.chip,
-                        selected
-                          ? { backgroundColor: colors.ink, borderColor: colors.ink }
-                          : { backgroundColor: colors.surface, borderColor: colors.border },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.chipLabel,
-                          selected
-                            ? [styles.chipLabelSelected, { color: colors.onInk }]
-                            : { color: colors.textSoft },
-                        ]}
-                      >
-                        {shiftTypeLabel[option]}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <TypeChipsRow
+                options={typeChipOptions}
+                onAddPress={() => setIsTypeSheetOpen(true)}
+              />
             </View>
 
             {/* Une carte par créneau — masquées pour les journées sans horaires */}
@@ -771,6 +807,11 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
             ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
+
+        {/* Feuille « Nouveau type » : le type créé est sélectionné d'office */}
+        {isTypeSheetOpen ? (
+          <TypeSheet onClose={() => setIsTypeSheetOpen(false)} onCreated={handleTypeCreated} />
+        ) : null}
       </View>
     </Modal>
   );

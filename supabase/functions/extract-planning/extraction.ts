@@ -326,12 +326,35 @@ Règles de lecture, dans l'ordre de priorité :
 
 Rapporte tout via l'outil report_planning.`;
 
+export type CustomShiftType = {
+  name: string;
+  isPaid: boolean;
+};
+
+// Paragraphe ajouté au prompt quand l'utilisateur a déclaré des codes de
+// créneau propres à son magasin (table custom_shift_types). Le schéma de
+// l'outil reste inchangé : on mappe sur les status existants + note.
+function buildCustomTypesParagraph(customTypes: CustomShiftType[]): string {
+  const list = customTypes
+    .map((type) => `"${type.name}" (${type.isPaid ? "payé" : "non payé"})`)
+    .join(", ");
+  return (
+    `Codes spécifiques à ce magasin possibles dans les cellules : ${list}. ` +
+    `Si une cellule porte exactement ou approximativement l'une de ces mentions, ` +
+    `produis status="work" avec les horaires si le code est payé et que les ` +
+    `horaires sont lisibles (sinon shifts vide), ou status="off" si le code est ` +
+    `non payé, et recopie la mention EXACTE dans note.`
+  );
+}
+
 export type ExtractPlanningInput = {
   imageBase64: string;
   mediaType: SupportedMediaType;
   apiKey: string;
   /** Override du modèle (défaut : ANTHROPIC_MODEL). */
   model?: string;
+  /** Codes de créneau personnalisés du magasin de l'uploader (optionnel). */
+  customTypes?: CustomShiftType[];
 };
 
 type AnthropicContentBlock =
@@ -348,7 +371,7 @@ type AnthropicResponse = {
 export async function extractPlanning(
   input: ExtractPlanningInput,
 ): Promise<ExtractionResult> {
-  const { imageBase64, mediaType, apiKey, model = ANTHROPIC_MODEL } = input;
+  const { imageBase64, mediaType, apiKey, model = ANTHROPIC_MODEL, customTypes } = input;
 
   if (!apiKey) {
     throw new Error("Missing Anthropic API key");
@@ -359,6 +382,11 @@ export async function extractPlanning(
   if (!imageBase64 || imageBase64.length < 100) {
     throw new Error("Image payload is empty or too small");
   }
+
+  const prompt =
+    customTypes && customTypes.length > 0
+      ? `${EXTRACTION_PROMPT}\n\n${buildCustomTypesParagraph(customTypes)}`
+      : EXTRACTION_PROMPT;
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -387,7 +415,7 @@ export async function extractPlanning(
                 data: imageBase64,
               },
             },
-            { type: "text", text: EXTRACTION_PROMPT },
+            { type: "text", text: prompt },
           ],
         },
       ],

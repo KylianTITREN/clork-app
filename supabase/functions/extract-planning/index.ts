@@ -11,6 +11,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   extractPlanning,
   SUPPORTED_MEDIA_TYPES,
+  type CustomShiftType,
   type PlanningExtraction,
   type SupportedMediaType,
 } from "./extraction.ts";
@@ -69,6 +70,31 @@ async function sendPushNotification(
   }
 }
 
+// Types de créneau personnalisés déclarés par l'uploader (table
+// custom_shift_types) — best-effort : l'extraction fonctionne sans eux,
+// toute erreur retombe sur un tableau vide.
+async function loadCustomShiftTypes(
+  service: SupabaseClient,
+  userId: string,
+): Promise<CustomShiftType[]> {
+  try {
+    const { data, error } = await service
+      .from("custom_shift_types")
+      .select("name, is_paid")
+      .eq("user_id", userId);
+    if (error) {
+      console.error(`custom_shift_types load failed for user ${userId}:`, error.message);
+      return [];
+    }
+    return (data ?? [])
+      .filter((row) => typeof row.name === "string" && row.name.trim().length > 0)
+      .map((row) => ({ name: row.name.trim(), isPaid: Boolean(row.is_paid) }));
+  } catch (error) {
+    console.error(`custom_shift_types load failed for user ${userId}:`, error);
+    return [];
+  }
+}
+
 async function processInBackground(
   service: SupabaseClient,
   scanId: string,
@@ -78,7 +104,8 @@ async function processInBackground(
   apiKey: string,
 ): Promise<void> {
   try {
-    const result = await extractPlanning({ imageBase64, mediaType, apiKey });
+    const customTypes = await loadCustomShiftTypes(service, uploaderId);
+    const result = await extractPlanning({ imageBase64, mediaType, apiKey, customTypes });
     const extraction: PlanningExtraction = result.data;
 
     const { error: updateError } = await service

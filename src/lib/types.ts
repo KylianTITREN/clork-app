@@ -45,6 +45,8 @@ export type Shift = {
   start_at: string | null;
   end_at: string | null;
   type: ShiftType;
+  // Type personnalisé (table custom_shift_types), null pour les types natifs.
+  custom_type_id: string | null;
   break_minutes: number;
   break_start: string | null; // "HH:MM:SS" côté Postgres (time)
   // Catégorie assignée par l'utilisateur (sinon déduite des horaires à l'affichage).

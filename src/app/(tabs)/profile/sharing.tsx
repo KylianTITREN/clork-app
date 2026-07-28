@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Defs, Line, Pattern, Rect } from "react-native-svg";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -39,6 +40,21 @@ import { createShare } from "@/lib/share-service";
 import { mondayOf } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
+
+/** Fond à rayures diagonales de la carte neutralisée (maquette 4d invité). */
+function HatchedBackground() {
+  return (
+    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+      <Defs>
+        <Pattern id="hatch" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(45)">
+          <Rect width="14" height="14" fill="#FFFFFF" />
+          <Line x1="0" y1="0" x2="0" y2="14" stroke="#F1EFE9" strokeWidth="7" />
+        </Pattern>
+      </Defs>
+      <Rect width="100%" height="100%" fill="url(#hatch)" />
+    </Svg>
+  );
+}
 
 export default function SharingSettingsScreen() {
   const colors = useThemeColors();
@@ -205,6 +221,7 @@ export default function SharingSettingsScreen() {
 
               {/* Mon code — neutralisé (hachures) */}
               <View style={[styles.hatchedCard, { borderColor: colors.border }]}>
+                <HatchedBackground />
                 <Text style={[styles.darkKicker, { color: colors.textMuted }]}>
                   MON CODE DE SUIVI
                 </Text>
@@ -391,10 +408,10 @@ const styles = StyleSheet.create({
   hatchedCard: {
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderStyle: "dashed",
     padding: spacing.lg,
     alignItems: "center",
     gap: spacing.sm + 2,
+    overflow: "hidden",
   },
   maskedCode: {
     fontSize: typeScale.heading,

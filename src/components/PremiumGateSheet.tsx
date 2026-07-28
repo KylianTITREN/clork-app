@@ -45,7 +45,7 @@ export function PremiumGateSheet() {
       <View
         style={[
           styles.sheet,
-          { backgroundColor: colors.background, paddingBottom: insets.bottom + spacing.md },
+          { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md },
         ]}
       >
         <View style={[styles.grabber, { backgroundColor: colors.surfaceMuted }]} />
@@ -59,7 +59,7 @@ export function PremiumGateSheet() {
           {feature} est réservé aux membres Premium.
         </Text>
 
-        <View style={[styles.benefits, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.benefits, { backgroundColor: colors.background, borderColor: colors.border }]}>
           {BENEFITS.map((benefit) => (
             <View key={benefit} style={styles.benefitRow}>
               <Ionicons name="checkmark" size={16} color={colors.accent} />
@@ -90,8 +90,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(23,21,14,0.4)",
   },
   sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     alignItems: "center",

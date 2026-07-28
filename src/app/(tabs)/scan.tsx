@@ -32,8 +32,8 @@ import { RecapStep, type WizardDay } from "@/components/scan/RecapStep";
 import { ReviewStep } from "@/components/scan/ReviewStep";
 import { SuccessView } from "@/components/scan/SuccessView";
 import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
+import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import { Button } from "@/components/ui/Button";
-import { ChoiceChips } from "@/components/ui/ChoiceChips";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import { WizardFrame } from "@/components/ui/WizardFrame";
 import {
@@ -46,6 +46,7 @@ import {
   useThemeColors,
   type ShiftPeriod,
 } from "@/constants/tokens";
+import { listCustomTypes, type CustomShiftType } from "@/lib/custom-types-service";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import { addDays, isoDate, mondayOf, weekLabel } from "@/lib/dates";
 import {
@@ -491,6 +492,11 @@ export default function AddWizardScreen() {
   const [manualDate, setManualDate] = useState<string>(isoDate(new Date()));
   const [manualEndDate, setManualEndDate] = useState<string | null>(null);
   const [manualType, setManualType] = useState<ManualType>("work");
+  // Type personnalisé sélectionné (chips persos après les standards) :
+  // null = type natif. La feuille « Nouveau type » alimente la liste.
+  const [manualCustomTypes, setManualCustomTypes] = useState<CustomShiftType[]>([]);
+  const [manualCustomTypeId, setManualCustomTypeId] = useState<string | null>(null);
+  const [isTypeSheetOpen, setIsTypeSheetOpen] = useState(false);
   const [manualPresets, setManualPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
   // null = « ✏️ Inventé » (saisie libre) ; sinon id du créneau type appliqué.
   const [manualPresetId, setManualPresetId] = useState<string | null>(null);
@@ -535,6 +541,15 @@ export default function AddWizardScreen() {
         setManualPeriod(first.period ?? null);
       }
     });
+    // Types personnalisés (chips après les standards) — best-effort : en cas
+    // d'échec réseau, la saisie reste possible avec les types natifs.
+    listCustomTypes()
+      .then((types) => {
+        if (!cancelled) setManualCustomTypes(types);
+      })
+      .catch(() => {
+        // silencieux : chips persos absentes
+      });
     return () => {
       cancelled = true;
     };
@@ -757,6 +772,8 @@ export default function AddWizardScreen() {
     setManualDate(isoDate(new Date()));
     setManualEndDate(null);
     setManualType("work");
+    setManualCustomTypeId(null);
+    setIsTypeSheetOpen(false);
     setManualPresetId(null);
     setManualStart(MANUAL_DEFAULT_START);
     setManualEnd(MANUAL_DEFAULT_END);
@@ -788,16 +805,45 @@ export default function AddWizardScreen() {
     setManualPresetId(null);
   }
 
+  // Type personnalisé sélectionné (résolu depuis la liste chargée) : les cartes
+  // HORAIRES/PAUSE et l'insert suivent son caractère payé, comme Travail/Repos.
+  const selectedManualCustom = manualCustomTypeId
+    ? (manualCustomTypes.find((customType) => customType.id === manualCustomTypeId) ?? null)
+    : null;
+
+  /** La sélection d'un type natif désélectionne la chip perso, et inversement. */
+  function selectManualNativeType(value: ManualType) {
+    setManualType(value);
+    setManualCustomTypeId(null);
+  }
+
+  function handleManualTypeCreated(created: CustomShiftType) {
+    setManualCustomTypes((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name, "fr")),
+    );
+    setManualCustomTypeId(created.id);
+    setIsTypeSheetOpen(false);
+  }
+
   // Écrit directement en base, comme ShiftEditorModal en mode create :
   // une ligne shifts par date (« AU » optionnel = plage multi-dates, ≤ 31 j),
   // horaires + pause du gros horaire pour les types travaillés.
   async function saveManualDays() {
     if (!userId) return;
-    const isTimed = MANUAL_TIMED_TYPES.includes(manualType);
+    const isTimed = selectedManualCustom
+      ? selectedManualCustom.isPaid
+      : MANUAL_TIMED_TYPES.includes(manualType);
     if (isTimed && manualEnd <= manualStart) {
       Alert.alert("Horaire invalide", "La fin doit être après le début.");
       return;
     }
+    // Type perso payé → type "work", non payé → "off" (custom_type_id garde le
+    // libellé) ; sans type perso, le type natif part tel quel.
+    const rowType = selectedManualCustom
+      ? selectedManualCustom.isPaid
+        ? "work"
+        : "off"
+      : manualType;
     const dates =
       manualEndDate && manualEndDate > manualDate
         ? datesBetween(manualDate, manualEndDate)
@@ -808,7 +854,8 @@ export default function AddWizardScreen() {
         user_id: userId,
         source: "manual",
         date: day,
-        type: manualType,
+        type: rowType,
+        custom_type_id: selectedManualCustom?.id ?? null,
         start_at: isTimed ? new Date(`${day}T${manualStart}:00`).toISOString() : null,
         end_at: isTimed ? new Date(`${day}T${manualEnd}:00`).toISOString() : null,
         break_minutes: isTimed ? manualPause : 0,
@@ -1127,7 +1174,23 @@ export default function AddWizardScreen() {
   }
 
   if (state.step === "manual") {
-    const isTimed = MANUAL_TIMED_TYPES.includes(manualType);
+    const isTimed = selectedManualCustom
+      ? selectedManualCustom.isPaid
+      : MANUAL_TIMED_TYPES.includes(manualType);
+    const manualTypeChips: TypeChipOption[] = [
+      ...MANUAL_TYPES.map(({ value, label }) => ({
+        key: value,
+        label,
+        selected: manualCustomTypeId === null && manualType === value,
+        onPress: () => selectManualNativeType(value),
+      })),
+      ...manualCustomTypes.map((customType) => ({
+        key: `custom-${customType.id}`,
+        label: customType.name,
+        selected: manualCustomTypeId === customType.id,
+        onPress: () => setManualCustomTypeId(customType.id),
+      })),
+    ];
     const cardSurface = { backgroundColor: colors.surface, borderColor: colors.border };
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
@@ -1159,10 +1222,10 @@ export default function AddWizardScreen() {
             Une plage crée le même créneau sur chaque jour — pratique pour les CP.
           </Text>
 
-          {/* Carte 2 — type : sélection encre */}
+          {/* Carte 2 — type : sélection encre, types persos + « + Autre… » */}
           <View style={[styles.manualCard, cardSurface]}>
             <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>Type</Text>
-            <ChoiceChips options={MANUAL_TYPES} value={manualType} onChange={setManualType} />
+            <TypeChipsRow options={manualTypeChips} onAddPress={() => setIsTypeSheetOpen(true)} />
           </View>
 
           {isTimed ? (
@@ -1266,6 +1329,14 @@ export default function AddWizardScreen() {
           <View style={styles.flexSpacer} />
           <Button label="Ajouter à ma semaine" onPress={saveManualDays} isLoading={isSaving} />
         </ScrollView>
+
+        {/* Feuille « Nouveau type » : le type créé est sélectionné d'office */}
+        {isTypeSheetOpen ? (
+          <TypeSheet
+            onClose={() => setIsTypeSheetOpen(false)}
+            onCreated={handleManualTypeCreated}
+          />
+        ) : null}
       </WizardFrame>
     );
   }
