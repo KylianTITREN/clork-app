@@ -46,9 +46,9 @@ function HatchedBackground() {
   return (
     <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
       <Defs>
-        <Pattern id="hatch" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(45)">
-          <Rect width="14" height="14" fill="#FFFFFF" />
-          <Line x1="0" y1="0" x2="0" y2="14" stroke="#F1EFE9" strokeWidth="7" />
+        <Pattern id="hatch" patternUnits="userSpaceOnUse" width="34" height="34" patternTransform="rotate(-45)">
+          <Rect width="34" height="34" fill="#FFFFFF" />
+          <Line x1="0" y1="0" x2="0" y2="34" stroke="#F4F2EC" strokeWidth="16" />
         </Pattern>
       </Defs>
       <Rect width="100%" height="100%" fill="url(#hatch)" />
