@@ -22,6 +22,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
+import { InfoSheet } from "@/components/ui/InfoSheet";
 import { Segmented } from "@/components/ui/Segmented";
 import {
   fonts,
@@ -106,6 +107,7 @@ export default function HomeScreen() {
   const isPremium = isPremiumPlan(plan);
   const [displayName, setDisplayName] = useState("");
   const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
+  const [showNoTeamSheet, setShowNoTeamSheet] = useState(false);
   const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
   // Équipe de la semaine (scan validé) : qui ouvre/ferme avec moi.
   const [team, setTeam] = useState<{ employees: ExtractionEmployee[]; myRow: number | null } | null>(null);
@@ -277,10 +279,7 @@ export default function HomeScreen() {
       .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
     const employees = data?.raw_extraction?.employees;
     if (!employees || employees.length === 0) {
-      Alert.alert(
-        "Pas de planning d'équipe",
-        "Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues.",
-      );
+      setShowNoTeamSheet(true);
       return;
     }
     // Non-premium : la feuille s'ouvre quand même — les collègues passent en
@@ -803,6 +802,17 @@ export default function HomeScreen() {
 
       {!viewing ? (
         <FloatingCTA label="＋ Ajouter mes horaires" onPress={() => router.navigate("/(tabs)/scan")} />
+      ) : null}
+
+      {showNoTeamSheet ? (
+        <InfoSheet
+          icon="people"
+          title="Pas de planning d'équipe"
+          text={"Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues."}
+          ctaLabel="Scanner le planning"
+          onCta={() => router.navigate("/(tabs)/scan")}
+          onClose={() => setShowNoTeamSheet(false)}
+        />
       ) : null}
 
       {/* Feuille équipe (collègues du scan de la semaine) */}
