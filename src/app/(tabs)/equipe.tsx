@@ -37,6 +37,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { avatarEmojiOf } from "@/constants/avatars";
 import { addDays, mondayOf } from "@/lib/dates";
 import type {
   ExtractionDay,
@@ -178,14 +179,10 @@ function liveSlotKey(date: string, startAt: string, endAt: string): string {
   return `${date}|${start}-${end}`;
 }
 
-/** Initiale d'avatar d'un compte relié — switch prêt pour la collection à venir. */
+/** Avatar d'un compte relié : animal de la collection Premium (écran Compte),
+    sinon initiale du prénom actuel — slugs inconnus/futurs compris. */
 function liveAvatarLetter(link: TeamLink): string {
-  switch (link.avatar) {
-    // 'letter' (et toute valeur inconnue) : initiale du prénom actuel.
-    case "letter":
-    default:
-      return link.display_name.trim().charAt(0).toUpperCase();
-  }
+  return avatarEmojiOf(link.avatar) ?? link.display_name.trim().charAt(0).toUpperCase();
 }
 
 /** Rôle sur le scan affiché — voir le commentaire d'en-tête. */

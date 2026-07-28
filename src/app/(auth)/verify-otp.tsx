@@ -58,7 +58,12 @@ export default function VerifyOtpScreen() {
     setIsVerifying(false);
     if (error) {
       Alert.alert("Code invalide", authErrorMessage(error));
+      return;
     }
+    // Étape 3/3 validée → BIENVENUE 1/4 (maquette 4f). Navigation EXPLICITE :
+    // l'ancienne détection « prénom vide » de l'accueil est morte depuis que
+    // l'inscription renseigne le prénom dès le signUp.
+    router.replace("/(tabs)/onboarding" as never);
   }
 
   async function handleResend() {
