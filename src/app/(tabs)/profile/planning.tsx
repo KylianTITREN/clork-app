@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -16,11 +18,17 @@ import { router, useFocusEffect } from "expo-router";
 
 import { SavePill } from "@/components/profile/SavePill";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
+import { Button } from "@/components/ui/Button";
 import { ChoiceChips } from "@/components/ui/ChoiceChips";
-import { DurationChips } from "@/components/ui/DurationChips";
 import { TextField } from "@/components/ui/TextField";
-import { TimePickerField } from "@/components/ui/TimePickerField";
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import {
+  fonts,
+  radius,
+  softShadow,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import {
   ensurePermission,
@@ -30,10 +38,12 @@ import {
   type ExportTarget,
   type WritableCalendar,
 } from "@/lib/calendar-export";
-import { DEFAULT_PRESETS, loadPresets, type ShiftPreset } from "@/lib/preset-service";
+import { DEFAULT_PRESETS, MAX_PRESETS, loadPresets, type ShiftPreset } from "@/lib/preset-service";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+
+import { FREE_PRESET_LIMIT, PauseDurationChips, presetDisplayName } from "./presets";
 
 // Seuils de déclenchement de la pause (recopiés de pause.tsx, fusion v2).
 const THRESHOLD_OPTIONS = [
@@ -42,6 +52,14 @@ const THRESHOLD_OPTIONS = [
   { value: 6, label: "6h" },
   { value: 7, label: "7h" },
   { value: 8, label: "8h" },
+] as const;
+
+// Durées de pause proposées (maquette : Aucune / 1h / 30 min / 45 min + Autre…).
+const PAUSE_OPTIONS = [
+  { minutes: 0, label: "Aucune" },
+  { minutes: 60, label: "1h" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 45, label: "45 min" },
 ] as const;
 
 type FormSnapshot = {
@@ -60,6 +78,120 @@ function formatPresetBreak(minutes: number): string | null {
   const rest = minutes % 60;
   if (hours === 0) return `${rest} min`;
   return rest > 0 ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
+}
+
+/** "HH:MM" (ou null) → Date pour le sélecteur natif. */
+function toPickerDate(value: string | null): Date {
+  const date = new Date();
+  if (value) {
+    const [hours, minutes] = value.split(":").map(Number);
+    date.setHours(hours || 0, minutes || 0, 0, 0);
+  } else {
+    date.setHours(9, 0, 0, 0);
+  }
+  return date;
+}
+
+function toHHMM(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+type TimeSettingPillProps = {
+  label: string;
+  value: string | null;
+  placeholder: string;
+  onChange: (value: string) => void;
+  /** Si fourni et valeur posée : petite croix d'effacement dans la pilule. */
+  onClear?: () => void;
+};
+
+/**
+ * Pilule réglage v2 (maquette Scan & horaires) : fond neutre r11, label tiny
+ * uppercase à gauche + heure body/bold à droite dans la MÊME pilule — tout le
+ * bloc ouvre le sélecteur d'heure natif (roue iOS / horloge Android).
+ */
+function TimeSettingPill({ label, value, placeholder, onChange, onClear }: TimeSettingPillProps) {
+  const colors = useThemeColors();
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState<Date>(() => toPickerDate(value));
+
+  function open() {
+    setDraft(toPickerDate(value));
+    setIsOpen(true);
+  }
+
+  function confirm() {
+    onChange(toHHMM(draft));
+    setIsOpen(false);
+  }
+
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={open}
+        style={({ pressed }) => [
+          styles.settingPill,
+          { backgroundColor: colors.background, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Text
+          style={[styles.settingPillLabel, { color: colors.textMuted }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+        >
+          {label}
+        </Text>
+        <View style={styles.settingPillValueBox}>
+          <Text style={[styles.settingPillValue, { color: value ? colors.text : colors.textDisabled }]}>
+            {value ?? placeholder}
+          </Text>
+          {value && onClear ? (
+            <Pressable onPress={onClear} hitSlop={8} accessibilityLabel={`Effacer — ${label}`}>
+              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+      </Pressable>
+
+      {isOpen ? (
+        Platform.OS === "ios" ? (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setIsOpen(false)}>
+            <Pressable style={styles.pickerBackdrop} onPress={() => setIsOpen(false)} />
+            <View
+              style={[
+                styles.pickerSheet,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                softShadow,
+              ]}
+            >
+              <DateTimePicker
+                value={draft}
+                mode="time"
+                display="spinner"
+                minuteInterval={5}
+                onChange={(_, date) => date && setDraft(date)}
+                locale="fr-FR"
+              />
+              <Button label="Valider" onPress={confirm} />
+            </View>
+          </Modal>
+        ) : (
+          <DateTimePicker
+            value={draft}
+            mode="time"
+            display="clock"
+            onChange={(event, date) => {
+              setIsOpen(false);
+              if (event.type === "set" && date) onChange(toHHMM(date));
+            }}
+          />
+        )
+      ) : null}
+    </>
+  );
 }
 
 /** Carte blanche v2 : titre + sous-titre DANS la carte (maquette Scan & horaires). */
@@ -95,6 +227,8 @@ export default function PlanningSettingsScreen() {
   const [breakMinutes, setBreakMinutes] = useState(0);
   const [breakThreshold, setBreakThreshold] = useState(6);
   const [breakStart, setBreakStart] = useState<string | null>(null);
+  // Le seuil s'édite en dépliant les chips sous la pilule « Si journée ≥ ».
+  const [isPickingThreshold, setIsPickingThreshold] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<FormSnapshot | null>(null);
 
@@ -224,6 +358,20 @@ export default function PlanningSettingsScreen() {
   );
 
   const plan = usePlan();
+
+  /** Création gérée par l'éditeur plein écran ; gates plan/maximum ici. */
+  function handleAddPreset() {
+    if (!isPremiumPlan(plan) && presets.length >= FREE_PRESET_LIMIT) {
+      showPremiumGate("Plus de 3 créneaux types");
+      return;
+    }
+    if (presets.length >= MAX_PRESETS) {
+      Alert.alert("Limite atteinte", `Maximum ${MAX_PRESETS} créneaux types.`);
+      return;
+    }
+    router.push({ pathname: "/profile/presets", params: { new: "1" } });
+  }
+
   // --- Export calendrier : dédié (nom au choix) ou calendrier existant ---
   const [exportTarget, setExportTarget] = useState<ExportTarget>({ mode: "dedicated", name: "Clork" });
   const [calendars, setCalendars] = useState<WritableCalendar[] | null>(null);
@@ -290,23 +438,19 @@ export default function PlanningSettingsScreen() {
           </SettingsCard>
 
           <SettingsCard title="Horaires du magasin" subtitle="Pour savoir quand tu ouvres ou fermes">
-            <View style={styles.storeRow}>
-              <View style={[styles.storePill, { backgroundColor: colors.background }]}>
-                <Text style={[styles.storePillLabel, { color: colors.textMuted }]}>Ouvre</Text>
-                <TimePickerField
-                  value={storeOpen}
-                  placeholder="09:00"
-                  onChange={(time) => void saveStoreHours(time, storeClose)}
-                />
-              </View>
-              <View style={[styles.storePill, { backgroundColor: colors.background }]}>
-                <Text style={[styles.storePillLabel, { color: colors.textMuted }]}>Ferme</Text>
-                <TimePickerField
-                  value={storeClose}
-                  placeholder="21:00"
-                  onChange={(time) => void saveStoreHours(storeOpen, time)}
-                />
-              </View>
+            <View style={styles.pillsRow}>
+              <TimeSettingPill
+                label="Ouvre"
+                value={storeOpen}
+                placeholder="09:00"
+                onChange={(time) => void saveStoreHours(time, storeClose)}
+              />
+              <TimeSettingPill
+                label="Ferme"
+                value={storeClose}
+                placeholder="21:00"
+                onChange={(time) => void saveStoreHours(storeOpen, time)}
+              />
             </View>
             <Text style={[styles.storeHint, { color: colors.textDisabled }]}>
               Créneau qui commence à l'ouverture → tu ouvres ; qui finit à la fermeture → tu
@@ -320,14 +464,16 @@ export default function PlanningSettingsScreen() {
               return (
                 <Pressable
                   key={preset.id}
-                  onPress={() => router.push("/profile/presets")}
+                  onPress={() =>
+                    router.push({ pathname: "/profile/presets", params: { id: preset.id } })
+                  }
                   style={({ pressed }) => [
                     styles.presetRow,
                     { backgroundColor: colors.background, opacity: pressed ? 0.7 : 1 },
                   ]}
                 >
                   <Text style={[styles.presetName, { color: colors.text }]} numberOfLines={1}>
-                    {preset.label}
+                    {presetDisplayName(preset.label)}
                   </Text>
                   <Text style={[styles.presetMeta, { color: colors.textMuted }]}>
                     {preset.start} – {preset.end}
@@ -338,7 +484,7 @@ export default function PlanningSettingsScreen() {
               );
             })}
             <Pressable
-              onPress={() => router.push("/profile/presets")}
+              onPress={handleAddPreset}
               style={({ pressed }) => [
                 styles.addRow,
                 { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
@@ -350,31 +496,53 @@ export default function PlanningSettingsScreen() {
           </SettingsCard>
 
           <SettingsCard title="Pause déjeuner" subtitle="Si le planning n'imprime pas la durée payée">
-            <View style={styles.fieldBlock}>
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Durée par défaut</Text>
-              <DurationChips value={breakMinutes} onChange={setBreakMinutes} allowCustom />
-            </View>
+            <PauseDurationChips
+              value={breakMinutes}
+              onChange={setBreakMinutes}
+              options={PAUSE_OPTIONS}
+            />
 
-            <View style={styles.fieldBlock}>
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Si journée ≥</Text>
-              <ChoiceChips options={THRESHOLD_OPTIONS} value={breakThreshold} onChange={setBreakThreshold} />
-            </View>
-
-            <View style={[styles.pauseTimeRow, { backgroundColor: colors.background }]}>
-              <Text style={[styles.fieldLabel, styles.inlineLabel, { color: colors.textMuted }]}>
-                Heure habituelle
-              </Text>
-              <TimePickerField value={breakStart} onChange={setBreakStart} placeholder="12:30" />
-              {breakStart ? (
-                <Pressable
-                  onPress={() => setBreakStart(null)}
-                  hitSlop={8}
-                  accessibilityLabel="Effacer l'heure habituelle"
+            <View style={styles.pillsRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Seuil de journée déclenchant la pause"
+                onPress={() => setIsPickingThreshold((current) => !current)}
+                style={({ pressed }) => [
+                  styles.settingPill,
+                  { backgroundColor: colors.background, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Text
+                  style={[styles.settingPillLabel, { color: colors.textMuted }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
                 >
-                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-                </Pressable>
-              ) : null}
+                  Si journée ≥
+                </Text>
+                <Text style={[styles.settingPillValue, { color: colors.text }]}>
+                  {breakThreshold}h
+                </Text>
+              </Pressable>
+              <TimeSettingPill
+                label="Heure habituelle"
+                value={breakStart}
+                placeholder="12:30"
+                onChange={setBreakStart}
+                onClear={() => setBreakStart(null)}
+              />
             </View>
+
+            {isPickingThreshold ? (
+              <ChoiceChips
+                options={THRESHOLD_OPTIONS}
+                value={breakThreshold}
+                onChange={(value) => {
+                  setBreakThreshold(value);
+                  setIsPickingThreshold(false);
+                }}
+              />
+            ) : null}
           </SettingsCard>
 
           <SettingsCard title="Export calendrier" subtitle="Où envoyer tes semaines">
@@ -466,27 +634,54 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     marginTop: 2,
   },
-  // Pilules « Ouvre / Ferme » : fond neutre r11, label à gauche, heure à droite.
-  storeRow: {
+  // Rangées de 2 pilules réglage côte à côte (Ouvre/Ferme, Si journée/Heure).
+  pillsRow: {
     flexDirection: "row",
     gap: spacing.sm,
   },
-  storePill: {
+  // Pilule réglage : fond neutre r11, label tiny uppercase + valeur bold.
+  settingPill: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.sm,
+    gap: 6,
     borderRadius: radius.input,
-    paddingVertical: 6,
+    minHeight: 46,
+    paddingVertical: 10,
     paddingLeft: 13,
-    paddingRight: 6,
+    paddingRight: 11,
   },
-  storePillLabel: {
+  settingPillLabel: {
+    flexShrink: 1,
     fontSize: typeScale.tiny,
     fontFamily: fonts.semiBold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
+  },
+  settingPillValueBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  settingPillValue: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+  },
+  // Sélecteur d'heure natif des pilules (feuille iOS, cf. TimePickerField).
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  pickerSheet: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xxl,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   storeHint: {
     fontSize: typeScale.tiny,
@@ -525,23 +720,6 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
-  // Pause déjeuner (styles recopiés de pause.tsx).
-  fieldBlock: { gap: spacing.sm - 2 },
-  fieldLabel: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.semiBold,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  pauseTimeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderRadius: radius.input,
-    paddingHorizontal: 12,
-    paddingVertical: spacing.sm,
-  },
-  inlineLabel: { flex: 1 },
   // Export calendrier (logique inchangée, habillage carte v2).
   calRow: {
     borderWidth: 1.5,
