@@ -16,8 +16,13 @@ export function useSheetDrag(onClose: () => void) {
 
   const panResponder = useRef(
     PanResponder.create({
+      // Variante CAPTURE : sans elle, un doigt posé sur un bouton/champ de la
+      // feuille donne le geste à l'enfant et le glisser ne démarre jamais.
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.5,
       onMoveShouldSetPanResponder: (_, gesture) =>
         gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.5,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_, gesture) => {
         if (gesture.dy > 0) translateY.setValue(gesture.dy);
       },
