@@ -23,7 +23,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Defs, Line, Pattern, Rect } from "react-native-svg";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -41,18 +40,25 @@ import { mondayOf } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
-/** Fond à rayures diagonales de la carte neutralisée (maquette 4d invité). */
+/**
+ * Fond à rayures diagonales de la carte neutralisée (maquette 4d invité).
+ * Views pivotées (pas de Pattern SVG : rendu partiel sur certaines versions) :
+ * un grand carré -45° de bandes horizontales, rogné par la carte.
+ */
+const HATCH_SIZE = 900;
+const HATCH_STRIPE = 16;
+const HATCH_GAP = 18;
+
 function HatchedBackground() {
+  const rowCount = Math.ceil(HATCH_SIZE / (HATCH_STRIPE + HATCH_GAP));
   return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-      <Defs>
-        <Pattern id="hatch" patternUnits="userSpaceOnUse" width="34" height="34" patternTransform="rotate(-45)">
-          <Rect width="34" height="34" fill="#FFFFFF" />
-          <Line x1="0" y1="0" x2="0" y2="34" stroke="#F4F2EC" strokeWidth="16" />
-        </Pattern>
-      </Defs>
-      <Rect width="100%" height="100%" fill="url(#hatch)" />
-    </Svg>
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.hatchClip]}>
+      <View style={styles.hatchCanvas}>
+        {Array.from({ length: rowCount }, (_, index) => (
+          <View key={index} style={styles.hatchStripe} />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -409,6 +415,26 @@ const styles = StyleSheet.create({
   followedMeta: {
     fontSize: typeScale.tiny,
     fontFamily: fonts.medium,
+  },
+  hatchClip: {
+    overflow: "hidden",
+    borderRadius: radius.lg,
+    backgroundColor: "#FFFFFF",
+  },
+  hatchCanvas: {
+    position: "absolute",
+    width: HATCH_SIZE,
+    height: HATCH_SIZE,
+    left: "50%",
+    top: "50%",
+    marginLeft: -HATCH_SIZE / 2,
+    marginTop: -HATCH_SIZE / 2,
+    transform: [{ rotate: "-45deg" }],
+    gap: HATCH_GAP,
+  },
+  hatchStripe: {
+    height: HATCH_STRIPE,
+    backgroundColor: "#F4F2EC",
   },
   hatchedCard: {
     borderRadius: radius.lg,
