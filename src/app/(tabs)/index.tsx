@@ -135,7 +135,17 @@ export default function HomeScreen() {
     if (!viewing && monday === mondayOf(new Date())) {
       void rescheduleFromShifts((data as Shift[]) ?? []);
     }
-  }, [userId, monday, sunday, viewing]);
+    // Widgets : re-pousser l'instantané après CHAQUE (re)chargement — sinon une
+    // suppression/édition laisse des horaires fantômes sur l'écran d'accueil.
+    // L'instantané reste ancré au jour J + planning par défaut, jamais à la vue.
+    if (userId) {
+      const widgetTarget = followedList.find((f) => f.isDefaultView)?.id ?? userId;
+      void refreshWidgetSnapshot(widgetTarget, {
+        accent: colors.accent,
+        onAccent: colors.onAccent,
+      });
+    }
+  }, [userId, monday, sunday, viewing, followedList, colors.accent, colors.onAccent]);
 
   const loadTeam = useCallback(async () => {
     if (!userId || viewing) {
