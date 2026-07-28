@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -29,6 +30,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { useSheetDrag } from "@/components/ui/useSheetDrag";
 import { createCustomType, type CustomShiftType } from "@/lib/custom-types-service";
 
 const SHEET_TOP_RADIUS = 20;
@@ -107,6 +109,7 @@ type TypeSheetProps = {
 
 export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
   const colors = useThemeColors();
+  const { panHandlers, dragStyle } = useSheetDrag(onClose);
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
@@ -149,9 +152,11 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
           accessibilityLabel="Fermer"
         />
 
-        <View
+        <Animated.View
+          {...panHandlers}
           style={[
             styles.sheet,
+            dragStyle,
             {
               backgroundColor: colors.surface,
               paddingBottom: Math.max(insets.bottom, spacing.md),
@@ -236,7 +241,7 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
             disabled={!trimmedName}
             isLoading={isCreating}
           />
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
   );

@@ -6,7 +6,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
@@ -18,6 +18,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { useSheetDrag } from "@/components/ui/useSheetDrag";
 import { setPremiumGateListener } from "@/lib/plan-service";
 
 const BENEFITS = [
@@ -31,6 +32,7 @@ export function PremiumGateSheet() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [feature, setFeature] = useState<string | null>(null);
+  const { panHandlers, dragStyle } = useSheetDrag(() => setFeature(null));
 
   useEffect(() => {
     setPremiumGateListener(setFeature);
@@ -48,9 +50,11 @@ export function PremiumGateSheet() {
         accessibilityLabel="Fermer"
       />
       <Pressable style={styles.backdrop} onPress={() => setFeature(null)} />
-      <View
+      <Animated.View
+        {...panHandlers}
         style={[
           styles.sheet,
+          dragStyle,
           { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md },
         ]}
       >
@@ -85,7 +89,7 @@ export function PremiumGateSheet() {
         <Pressable onPress={() => setFeature(null)} hitSlop={8}>
           <Text style={[styles.later, { color: colors.textMuted }]}>Plus tard</Text>
         </Pressable>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

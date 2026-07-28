@@ -244,7 +244,8 @@ export default function SharingSettingsScreen() {
                   label="Créer mon compte gratuit"
                   variant="dark"
                   style={{ alignSelf: "stretch" }}
-                  onPress={() => router.navigate("/(tabs)/profile")}
+                  // Parcours d'inscription invité 3 étapes ; retour = cette page.
+                  onPress={() => router.push("/upgrade" as Parameters<typeof router.push>[0])}
                 />
               </View>
 
