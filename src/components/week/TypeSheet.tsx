@@ -137,6 +137,12 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
         style={styles.flex}
       >
         <Pressable
+          style={styles.backdropFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Fermer"
+        />
+        <Pressable
           style={styles.backdrop}
           onPress={onClose}
           accessibilityRole="button"
@@ -240,9 +246,12 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  backdropFill: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: BACKDROP_COLOR,
+  },
   backdrop: {
     flex: 1,
-    backgroundColor: BACKDROP_COLOR,
   },
   sheet: {
     borderTopLeftRadius: SHEET_TOP_RADIUS,

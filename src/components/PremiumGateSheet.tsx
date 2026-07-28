@@ -41,6 +41,12 @@ export function PremiumGateSheet() {
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={() => setFeature(null)}>
+      <Pressable
+        style={styles.backdropFill}
+        onPress={() => setFeature(null)}
+        accessibilityRole="button"
+        accessibilityLabel="Fermer"
+      />
       <Pressable style={styles.backdrop} onPress={() => setFeature(null)} />
       <View
         style={[
@@ -85,9 +91,12 @@ export function PremiumGateSheet() {
 }
 
 const styles = StyleSheet.create({
+  backdropFill: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(23,21,14,0.4)",
+  },
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(23,21,14,0.4)",
   },
   sheet: {
     borderTopLeftRadius: 24,
