@@ -4,7 +4,7 @@
 // « planning par défaut » (un seul, optimiste), note covoiturage quand nos
 // heures de fin (ou de début) sont à ≤ 30 min d'écart, et « Ne plus suivre ».
 
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -119,8 +119,12 @@ export default function FollowedPlanningsScreen() {
   const userId = session?.user.id;
 
   const [followed, setFollowed] = useState<FollowedUser[]>([]);
+  // Arrivée depuis Partage & suivi : ouvrir directement sur la personne cliquée.
+  const params = useLocalSearchParams<{ personId?: string }>();
   // null = « Moi » ; sinon id d'une personne suivie.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    typeof params.personId === "string" ? params.personId : null,
+  );
   const [weekShifts, setWeekShifts] = useState<Shift[]>([]);
 
   // Semaine COURANTE uniquement — pas de navigation sur cet écran.
@@ -284,7 +288,8 @@ export default function FollowedPlanningsScreen() {
           </Text>
         </View>
 
-        {selected ? (
+        {/* Masquée quand c'est MA vue par défaut : l'info est déjà évidente. */}
+        {selected && !selected.isDefaultView ? (
           <View style={[styles.banner, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={[styles.dot, { backgroundColor: colors.accent }]} />
             <Text style={[styles.bannerText, { color: colors.textSoft }]} numberOfLines={2}>

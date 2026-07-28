@@ -169,7 +169,12 @@ export default function SharingSettingsScreen() {
       {followed.map((user) => (
         <Pressable
           key={user.id}
-          onPress={() => router.push("/profile/suivis" as Parameters<typeof router.push>[0])}
+          onPress={() =>
+            router.push({
+              pathname: "/profile/suivis",
+              params: { personId: user.id },
+            } as Parameters<typeof router.push>[0])
+          }
           style={[styles.followedRow, { backgroundColor: colors.background }]}
         >
           <View style={[styles.followedAvatar, { backgroundColor: colors.accentMuted }]}>
