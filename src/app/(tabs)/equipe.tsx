@@ -2,9 +2,16 @@
 // carte par employé du scan validé de la semaine COURANTE (moi en premier),
 // dépliage de la semaine complète dans la carte, verrou Premium (silhouettes)
 // et CTA « Envoyer le code à l'équipe » (partage par code, premium-gaté).
-// Mode conjoint (planning suivi) : pas de « (toi) », pas d'envoi de code, et
-// l'accès dépend du plan de la personne SUIVIE (verrou sans déblocage) — la
-// RLS applique la même règle côté serveur.
+// Trois rôles sur le scan affiché :
+//   · owner — mon scan de la semaine consultée : comportement complet.
+//   · invited — pas de scan à moi, mais une ligne réclamée par code sur le
+//     scan d'une collègue : même vue, verrou selon MON plan, pas de CTA code.
+//   · follower (planning suivi) — pas de « (toi) », pas d'envoi de code, et
+//     l'accès dépend du plan de la personne SUIVIE (verrou sans déblocage) —
+//     la RLS applique la même règle côté serveur.
+// « Équipe vivante » : les comptes reliés au scan (RPC get_team_links)
+// remplacent leur ligne du snapshot par leurs créneaux EN DIRECT — petit
+// point accent sur l'avatar.
 
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -45,6 +52,7 @@ import {
 } from "@/lib/plan-service";
 import { findTargetEmployee } from "@/lib/scan-service";
 import { createShare } from "@/lib/share-service";
+import { getTeamLinks, type LiveShift, type TeamLink } from "@/lib/team-live-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -128,11 +136,107 @@ function dayScheduleOf(day: ExtractionDay | undefined): DaySchedule {
   return { label: "Repos", isWork: false };
 }
 
+/** Créneaux LIVE d'un jour → libellé de chip (mêmes règles que dayScheduleOf). */
+function liveDayScheduleOf(shifts: LiveShift[], date: string): DaySchedule {
+  const ofDay = shifts.filter((s) => s.date === date);
+  const timed = ofDay.filter(
+    (s) => (s.type === "work" || s.type === "meeting") && s.start_at && s.end_at,
+  );
+  if (timed.length > 0) {
+    const ranges = timed.map((s) => ({
+      start: TIME_FORMATTER.format(new Date(s.start_at as string)),
+      end: TIME_FORMATTER.format(new Date(s.end_at as string)),
+    }));
+    return {
+      label:
+        ranges.length === 1
+          ? `${ranges[0].start} – ${ranges[0].end}`
+          : ranges.map((r) => `${r.start}–${r.end}`).join(" · "),
+      isWork: true,
+    };
+  }
+  if (ofDay.some((s) => s.type === "cp")) return { label: "CP", isWork: false };
+  if (ofDay.some((s) => s.type === "rh")) return { label: "RH", isWork: false };
+  return { label: "Repos", isWork: false };
+}
+
+/** Heures PAYÉES live de la semaine : Σ (fin − début) − pause, work + réunion. */
+function livePaidHours(shifts: LiveShift[]): number {
+  let total = 0;
+  for (const s of shifts) {
+    if ((s.type !== "work" && s.type !== "meeting") || !s.start_at || !s.end_at) continue;
+    const span = (new Date(s.end_at).getTime() - new Date(s.start_at).getTime()) / 3_600_000;
+    total += Math.max(span - (s.break_minutes ?? 0) / 60, 0);
+  }
+  return total;
+}
+
+/** Clé canonique « date|min-min » d'un créneau live (timestamptz → heure locale). */
+function liveSlotKey(date: string, startAt: string, endAt: string): string {
+  const start = minutesOf(TIME_FORMATTER.format(new Date(startAt)));
+  const end = minutesOf(TIME_FORMATTER.format(new Date(endAt)));
+  return `${date}|${start}-${end}`;
+}
+
+/** Initiale d'avatar d'un compte relié — switch prêt pour la collection à venir. */
+function liveAvatarLetter(link: TeamLink): string {
+  switch (link.avatar) {
+    // 'letter' (et toute valeur inconnue) : initiale du prénom actuel.
+    case "letter":
+    default:
+      return link.display_name.trim().charAt(0).toUpperCase();
+  }
+}
+
+/** Rôle sur le scan affiché — voir le commentaire d'en-tête. */
+type TeamRole = "owner" | "invited" | "follower";
+
 type TeamScan = {
   id: string;
+  uploaderId: string;
   employees: ExtractionEmployee[];
   myRow: number | null;
 };
+
+// Repli « invitée » : le scan validé de la semaine auquel ce compte est
+// rattaché par code (scan_shares.claimed_row_id) — trois petites requêtes
+// plutôt qu'une jointure PostgREST imbriquée fragile ; la policy « scans:
+// invited users can read » autorise la lecture. Best-effort : null si rien.
+async function findInvitedScan(
+  userId: string,
+  monday: string,
+): Promise<TeamScan & { role: "invited" } | null> {
+  const { data: shares } = await supabase
+    .from("scan_shares")
+    .select("scan_id, claimed_row_id")
+    .eq("invited_user_id", userId)
+    .not("claimed_row_id", "is", null);
+  const shareRows = (shares ?? []) as { scan_id: string; claimed_row_id: string | null }[];
+  if (shareRows.length === 0) return null;
+  const { data: scan } = await supabase
+    .from("scans")
+    .select("id, uploader_id, raw_extraction")
+    .in("id", shareRows.map((s) => s.scan_id))
+    .eq("week_start", monday)
+    .eq("status", "validated")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; uploader_id: string; raw_extraction: PlanningExtraction | null }>();
+  const employees = scan?.raw_extraction?.employees;
+  if (!scan || !employees || employees.length === 0) return null;
+  // Ma ligne = celle RÉCLAMÉE à la saisie du code — pas de matching par alias.
+  const claimedRowId = shareRows.find((s) => s.scan_id === scan.id)?.claimed_row_id ?? null;
+  let myRow: number | null = null;
+  if (claimedRowId) {
+    const { data: row } = await supabase
+      .from("scan_rows")
+      .select("row_index")
+      .eq("id", claimedRowId)
+      .maybeSingle<{ row_index: number }>();
+    myRow = row?.row_index ?? null;
+  }
+  return { role: "invited", id: scan.id, uploaderId: scan.uploader_id, employees, myRow };
+}
 
 export default function EquipeScreen() {
   const colors = useThemeColors();
@@ -153,6 +257,14 @@ export default function EquipeScreen() {
     : mondayOf(new Date());
 
   const [scan, setScan] = useState<TeamScan | null>(null);
+  // owner par défaut ; recalculé à chaque chargement de scan.
+  const [role, setRole] = useState<TeamRole>("owner");
+  // Comptes reliés au scan affiché (clé = row_index de la ligne) : créneaux
+  // en direct. Le scanId mémorisé évite d'appliquer des liens périmés à un
+  // autre scan pendant un rechargement.
+  const [links, setLinks] = useState<{ scanId: string; byRow: Map<number, TeamLink> } | null>(
+    null,
+  );
   // Planning suivi + personne suivie non-premium : verrou SANS déblocage
   // (on ne peut pas acheter l'accès aux données de quelqu'un d'autre).
   const [isBlockedByOwnerPlan, setIsBlockedByOwnerPlan] = useState(false);
@@ -191,56 +303,114 @@ export default function EquipeScreen() {
       return;
     }
     setIsBlockedByOwnerPlan(false);
-    // Dernier scan validé de la semaine courante de cet uploader.
+    // Dernier scan validé de la semaine consultée de cet uploader.
     const { data } = await supabase
       .from("scans")
-      .select("id, raw_extraction")
+      .select("id, uploader_id, raw_extraction")
       .eq("uploader_id", ownerId)
       .eq("week_start", monday)
       .eq("status", "validated")
       .order("created_at", { ascending: false })
       .limit(1)
-      .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
-    const employees = data?.raw_extraction?.employees;
-    if (!data || !employees || employees.length === 0) {
+      .maybeSingle<{ id: string; uploader_id: string; raw_extraction: PlanningExtraction | null }>();
+
+    let nextRole: TeamRole = isOwn ? "owner" : "follower";
+    let scanId = data?.id ?? null;
+    let uploaderId = data?.uploader_id ?? ownerId;
+    let employees = data?.raw_extraction?.employees ?? [];
+    // « Moi » = la ligne de l'uploader consulté (mêmes alias que loadTeam).
+    let myRow =
+      employees.length > 0
+        ? (findTargetEmployee(
+            employees,
+            profile?.employee_aliases ?? [],
+            profile?.display_name ?? "",
+          )?.row_index ?? null)
+        : null;
+
+    // Repli « invitée » : pas de scan à MOI cette semaine, mais peut-être un
+    // scan de collègue auquel je suis rattachée par code (ligne réclamée).
+    if (isOwn && (!scanId || employees.length === 0)) {
+      const invited = await findInvitedScan(ownerId, monday);
+      if (invited) {
+        nextRole = invited.role;
+        scanId = invited.id;
+        uploaderId = invited.uploaderId;
+        employees = invited.employees;
+        myRow = invited.myRow;
+      }
+    }
+
+    if (!scanId || employees.length === 0) {
       setScan(null);
       setIsLoading(false);
       return;
     }
-    // « Moi » = la ligne de l'uploader consulté (mêmes alias que loadTeam).
-    const myRow =
-      findTargetEmployee(employees, profile?.employee_aliases ?? [], profile?.display_name ?? "")
-        ?.row_index ?? null;
-    setScan({ id: data.id, employees, myRow });
+    setRole(nextRole);
+    setScan({ id: scanId, uploaderId, employees, myRow });
     setIsLoading(false);
 
-    // Fiabilité : si les créneaux ACTUELS du propriétaire ne correspondent
-    // plus à sa ligne extraite (correction après scan), le scan s'est
-    // peut-être trompé pour l'équipe aussi → bandeau. Best-effort.
-    const mine = employees.find((e) => e.row_index === myRow);
-    if (!mine) {
+    // Superposition « équipe vivante » : comptes reliés → créneaux en direct.
+    // Best-effort (tableau vide en cas d'échec) — le snapshot reste affiché.
+    const teamLinks = await getTeamLinks(scanId);
+    const byRow = new Map<number, TeamLink>();
+    let uploaderLink: TeamLink | null = null;
+    for (const link of teamLinks) {
+      if (link.row_index != null) {
+        byRow.set(link.row_index, link);
+        continue;
+      }
+      // row_index null = l'uploader : sa ligne se résout par SES alias.
+      uploaderLink = link;
+      const resolved = findTargetEmployee(employees, link.employee_aliases, link.display_name);
+      if (resolved) byRow.set(resolved.row_index, link);
+    }
+    setLinks({ scanId, byRow });
+
+    // Fiabilité : si les créneaux ACTUELS de l'UPLOADER du scan ne
+    // correspondent plus à sa ligne extraite (correction après scan), le scan
+    // s'est peut-être trompé pour l'équipe aussi → bandeau. Best-effort.
+    // Source préférée : son lien live (déjà chargé, valable pour tous les
+    // rôles) ; repli sur la table shifts pour owner/suiveur — la RLS la
+    // refuse à une invitée, on s'abstient alors proprement.
+    const uploaderRow = uploaderLink
+      ? findTargetEmployee(employees, uploaderLink.employee_aliases, uploaderLink.display_name)
+      : nextRole !== "invited"
+        ? (employees.find((e) => e.row_index === myRow) ?? null)
+        : null;
+    if (!uploaderRow) {
       setOwnerEdited(false);
       return;
     }
-    const { data: ownerShifts } = await supabase
-      .from("shifts")
-      .select("date, start_at, end_at")
-      .eq("user_id", ownerId)
-      .eq("type", "work")
-      .gte("date", monday)
-      .lte("date", addDays(monday, 6));
-    const liveKeys = new Set(
-      (ownerShifts ?? [])
-        .filter((s) => s.start_at && s.end_at)
-        .map((s) => {
-          const start = minutesOf(TIME_FORMATTER.format(new Date(s.start_at as string)));
-          const end = minutesOf(TIME_FORMATTER.format(new Date(s.end_at as string)));
-          return `${s.date}|${start}-${end}`;
-        }),
-    );
-    const scanKeys = extractionSlotKeys(mine, monday);
+    let liveKeys: Set<string> | null = null;
+    if (uploaderLink) {
+      liveKeys = new Set(
+        uploaderLink.shifts
+          .filter((s) => s.type === "work" && s.start_at && s.end_at)
+          .map((s) => liveSlotKey(s.date, s.start_at as string, s.end_at as string)),
+      );
+    } else if (nextRole !== "invited") {
+      const { data: ownerShifts } = await supabase
+        .from("shifts")
+        .select("date, start_at, end_at")
+        .eq("user_id", uploaderId)
+        .eq("type", "work")
+        .gte("date", monday)
+        .lte("date", addDays(monday, 6));
+      liveKeys = new Set(
+        (ownerShifts ?? [])
+          .filter((s) => s.start_at && s.end_at)
+          .map((s) => liveSlotKey(s.date as string, s.start_at as string, s.end_at as string)),
+      );
+    }
+    if (!liveKeys) {
+      setOwnerEdited(false);
+      return;
+    }
+    const currentKeys = liveKeys; // const : le narrowing survit à la closure
+    const scanKeys = extractionSlotKeys(uploaderRow, monday);
     const matches =
-      liveKeys.size === scanKeys.size && [...scanKeys].every((key) => liveKeys.has(key));
+      currentKeys.size === scanKeys.size && [...scanKeys].every((key) => currentKeys.has(key));
     setOwnerEdited(!matches);
   }, [ownerId, isOwn, monday]);
 
@@ -258,6 +428,9 @@ export default function EquipeScreen() {
     const others = scan.employees.filter((e) => e.row_index !== scan.myRow);
     return [...mine, ...others];
   }, [scan]);
+
+  // Liens live applicables au scan affiché (sinon on reste sur le snapshot).
+  const liveByRow = scan && links?.scanId === scan.id ? links.byRow : null;
 
   // Pastels des avatars : MOI = accentMuted/accent ; les autres alternent.
   const avatarPairs = [
@@ -436,8 +609,9 @@ export default function EquipeScreen() {
             const otherIndex = scan.myRow != null ? index - 1 : index;
             const pair = isMe ? avatarPairs[0] : avatarPairs[Math.max(otherIndex, 0) % 3];
 
-            // Verrou non-premium (MA vue seulement — sur un planning suivi le
-            // verrou dépend du plan du suivi, traité plus haut) : silhouettes.
+            // Verrou non-premium (rôles owner/invited : MON plan — sur un
+            // planning suivi le verrou dépend du plan de la personne suivie,
+            // traité plus haut) : silhouettes.
             if (isOwn && !isPremium && !isMe) {
               return (
                 <View
@@ -468,12 +642,16 @@ export default function EquipeScreen() {
               );
             }
 
-            const schedule = dayScheduleOf(
-              employee.days.find((d) => d.day_index === selectedIndex),
-            );
+            // Compte relié : ses créneaux EN DIRECT remplacent la ligne du
+            // snapshot (chip du jour, semaine dépliée, heures payées).
+            const link = liveByRow?.get(employee.row_index);
+            const schedule = link
+              ? liveDayScheduleOf(link.shifts, selectedDate)
+              : dayScheduleOf(employee.days.find((d) => d.day_index === selectedIndex));
             // Total extrait quand il existe, sinon recalculé depuis les jours
-            // (certains plannings n'impriment pas la colonne des totaux).
-            const weekHours = weeklyHoursOf(employee);
+            // (certains plannings n'impriment pas la colonne des totaux) ;
+            // heures PAYÉES live pour un compte relié.
+            const weekHours = link ? livePaidHours(link.shifts) : weeklyHoursOf(employee);
             const isOpen = expandedRow === employee.row_index;
             return (
               <Pressable
@@ -489,9 +667,21 @@ export default function EquipeScreen() {
               >
                 <View style={styles.cardHeader}>
                   <View style={[styles.avatar, { backgroundColor: pair.soft }]}>
+                    {/* Nom du planning conservé (référence papier) ; l'initiale
+                        suit le prénom actuel du compte relié. */}
                     <Text style={[styles.avatarLetter, { color: pair.strong }]}>
-                      {employee.name.trim().charAt(0).toUpperCase()}
+                      {(link ? liveAvatarLetter(link) : "") ||
+                        employee.name.trim().charAt(0).toUpperCase()}
                     </Text>
+                    {link ? (
+                      // Point « compte relié, horaires en direct ».
+                      <View
+                        style={[
+                          styles.liveDot,
+                          { backgroundColor: colors.accent, borderColor: colors.surface },
+                        ]}
+                      />
+                    ) : null}
                   </View>
                   <View style={styles.cardText}>
                     <Text style={[styles.cardName, { color: colors.text }]} numberOfLines={1}>
@@ -537,9 +727,9 @@ export default function EquipeScreen() {
                 {isOpen ? (
                   <View style={[styles.weekDetail, { borderTopColor: colors.separator }]}>
                     {Array.from({ length: 7 }, (_, dayIndex) => {
-                      const daySchedule = dayScheduleOf(
-                        employee.days.find((d) => d.day_index === dayIndex),
-                      );
+                      const daySchedule = link
+                        ? liveDayScheduleOf(link.shifts, addDays(monday, dayIndex))
+                        : dayScheduleOf(employee.days.find((d) => d.day_index === dayIndex));
                       const isSelectedDay = dayIndex === selectedIndex;
                       return (
                         <View
@@ -585,10 +775,11 @@ export default function EquipeScreen() {
         ) : null}
       </ScrollView>
 
-      {/* CTA épinglé sous la liste : partage du code équipe — seulement sur
-          MON planning (sur un suivi, le code appartient à la personne suivie). */}
+      {/* CTA épinglé sous la liste : partage du code équipe — rôle owner
+          uniquement (le code appartient à l'uploader du scan, pas à une
+          invitée ni à un suiveur). */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-        {isOwn ? (
+        {role === "owner" ? (
           <Button
             label="Envoyer le code à l'équipe"
             onPress={handleShareCode}
@@ -731,6 +922,17 @@ const styles = StyleSheet.create({
   avatarLetter: {
     fontSize: typeScale.body,
     fontFamily: fonts.bold,
+  },
+  // « Compte relié, horaires en direct » : point accent bordé de surface,
+  // posé en bas à droite de l'avatar.
+  liveDot: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1.5,
   },
   cardText: {
     flex: 1,
