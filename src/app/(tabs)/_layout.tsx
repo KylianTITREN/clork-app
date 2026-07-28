@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { useEffect } from "react";
 
 import { PremiumGateSheet } from "@/components/PremiumGateSheet";
+import { UpdateSplashHost } from "@/components/brand/UpdateSplash";
 import { registerPushToken } from "@/lib/notifications";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -26,6 +27,9 @@ export default function AppLayout() {
       </Stack>
       {/* Porte Premium v2 : feuille du bas globale (remplace l'Alert). */}
       <PremiumGateSheet />
+      {/* Splash v2 : joué une fois après la mise à jour, rejouable en easter
+          egg — monté APRÈS la porte Premium pour passer au-dessus. */}
+      <UpdateSplashHost />
     </>
   );
 }

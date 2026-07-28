@@ -5,6 +5,7 @@
 // équipe, suivis, export, widgets, rappels) est reprise de la v1.
 
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -14,9 +15,12 @@ import {
   StyleSheet,
   Text,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { PullSplashTeaser, triggerUpdateSplash } from "@/components/brand/UpdateSplash";
 import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
@@ -45,6 +49,10 @@ import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
 
 const DAY_LABELS = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"] as const;
+// Easter egg splash v2 (façon fantôme Snapchat) : seuil du tirage élastique
+// en haut de l'accueil, et seuil de réarmement du verrou en fin de geste.
+const SPLASH_PULL_TRIGGER = -110;
+const SPLASH_PULL_REARM = -10;
 const HERO_DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
   day: "numeric",
@@ -366,8 +374,22 @@ export default function HomeScreen() {
       },
     ],
   };
+  // Easter egg splash v2 : tirage élastique en haut → haptique + replay du
+  // splash, UNE fois par geste (verrou réarmé quand l'offset revient ≥ -10).
+  const splashPullLock = useRef(false);
   const onScroll = Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
     useNativeDriver: true,
+    // Le listener s'ajoute au mapping scrollY sans toucher au repli du hero.
+    listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = event.nativeEvent.contentOffset.y;
+      if (y < SPLASH_PULL_TRIGGER && !splashPullLock.current) {
+        splashPullLock.current = true;
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        triggerUpdateSplash();
+      } else if (y >= SPLASH_PULL_REARM && splashPullLock.current) {
+        splashPullLock.current = false;
+      }
+    },
   });
   const collapsedInfo =
     view === "today"
@@ -471,6 +493,9 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      {/* Easter egg (2.0.0) : le o-logo apparaît pendant le tirage élastique,
+          l'aiguille suit le doigt, et au seuil le listener lance le splash. */}
+      <PullSplashTeaser scrollY={scrollY} topOffset={insets.top + 10} />
       {view === "today" ? (
         <Animated.ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
           {topBar}
