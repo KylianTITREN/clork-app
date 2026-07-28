@@ -10,9 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
-  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -22,7 +20,6 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
-import { InfoSheet } from "@/components/ui/InfoSheet";
 import { Segmented } from "@/components/ui/Segmented";
 import {
   fonts,
@@ -104,11 +101,7 @@ export default function HomeScreen() {
   const [dayEditor, setDayEditor] = useState<{ date: string; shifts: Shift[] } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const plan = usePlan();
-  const isPremium = isPremiumPlan(plan);
   const [displayName, setDisplayName] = useState("");
-  const [colleagues, setColleagues] = useState<ExtractionEmployee[] | null>(null);
-  const [showNoTeamSheet, setShowNoTeamSheet] = useState(false);
-  const [expandedColleague, setExpandedColleague] = useState<number | null>(null);
   // Équipe de la semaine (scan validé) : qui ouvre/ferme avec moi.
   const [team, setTeam] = useState<{ employees: ExtractionEmployee[]; myRow: number | null } | null>(null);
   // Plannings suivis en lecture seule (ex : celui de sa compagne).
@@ -273,25 +266,10 @@ export default function HomeScreen() {
     [shifts],
   );
 
-  async function openColleagues() {
-    const teamOwnerId = viewing?.id ?? userId;
-    const { data } = await supabase
-      .from("scans")
-      .select("id, raw_extraction")
-      .eq("uploader_id", teamOwnerId ?? "")
-      .eq("week_start", monday)
-      .eq("status", "validated")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ id: string; raw_extraction: PlanningExtraction | null }>();
-    const employees = data?.raw_extraction?.employees;
-    if (!employees || employees.length === 0) {
-      setShowNoTeamSheet(true);
-      return;
-    }
-    // Non-premium : la feuille s'ouvre quand même — les collègues passent en
-    // silhouettes (verrou visible), seule ma ligne reste en clair.
-    setColleagues(employees);
+  // Écran « L'équipe » pleine page : l'uploader consulté (mode conjoint inclus)
+  // est passé en param ; l'écran gère lui-même l'état « pas de scan validé ».
+  function openEquipe() {
+    router.push({ pathname: "/equipe", params: { ownerId: viewing?.id ?? userId ?? "" } } as never);
   }
 
   async function handleExport() {
@@ -445,7 +423,7 @@ export default function HomeScreen() {
   const shortcuts = (
     <View style={styles.shortcutRow}>
       <Pressable
-        onPress={openColleagues}
+        onPress={openEquipe}
         style={[styles.shortcut, { backgroundColor: colors.surface, borderColor: colors.border }]}
       >
         <Ionicons name="people-outline" size={18} color={colors.accent} />
@@ -657,6 +635,12 @@ export default function HomeScreen() {
                     slots={toDayRowSlots(dayShifts)}
                     status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
                     readOnly={!!viewing}
+                    // Rien de déplié → le jour J garde son contour accent.
+                    style={
+                      expandedDay === null && date === todayIso
+                        ? { borderColor: colors.accent }
+                        : undefined
+                    }
                     onPress={() =>
                       dayShifts.length === 0
                         ? openDayEditor(date, dayShifts)
@@ -809,148 +793,6 @@ export default function HomeScreen() {
 
       {!viewing ? (
         <FloatingCTA label="＋ Ajouter mes horaires" onPress={() => router.navigate("/(tabs)/scan")} />
-      ) : null}
-
-      {showNoTeamSheet ? (
-        <InfoSheet
-          icon="people"
-          title="Pas de planning d'équipe"
-          text={"Aucun scan validé pour cette semaine — scanne le planning pour voir les horaires des collègues."}
-          ctaLabel="Scanner le planning"
-          onCta={() => router.navigate("/(tabs)/scan")}
-          onClose={() => setShowNoTeamSheet(false)}
-        />
-      ) : null}
-
-      {/* Feuille équipe (collègues du scan de la semaine) */}
-      {colleagues ? (
-        <Modal visible transparent animationType="slide" onRequestClose={() => setColleagues(null)}>
-          <Pressable style={styles.sheetBackdrop} onPress={() => setColleagues(null)} />
-          <View style={[styles.sheet, { backgroundColor: colors.background }]}>
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeadings}>
-                <Text style={[styles.sheetTitle, { color: colors.text }]}>
-                  L'équipe · {weekLabel(monday)}
-                </Text>
-                {!isPremium ? (
-                  <Text style={[styles.sheetSubtitle, { color: colors.textMuted }]}>
-                    Les collègues passent en silhouettes, ta ligne reste visible
-                  </Text>
-                ) : null}
-              </View>
-              <Pressable
-                onPress={() => setColleagues(null)}
-                hitSlop={10}
-                accessibilityLabel="Fermer"
-                style={[styles.sheetClose, { backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="close" size={18} color={colors.textMuted} />
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.sheetList}>
-              {colleagues.map((employee, index) => {
-                // Non-premium : seule MA ligne (matching best-effort de loadTeam)
-                // reste en clair — les autres deviennent des silhouettes.
-                const isMe = team?.myRow != null && employee.row_index === team.myRow;
-                if (!isPremium && !isMe) {
-                  return (
-                    <View
-                      key={employee.row_index}
-                      style={[
-                        styles.colleagueRow,
-                        { backgroundColor: colors.surface, borderColor: colors.border },
-                      ]}
-                    >
-                      <View style={styles.ghostRow}>
-                        <View
-                          style={[
-                            styles.ghostDot,
-                            {
-                              backgroundColor:
-                                index % 2 === 0 ? colors.accentMuted : colors.shiftMeetingSoft,
-                            },
-                          ]}
-                        />
-                        <View style={styles.ghostBars}>
-                          <View
-                            style={[
-                              styles.ghostBar,
-                              styles.ghostBarLong,
-                              { backgroundColor: colors.surfaceMuted },
-                            ]}
-                          />
-                          <View
-                            style={[
-                              styles.ghostBar,
-                              styles.ghostBarShort,
-                              { backgroundColor: colors.surfaceMuted },
-                            ]}
-                          />
-                        </View>
-                      </View>
-                    </View>
-                  );
-                }
-                const isOpen = expandedColleague === employee.row_index;
-                return (
-                  <Pressable
-                    key={employee.row_index}
-                    onPress={() => setExpandedColleague(isOpen ? null : employee.row_index)}
-                    style={[styles.colleagueRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  >
-                    <View style={styles.colleagueHeader}>
-                      <View style={styles.colleagueText}>
-                        <Text style={[styles.colleagueName, { color: colors.text }]} numberOfLines={1}>
-                          {employee.name}
-                        </Text>
-                        <Text style={[styles.colleagueMeta, { color: colors.textMuted }]}>
-                          {employee.total_hours != null ? `${employee.total_hours}h cette semaine` : "—"}
-                        </Text>
-                      </View>
-                      <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
-                    </View>
-                    {isOpen
-                      ? employee.days.map((day) => {
-                          const summary =
-                            day.status === "work" && day.shifts.length > 0
-                              ? day.shifts.map((sl) => `${sl.start}–${sl.end}`).join(" / ")
-                              : day.status === "rh"
-                                ? "RH"
-                                : day.status === "cp"
-                                  ? "CP"
-                                  : "Repos";
-                          return (
-                            <View key={day.day_index} style={[styles.colleagueDayRow, { borderTopColor: colors.separator }]}>
-                              <Text style={[styles.colleagueDayLabel, { color: colors.textMuted }]}>
-                                {day.date
-                                  ? new Date(`${day.date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })
-                                  : `Jour ${day.day_index + 1}`}
-                              </Text>
-                              <Text style={[styles.colleagueDay, { color: colors.text }]}>{summary}</Text>
-                            </View>
-                          );
-                        })
-                      : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            {!isPremium ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => showPremiumGate("Les horaires de tes collègues")}
-                style={[styles.premiumBanner, { backgroundColor: colors.background }]}
-              >
-                <Text style={[styles.premiumBannerText, { color: colors.textSoft }]}>
-                  Les horaires de tes collègues sont réservés à Premium
-                </Text>
-                <Text style={[styles.premiumBannerCta, { color: colors.accent }]}>
-                  Débloquer ›
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </Modal>
       ) : null}
 
       {dayEditor && userId ? (
@@ -1264,132 +1106,5 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.regular,
     textAlign: "center",
-  },
-  sheetBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(23,21,14,0.4)",
-  },
-  sheet: {
-    maxHeight: "75%",
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    paddingTop: spacing.md,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  sheetHeadings: {
-    flex: 1,
-    gap: 2,
-    paddingRight: spacing.sm,
-  },
-  sheetTitle: {
-    fontSize: typeScale.heading,
-    fontFamily: fonts.bold,
-    letterSpacing: letterSpacing.heading,
-  },
-  sheetSubtitle: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.medium,
-  },
-  sheetClose: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetList: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.sm,
-  },
-  colleagueRow: {
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    padding: 12,
-    gap: 8,
-  },
-  colleagueHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  colleagueText: {
-    flex: 1,
-    gap: 1,
-  },
-  colleagueName: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.semiBold,
-  },
-  colleagueMeta: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.medium,
-  },
-  colleagueDayRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderTopWidth: 1,
-    paddingTop: 6,
-  },
-  colleagueDayLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.medium,
-  },
-  colleagueDay: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.semiBold,
-  },
-  // Silhouette de collègue (verrou Premium) : pastille pastel + 2 barres grises.
-  ghostRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm + 4,
-  },
-  ghostDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-  },
-  ghostBars: {
-    flex: 1,
-    gap: 6,
-  },
-  ghostBar: {
-    borderRadius: 4,
-  },
-  ghostBarLong: {
-    height: 12,
-    width: "60%",
-  },
-  ghostBarShort: {
-    height: 10,
-    width: "35%",
-  },
-  // Bandeau verrou (maquette 4e) : fond neutre r11, texte + « Débloquer › ».
-  premiumBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-    borderRadius: radius.input,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-  },
-  premiumBannerText: {
-    flex: 1,
-    fontSize: typeScale.caption,
-    fontFamily: fonts.medium,
-  },
-  premiumBannerCta: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
   },
 });
