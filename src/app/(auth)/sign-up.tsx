@@ -1,8 +1,11 @@
-// Inscription v2 (maquette 4f) — 3 étapes avec barre de progression :
-//   1/3 email · 2/3 mot de passe (jauge de force) · 3/3 code 6 chiffres
-//   (écran verify-otp). Le prénom n'est plus demandé ici : il arrive dans
-//   l'onboarding post-inscription (il alimente le matching du scan).
+// Inscription v2 (maquette 4f) — 3 étapes ISO maquette :
+//   Étape 1 sur 3 « Comment tu t'appelles ? » (prénom → display_name)
+//   Étape 2 sur 3 « Tes identifiants » (e-mail pré-rempli depuis la connexion
+//   mais modifiable, mot de passe + jauge)
+//   Étape 3 sur 3 = code à 6 chiffres (écran verify-otp).
+// Header maquette : retour carré + barre de progression + « Étape N sur 3 ».
 
+import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import {
@@ -13,15 +16,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { WizardFrame } from "@/components/ui/WizardFrame";
 import {
   fonts,
   letterSpacing,
+  radius,
   spacing,
   typeScale,
   useThemeColors,
@@ -29,6 +34,7 @@ import {
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
+const TOTAL_STEPS = 3;
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -45,20 +51,36 @@ const STRENGTH_LABELS = ["Trop court", "Fragile", "Correct", "Solide"] as const;
 
 export default function SignUpScreen() {
   const colors = useThemeColors();
-  // Email transmis depuis l'écran de connexion (pré-rempli).
+  const insets = useSafeAreaInsets();
+  // E-mail transmis depuis l'écran de connexion (pré-rempli mais modifiable).
   const params = useLocalSearchParams<{ email?: string }>();
   const [step, setStep] = useState<1 | 2>(1);
+  const [firstName, setFirstName] = useState("");
+  const [isNameFocused, setIsNameFocused] = useState(false);
   const [email, setEmail] = useState(typeof params.email === "string" ? params.email : "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const strength = passwordStrength(password);
-  const strengthColors = [colors.danger, colors.shiftCp, colors.accentSoft, colors.success];
+  // Jauge maquette : « Correct » = vert accent ; les états plus faibles gardent
+  // leurs couleurs sémantiques (rouge / orange), « Solide » = succès.
+  const strengthColors = [colors.danger, colors.shiftCp, colors.accent, colors.success];
 
-  function handleEmailNext() {
-    if (!EMAIL_RE.test(email.trim())) {
-      setError("Saisis une adresse e-mail valide.");
+  function goBack() {
+    if (step === 2) {
+      setStep(1);
+      setError(null);
+    } else if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/sign-in");
+    }
+  }
+
+  function handleNameNext() {
+    if (!firstName.trim()) {
+      setError("Renseigne ton prénom — il sert à retrouver ta ligne.");
       return;
     }
     setError(null);
@@ -66,6 +88,10 @@ export default function SignUpScreen() {
   }
 
   async function handleSignUp() {
+    if (!EMAIL_RE.test(email.trim())) {
+      setError("Saisis une adresse e-mail valide.");
+      return;
+    }
     if (password.length < MIN_PASSWORD_LENGTH) {
       setError(`Au moins ${MIN_PASSWORD_LENGTH} caractères.`);
       return;
@@ -75,8 +101,8 @@ export default function SignUpScreen() {
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      // Le prénom est renseigné à l'onboarding (le trigger tolère l'absence).
-      options: { data: { display_name: "" } },
+      // Le prénom saisi à l'étape 1 alimente le profil dès la création.
+      options: { data: { display_name: firstName.trim() } },
     });
     setIsSubmitting(false);
     if (signUpError) {
@@ -84,36 +110,102 @@ export default function SignUpScreen() {
       return;
     }
     // Confirmation e-mail activée : pas de session tant que le code n'est pas
-    // validé → étape 3/3 (code à 6 chiffres).
+    // validé → Étape 3 sur 3 (code à 6 chiffres).
     if (!data.session) {
       router.push({ pathname: "/verify-otp", params: { email: email.trim() } });
     }
   }
 
   return (
-    <WizardFrame
-      step={step}
-      totalSteps={3}
-      closeIcon="back"
-      onClose={() => {
-        if (step === 2) setStep(1);
-        else if (router.canGoBack()) router.back();
-        else router.replace("/sign-in");
-      }}
+    <View
+      style={[
+        styles.screen,
+        { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 12) + 4 },
+      ]}
     >
+      {/* Header maquette : retour carré r11 + progression + « Étape N sur 3 ». */}
+      <View style={styles.header}>
+        <Pressable
+          accessibilityLabel="Retour"
+          onPress={goBack}
+          hitSlop={10}
+          style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Ionicons name="chevron-back" size={20} color={colors.text} />
+        </Pressable>
+        <View style={[styles.progressRail, { backgroundColor: colors.surfaceMuted }]}>
+          <View
+            style={[
+              styles.progressFill,
+              { backgroundColor: colors.accent, width: `${(step / TOTAL_STEPS) * 100}%` },
+            ]}
+          />
+        </View>
+        <Text style={[styles.stepLabel, { color: colors.accent }]}>
+          Étape {step} sur {TOTAL_STEPS}
+        </Text>
+      </View>
+
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {step === 1 ? (
             <>
-              <Text style={[styles.title, { color: colors.text }]}>
-                Ton adresse{"\n"}e-mail ?
-              </Text>
-              <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-                Elle sert à retrouver ton compte — jamais à te spammer.
-              </Text>
+              <View>
+                <Text style={[styles.title, { color: colors.text }]}>
+                  Comment{"\n"}tu t'appelles ?
+                </Text>
+                <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+                  Ton prénom sert à retrouver ta ligne sur les plannings scannés.
+                </Text>
+              </View>
+              <TextInput
+                autoFocus
+                autoCapitalize="words"
+                autoComplete="given-name"
+                textContentType="givenName"
+                returnKeyType="next"
+                placeholder="Sarah"
+                placeholderTextColor={colors.textDisabled}
+                value={firstName}
+                onChangeText={(value) => {
+                  setFirstName(value);
+                  setError(null);
+                }}
+                onFocus={() => setIsNameFocused(true)}
+                onBlur={() => setIsNameFocused(false)}
+                onSubmitEditing={handleNameNext}
+                style={[
+                  styles.nameInput,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: isNameFocused ? colors.accent : colors.border,
+                    color: colors.text,
+                  },
+                ]}
+              />
+              {/* Carte verte : variantes du nom (maquette 4f). */}
+              <View style={[styles.hintCard, { backgroundColor: colors.accentMuted }]}>
+                <View style={[styles.hintDot, { backgroundColor: colors.accent }]} />
+                <Text style={[styles.hintText, { color: colors.text }]}>
+                  Tu pourras ajouter tes variantes (« MARTIN Sarah », « Sarah M. ») dans Scan &
+                  horaires.
+                </Text>
+              </View>
+              {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
+              <View style={styles.footer}>
+                <Button label="Continuer →" onPress={handleNameNext} />
+              </View>
+            </>
+          ) : (
+            <>
+              <View>
+                <Text style={[styles.title, { color: colors.text }]}>Tes identifiants</Text>
+                <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+                  Pour retrouver tes plannings sur n'importe quel téléphone.
+                </Text>
+              </View>
               <TextField
                 label="Email"
-                autoFocus
                 autoCapitalize="none"
                 autoComplete="email"
                 textContentType="emailAddress"
@@ -125,70 +217,93 @@ export default function SignUpScreen() {
                   setEmail(value);
                   setError(null);
                 }}
-                onSubmitEditing={handleEmailNext}
               />
-              {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
-              <Button label="Continuer →" onPress={handleEmailNext} />
-              <Pressable onPress={() => router.replace("/sign-in")} hitSlop={8}>
-                <Text style={[styles.link, { color: colors.accent }]}>
-                  Déjà un compte ? Se connecter
-                </Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.title, { color: colors.text }]}>
-                Choisis un{"\n"}mot de passe
-              </Text>
-              <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-                {MIN_PASSWORD_LENGTH} caractères minimum — mélange lettres et chiffres pour du solide.
-              </Text>
-              <TextField
-                label="Mot de passe"
-                autoFocus
-                secureToggle
-                autoComplete="new-password"
-                textContentType="newPassword"
-                placeholder={`${MIN_PASSWORD_LENGTH} caractères minimum`}
-                value={password}
-                onChangeText={(value) => {
-                  setPassword(value);
-                  setError(null);
-                }}
-              />
-              {/* Jauge de force */}
-              <View style={styles.gaugeRow}>
-                {[0, 1, 2].map((index) => (
-                  <View
-                    key={index}
+              <View>
+                <TextField
+                  label="Mot de passe"
+                  autoFocus
+                  secureToggle
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  placeholder={`${MIN_PASSWORD_LENGTH} caractères minimum`}
+                  value={password}
+                  onChangeText={(value) => {
+                    setPassword(value);
+                    setError(null);
+                  }}
+                />
+                {/* Jauge de force (maquette : segments + libellé « Correct »). */}
+                <View style={styles.gaugeRow}>
+                  {[0, 1, 2].map((index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.gaugeSegment,
+                        {
+                          backgroundColor:
+                            password.length > 0 && index < strength
+                              ? strengthColors[strength]
+                              : colors.surfaceMuted,
+                        },
+                      ]}
+                    />
+                  ))}
+                  <Text
                     style={[
-                      styles.gaugeSegment,
-                      {
-                        backgroundColor:
-                          password.length > 0 && index < strength
-                            ? strengthColors[strength]
-                            : colors.surfaceMuted,
-                      },
+                      styles.gaugeLabel,
+                      { color: password.length > 0 ? strengthColors[strength] : colors.textMuted },
                     ]}
-                  />
-                ))}
-                <Text style={[styles.gaugeLabel, { color: colors.textMuted }]}>
-                  {password.length > 0 ? STRENGTH_LABELS[strength] : " "}
-                </Text>
+                  >
+                    {password.length > 0 ? STRENGTH_LABELS[strength] : " "}
+                  </Text>
+                </View>
               </View>
               {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
-              <Button label="Créer mon compte" onPress={handleSignUp} isLoading={isSubmitting} />
+              <View style={styles.footer}>
+                <Button label="Créer mon compte" onPress={handleSignUp} isLoading={isSubmitting} />
+              </View>
             </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </WizardFrame>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   flex: { flex: 1 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 4,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.input,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRail: {
+    flex: 1,
+    height: 5,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: radius.pill,
+  },
+  stepLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
   content: {
+    flexGrow: 1,
     padding: spacing.lg,
     gap: spacing.md,
   },
@@ -196,32 +311,53 @@ const styles = StyleSheet.create({
     fontSize: typeScale.title,
     fontFamily: fonts.bold,
     letterSpacing: letterSpacing.title,
-    marginTop: spacing.sm,
+    lineHeight: 30,
   },
   subtitle: {
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
-    marginBottom: spacing.xs,
+    marginTop: 5,
+  },
+  nameInput: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: typeScale.heading,
+    fontFamily: fonts.bold,
+  },
+  hintCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+  },
+  hintDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  hintText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 17,
   },
   error: {
     fontSize: typeScale.caption,
     fontFamily: fonts.medium,
   },
-  link: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.bold,
-    textAlign: "center",
-    paddingVertical: spacing.sm,
-  },
   gaugeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 7,
+    marginTop: spacing.sm,
   },
   gaugeSegment: {
     flex: 1,
     height: 5,
-    borderRadius: 3,
+    borderRadius: radius.pill,
   },
   gaugeLabel: {
     fontSize: typeScale.tiny,
@@ -229,5 +365,9 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     minWidth: 64,
     textAlign: "right",
+  },
+  footer: {
+    marginTop: "auto",
+    paddingTop: spacing.md,
   },
 });

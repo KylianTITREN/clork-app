@@ -1,9 +1,9 @@
-// Onboarding post-inscription v2 (maquette 4f) — 4 étapes, TOUT skippable
-// (dots + « Passer » sur chaque écran) :
-//   1/4 nom sur le planning (alimente le matching du scan)
-//   2/4 horaires du magasin (« ça varie ? passe »)
-//   3/4 pause habituelle (chips + seuil)
-//   4/4 rappels (2 toggles)
+// Onboarding post-inscription v2 (maquette 4f) — 4 étapes « Bienvenue · n/4 »,
+// TOUT skippable (dots + « Passer » sur chaque écran) :
+//   1/4 nom sur le planning (prénom + écriture planning → employee_aliases)
+//   2/4 horaires du magasin (Ouverture 09:00 / Fermeture 21:00)
+//   3/4 pause habituelle (chips + seuil « dès que la journée dépasse 6h »)
+//   4/4 rappels (veille au soir avec aperçu dynamique, matin même)
 // → CTA final « Scanner mon premier planning » / « Plus tard ».
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -22,7 +22,6 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
-import { DurationChips } from "@/components/ui/DurationChips";
 import { TextField } from "@/components/ui/TextField";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import {
@@ -45,6 +44,15 @@ import { useAuth } from "@/providers/auth-provider";
 export const ONBOARDING_DONE_KEY = "clork.onboarding-done";
 
 const TOTAL_STEPS = 4;
+// Seuil maquette : la pause s'applique dès que la journée dépasse 6h.
+const BREAK_THRESHOLD_HOURS = 6;
+// Pauses proposées (maquette 3/4) : Aucune / 30 min / 45 min / 1h.
+const BREAK_CHOICES = [
+  { minutes: 0, label: "Aucune" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 45, label: "45 min" },
+  { minutes: 60, label: "1h" },
+] as const;
 
 export default function OnboardingScreen() {
   const colors = useThemeColors();
@@ -53,25 +61,63 @@ export default function OnboardingScreen() {
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
-  const [storeOpen, setStoreOpen] = useState<string | null>(null);
-  const [storeClose, setStoreClose] = useState<string | null>(null);
+  const [planningNames, setPlanningNames] = useState("");
+  // Défauts maquette 2/4 : Ouverture 09:00 / Fermeture 21:00.
+  const [storeOpen, setStoreOpen] = useState<string | null>("09:00");
+  const [storeClose, setStoreClose] = useState<string | null>("21:00");
   const [breakMinutes, setBreakMinutes] = useState(60);
-  const [breakStart, setBreakStart] = useState<string | null>("12:30");
+  // États maquette 4/4 : veille ON, matin OFF ; heures lues dans les prefs.
   const [eveEnabled, setEveEnabled] = useState(true);
-  const [morningEnabled, setMorningEnabled] = useState(true);
+  const [morningEnabled, setMorningEnabled] = useState(false);
+  const [eveTime, setEveTime] = useState(DEFAULT_REMINDER_PREFS.eveTime);
+  const [morningTime, setMorningTime] = useState(DEFAULT_REMINDER_PREFS.morningTime);
 
   useEffect(() => {
     void AsyncStorage.setItem(ONBOARDING_DONE_KEY, "1");
   }, []);
 
+  // Pré-remplit le prénom (renseigné à l'inscription) et les écritures planning.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void supabase
+      .from("profiles")
+      .select("display_name, employee_aliases")
+      .eq("id", userId)
+      .single<{ display_name: string; employee_aliases: string[] }>()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setName((prev) => prev || data.display_name);
+        setPlanningNames((prev) => prev || data.employee_aliases.join(", "));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Heures des rappels pour l'aperçu dynamique (4/4).
+  useEffect(() => {
+    void getReminderPrefs().then((prefs) => {
+      setEveTime(prefs.eveTime);
+      setMorningTime(prefs.morningTime);
+    });
+  }, []);
+
   async function persistStep(current: number) {
     if (!userId) return;
     try {
-      if (current === 0 && name.trim()) {
-        await supabase
-          .from("profiles")
-          .update({ display_name: name.trim() })
-          .eq("id", userId);
+      if (current === 0) {
+        const aliases = planningNames
+          .split(",")
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0);
+        const patch = {
+          ...(name.trim() ? { display_name: name.trim() } : {}),
+          ...(aliases.length > 0 ? { employee_aliases: aliases } : {}),
+        };
+        if (Object.keys(patch).length > 0) {
+          await supabase.from("profiles").update(patch).eq("id", userId);
+        }
       } else if (current === 1 && (storeOpen || storeClose)) {
         await supabase
           .from("profiles")
@@ -82,7 +128,7 @@ export default function OnboardingScreen() {
           .from("profiles")
           .update({
             break_default_minutes: breakMinutes,
-            break_start_default: breakStart,
+            break_threshold_hours: BREAK_THRESHOLD_HOURS,
           })
           .eq("id", userId);
       } else if (current === 3) {
@@ -112,23 +158,29 @@ export default function OnboardingScreen() {
     else router.replace("/(tabs)");
   }
 
+  // Textes maquette 4f — exacts, écran par écran.
   const titles = [
-    "Comment tu t'appelles\nsur le planning ?",
-    "Les horaires\nde ton magasin ?",
-    "Ta pause\nhabituelle ?",
-    "On te rappelle\ntes horaires ?",
+    "Ton nom sur\nle planning",
+    "Les horaires\nde ton magasin",
+    "Ta pause\nhabituelle",
+    "On te fait\npenser à tout ?",
   ];
   const subtitles = [
-    "Ton prénom sert à retrouver TA ligne sur les plannings scannés.",
-    "Pour t'indiquer quand tu ouvres ou fermes. Ça varie ? Passe.",
-    "Appliquée automatiquement dès que ta journée atteint 6h.",
-    "Deux petits rappels utiles — modifiables à tout moment.",
+    "C'est comme ça que le scan retrouve ta ligne, tout seul.",
+    "Pour te dire quand tu ouvres ou tu fermes, sans rien saisir.",
+    "Pour calculer tes heures payées quand le planning ne l'imprime pas.",
+    "Deux rappels utiles — tu règles les heures dans Notifications.",
   ];
+
+  const cardStyle = {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
-        {/* Dots + Passer */}
+        {/* Dots (actif = pilule large) + Passer */}
         <View style={styles.header}>
           <View style={styles.dots}>
             {Array.from({ length: TOTAL_STEPS }, (_, index) => (
@@ -138,7 +190,7 @@ export default function OnboardingScreen() {
                   styles.dot,
                   {
                     backgroundColor: index <= step ? colors.accent : colors.surfaceMuted,
-                    width: index === step ? 22 : 8,
+                    width: index === step ? 18 : 6,
                   },
                 ]}
               />
@@ -150,83 +202,159 @@ export default function OnboardingScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.stepBadge, { color: colors.accent }]}>
-            {step + 1}/{TOTAL_STEPS}
-          </Text>
-          <Text style={[styles.title, { color: colors.text }]}>{titles[step]}</Text>
-          <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitles[step]}</Text>
+          <View>
+            <Text style={[styles.stepBadge, { color: colors.accent }]}>
+              Bienvenue · {step + 1}/{TOTAL_STEPS}
+            </Text>
+            <Text style={[styles.title, { color: colors.text }]}>{titles[step]}</Text>
+            <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitles[step]}</Text>
+          </View>
 
           {step === 0 ? (
-            <>
+            <View style={[styles.card, cardStyle]}>
               <TextField
-                label="Prénom (ou nom affiché)"
+                label="Prénom"
                 autoFocus
+                autoCapitalize="words"
                 placeholder="Sarah"
                 value={name}
                 onChangeText={setName}
               />
-              <Text style={[styles.hint, { color: colors.textMuted }]}>
-                Tu pourras ajouter des variantes plus tard (ex. « Sarah M. »).
+              <TextField
+                label="Tel qu'écrit sur le planning"
+                autoCapitalize="characters"
+                placeholder="MARTIN Sarah"
+                value={planningNames}
+                onChangeText={setPlanningNames}
+              />
+              <Text style={[styles.cardCaption, { color: colors.textMuted }]}>
+                Plusieurs écritures possibles ? Sépare-les d'une virgule : « MARTIN Sarah, Sarah
+                M. »
               </Text>
-            </>
-          ) : null}
-
-          {step === 1 ? (
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>OUVRE À</Text>
-              <TimePickerField value={storeOpen} placeholder="--:--" onChange={setStoreOpen} />
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>FERME À</Text>
-              <TimePickerField value={storeClose} placeholder="--:--" onChange={setStoreClose} />
             </View>
           ) : null}
 
+          {step === 1 ? (
+            <>
+              <View style={[styles.card, cardStyle]}>
+                <View style={styles.timeRow}>
+                  <View style={styles.timeCol}>
+                    <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Ouverture</Text>
+                    <TimePickerField value={storeOpen} placeholder="09:00" onChange={setStoreOpen} />
+                  </View>
+                  <View style={styles.timeCol}>
+                    <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Fermeture</Text>
+                    <TimePickerField value={storeClose} placeholder="21:00" onChange={setStoreClose} />
+                  </View>
+                </View>
+                <Text style={[styles.cardCaption, { color: colors.textMuted }]}>
+                  Ton créneau démarre à l'ouverture → « tu ouvres ». Il finit à la fermeture → « tu
+                  fermes ». Les mentions O/F du planning priment.
+                </Text>
+              </View>
+              <View style={[styles.noteRow, cardStyle]}>
+                <View style={[styles.noteDot, { backgroundColor: colors.surfaceMuted }]} />
+                <Text style={[styles.noteText, { color: colors.textMuted }]}>
+                  Ça varie selon les jours ? Passe — tu pourras l'affiner dans Scan & horaires.
+                </Text>
+              </View>
+            </>
+          ) : null}
+
           {step === 2 ? (
-            <View style={styles.fieldGroup}>
-              <DurationChips value={breakMinutes} onChange={setBreakMinutes} allowCustom />
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-                HEURE HABITUELLE
+            <View style={[styles.card, cardStyle]}>
+              <View style={styles.chipsRow}>
+                {BREAK_CHOICES.map(({ minutes, label }) => {
+                  const selected = breakMinutes === minutes;
+                  return (
+                    <Pressable
+                      key={minutes}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => setBreakMinutes(minutes)}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: selected ? colors.ink : colors.background },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.chipLabel,
+                          { color: selected ? colors.onInk : colors.textMuted },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={[styles.thresholdRow, { backgroundColor: colors.background }]}>
+                <Text style={[styles.thresholdLabel, { color: colors.textMuted }]}>
+                  Dès que la journée dépasse
+                </Text>
+                <View style={[styles.thresholdPill, cardStyle]}>
+                  <Text style={[styles.thresholdValue, { color: colors.text }]}>
+                    {BREAK_THRESHOLD_HOURS}h
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.cardCaption, { color: colors.textMuted }]}>
+                Modifiable à tout moment, y compris créneau par créneau.
               </Text>
-              <TimePickerField value={breakStart} placeholder="12:30" onChange={setBreakStart} />
             </View>
           ) : null}
 
           {step === 3 ? (
-            <View style={styles.fieldGroup}>
-              <View style={[styles.toggleRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={styles.toggleText}>
-                  <Text style={[styles.toggleTitle, { color: colors.text }]}>La veille au soir</Text>
-                  <Text style={[styles.toggleSub, { color: colors.textMuted }]}>
-                    « Demain tu bosses 9h – 17h30 » vers 20:00
-                  </Text>
+            <>
+              <View style={[styles.card, cardStyle]}>
+                <View style={styles.toggleRow}>
+                  <View style={styles.toggleText}>
+                    <Text style={[styles.toggleTitle, { color: colors.text }]}>
+                      La veille au soir
+                    </Text>
+                    {/* Aperçu dynamique : ouverture du magasin + heure du rappel. */}
+                    <Text style={[styles.toggleSub, { color: colors.textMuted }]}>
+                      « Demain : {storeOpen ?? "09:00"} – 17:30 » · {eveTime}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={eveEnabled}
+                    onValueChange={setEveEnabled}
+                    trackColor={{ true: colors.accent, false: colors.surfaceMuted }}
+                    thumbColor="#FFFFFF"
+                  />
                 </View>
-                <Switch
-                  value={eveEnabled}
-                  onValueChange={setEveEnabled}
-                  trackColor={{ true: colors.accent, false: colors.surfaceMuted }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              <View style={[styles.toggleRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={styles.toggleText}>
-                  <Text style={[styles.toggleTitle, { color: colors.text }]}>Le matin même</Text>
-                  <Text style={[styles.toggleSub, { color: colors.textMuted }]}>
-                    Un rappel de départ vers 07:30
-                  </Text>
+                <View style={[styles.toggleSeparator, { backgroundColor: colors.separator }]} />
+                <View style={styles.toggleRow}>
+                  <View style={styles.toggleText}>
+                    <Text style={[styles.toggleTitle, { color: colors.text }]}>Le matin même</Text>
+                    <Text style={[styles.toggleSub, { color: colors.textMuted }]}>
+                      Avant de partir · {morningTime}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={morningEnabled}
+                    onValueChange={setMorningEnabled}
+                    trackColor={{ true: colors.accent, false: colors.surfaceMuted }}
+                    thumbColor="#FFFFFF"
+                  />
                 </View>
-                <Switch
-                  value={morningEnabled}
-                  onValueChange={setMorningEnabled}
-                  trackColor={{ true: colors.accent, false: colors.surfaceMuted }}
-                  thumbColor="#FFFFFF"
-                />
               </View>
-            </View>
+              <View style={[styles.noteRow, cardStyle]}>
+                <View style={[styles.noteDot, { backgroundColor: colors.accent }]} />
+                <Text style={[styles.noteText, { color: colors.textMuted }]}>
+                  Dernière étape : scanne ton premier planning et ta semaine se remplit toute
+                  seule.
+                </Text>
+              </View>
+            </>
           ) : null}
         </ScrollView>
 
         <View style={styles.footer}>
           {step < TOTAL_STEPS - 1 ? (
-            <Button label="Continuer →" onPress={next} />
+            <Button label="Continuer" onPress={next} />
           ) : (
             <>
               <Button label="Scanner mon premier planning" onPress={() => finish(true)} />
@@ -253,25 +381,27 @@ const styles = StyleSheet.create({
   },
   dots: {
     flexDirection: "row",
-    gap: 6,
+    gap: 5,
     alignItems: "center",
   },
   dot: {
-    height: 8,
-    borderRadius: 4,
+    height: 6,
+    borderRadius: radius.pill,
   },
   skip: {
-    fontSize: typeScale.bodySm,
+    fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
   content: {
     padding: spacing.lg,
-    gap: spacing.sm + 2,
+    gap: spacing.md - 2,
   },
   stepBadge: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.semiBold,
     letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 6,
   },
   title: {
     fontSize: typeScale.title,
@@ -281,38 +411,109 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
-    marginBottom: spacing.sm,
+    marginTop: 5,
     lineHeight: 20,
   },
-  hint: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.regular,
+  card: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: 18,
+    gap: spacing.sm + 4,
   },
-  fieldGroup: {
-    gap: spacing.sm,
+  cardCaption: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+    lineHeight: 17,
   },
   fieldLabel: {
     fontSize: typeScale.tiny,
     fontFamily: fonts.semiBold,
-    letterSpacing: 0.6,
-    marginTop: spacing.xs,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  timeRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  timeCol: {
+    flex: 1,
+    gap: 5,
+  },
+  noteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 2,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+  },
+  noteDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 18,
+  },
+  chipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  chip: {
+    borderRadius: radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  chipLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
+  thresholdRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 2,
+    borderRadius: radius.input,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  thresholdLabel: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  thresholdPill: {
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  thresholdValue: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.bold,
   },
   toggleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    padding: spacing.md,
+    gap: spacing.sm + 4,
   },
   toggleText: { flex: 1, gap: 2 },
   toggleTitle: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.semiBold,
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
   },
   toggleSub: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.regular,
+    fontFamily: fonts.medium,
+  },
+  toggleSeparator: {
+    height: 1,
   },
   footer: {
     padding: spacing.lg,

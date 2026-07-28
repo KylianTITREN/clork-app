@@ -1,7 +1,10 @@
-// Vérification e-mail v2 (maquette 4f, étape 3/3) : code à 6 chiffres saisi
-// dans 6 cases (un seul TextInput invisible pilote l'ensemble), « Renvoyer le
-// code », CTA actif uniquement quand le code est complet.
+// Vérification e-mail v2 (maquette 4f, « Étape 3 sur 3 ») : code à 6 chiffres
+// saisi dans 6 cases (un seul TextInput invisible pilote l'ensemble),
+// « Renvoyer le code » sous les cases, CTA « Valider » gris tant que le code
+// est incomplet + caption « Le bouton s'active quand les 6 chiffres sont
+// saisis. » ferrés en bas.
 
+import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
 import {
@@ -14,9 +17,9 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
-import { WizardFrame } from "@/components/ui/WizardFrame";
 import {
   fonts,
   letterSpacing,
@@ -28,10 +31,12 @@ import {
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
+const TOTAL_STEPS = 3;
 const CODE_LENGTH = 6;
 
 export default function VerifyOtpScreen() {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ email?: string }>();
   const email = typeof params.email === "string" ? params.email : "";
   const [code, setCode] = useState("");
@@ -67,20 +72,44 @@ export default function VerifyOtpScreen() {
   }
 
   return (
-    <WizardFrame
-      step={3}
-      totalSteps={3}
-      closeIcon="back"
-      onClose={() => (router.canGoBack() ? router.back() : router.replace("/sign-in"))}
+    <View
+      style={[
+        styles.screen,
+        { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 12) + 4 },
+      ]}
     >
+      {/* Header maquette : retour carré r11 + progression 100 % + « Étape 3 sur 3 ». */}
+      <View style={styles.header}>
+        <Pressable
+          accessibilityLabel="Retour"
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/sign-in"))}
+          hitSlop={10}
+          style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Ionicons name="chevron-back" size={20} color={colors.text} />
+        </Pressable>
+        <View style={[styles.progressRail, { backgroundColor: colors.surfaceMuted }]}>
+          <View style={[styles.progressFill, { backgroundColor: colors.accent, width: "100%" }]} />
+        </View>
+        <Text style={[styles.stepLabel, { color: colors.accent }]}>
+          Étape {TOTAL_STEPS} sur {TOTAL_STEPS}
+        </Text>
+      </View>
+
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
         <View style={styles.content}>
-          <Text style={[styles.title, { color: colors.text }]}>Vérifie ton e-mail</Text>
-          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-            On t'a envoyé un code à {CODE_LENGTH} chiffres à {email || "ton adresse"}.
-          </Text>
+          <View>
+            <Text style={[styles.title, { color: colors.text }]}>Vérifie ton e-mail</Text>
+            <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+              Code à {CODE_LENGTH} chiffres envoyé à{" "}
+              <Text style={[styles.subtitleEmail, { color: colors.text }]}>
+                {email || "ton adresse"}
+              </Text>
+            </Text>
+          </View>
 
-          {/* 6 cases visuelles pilotées par un input invisible. */}
+          {/* 6 cases visuelles pilotées par un input invisible ; seule la case
+              active est bordée en vert (maquette). */}
           <Pressable onPress={() => inputRef.current?.focus()} style={styles.cells}>
             {Array.from({ length: CODE_LENGTH }, (_, index) => {
               const digit = code[index] ?? "";
@@ -92,7 +121,7 @@ export default function VerifyOtpScreen() {
                     styles.cell,
                     {
                       backgroundColor: colors.surface,
-                      borderColor: isActive ? colors.accent : digit ? colors.text : colors.border,
+                      borderColor: isActive ? colors.accent : colors.border,
                     },
                   ]}
                 >
@@ -112,26 +141,64 @@ export default function VerifyOtpScreen() {
             style={styles.hiddenInput}
           />
 
-          <Button
-            label="Valider"
-            onPress={handleVerify}
-            isLoading={isVerifying}
-            disabled={!isComplete}
-          />
           <Pressable onPress={handleResend} disabled={isResending} hitSlop={8}>
             <Text style={[styles.resend, { color: colors.accent }]}>
               {isResending ? "Envoi…" : "Renvoyer le code"}
             </Text>
           </Pressable>
+
+          {/* CTA + caption ferrés en bas (maquette 4f). */}
+          <View style={styles.footer}>
+            <Button
+              label="Valider"
+              onPress={handleVerify}
+              isLoading={isVerifying}
+              disabled={!isComplete}
+            />
+            <Text style={[styles.footerCaption, { color: colors.textDisabled }]}>
+              Le bouton s'active quand les 6 chiffres sont saisis.
+            </Text>
+          </View>
         </View>
       </KeyboardAvoidingView>
-    </WizardFrame>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   flex: { flex: 1 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm + 4,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.input,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRail: {
+    flex: 1,
+    height: 5,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: radius.pill,
+  },
+  stepLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
   content: {
+    flex: 1,
     padding: spacing.lg,
     gap: spacing.md,
   },
@@ -139,28 +206,31 @@ const styles = StyleSheet.create({
     fontSize: typeScale.title,
     fontFamily: fonts.bold,
     letterSpacing: letterSpacing.title,
-    marginTop: spacing.sm,
   },
   subtitle: {
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
+    marginTop: 5,
+  },
+  subtitleEmail: {
+    fontFamily: fonts.semiBold,
   },
   cells: {
     flexDirection: "row",
-    gap: 8,
+    gap: 7,
     justifyContent: "center",
-    marginVertical: spacing.sm,
+    marginTop: spacing.sm,
   },
   cell: {
-    width: 48,
-    height: 56,
+    width: 44,
+    height: 54,
     borderRadius: radius.sm,
-    borderWidth: 1.5,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   cellDigit: {
-    fontSize: typeScale.title,
+    fontSize: typeScale.heading,
     fontFamily: fonts.bold,
   },
   hiddenInput: {
@@ -170,9 +240,18 @@ const styles = StyleSheet.create({
     width: 1,
   },
   resend: {
-    fontSize: typeScale.bodySm,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
     textAlign: "center",
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  footer: {
+    marginTop: "auto",
+    gap: spacing.sm,
+  },
+  footerCaption: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.medium,
+    textAlign: "center",
   },
 });

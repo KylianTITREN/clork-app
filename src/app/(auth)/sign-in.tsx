@@ -1,3 +1,12 @@
+// Connexion « e-mail d'abord » v2 (maquette 4f) :
+//   écran 1 = hero encre + champ e-mail seul + « Continuer → » ;
+//   e-mail CONNU (rpc email_is_registered) → état 2 « Content de te revoir »
+//   (e-mail affiché + Modifier, mot de passe, « Se connecter ») ;
+//   e-mail INCONNU → inscription directe avec l'e-mail en paramètre.
+// En cas d'erreur réseau sur le RPC, on replie sur l'écran mot de passe —
+// on ne bloque jamais la connexion.
+
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useState } from "react";
 import {
@@ -19,32 +28,46 @@ import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
 // Validation locale légère : on bloque les fautes de frappe évidentes avant
-// d'enchaîner sur le mot de passe.
+// d'interroger le serveur.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Connexion en deux temps : email d'abord, puis mot de passe. On NE teste
- * jamais l'existence du compte (pas d'énumération) : si la connexion échoue,
- * on propose simplement de créer un compte avec l'email déjà saisi.
- */
 export default function SignInScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<"email" | "password">("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isChecking, setIsChecking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const trimmedEmail = email.trim();
 
-  function goToPassword() {
+  async function handleContinue() {
     if (!EMAIL_RE.test(trimmedEmail)) {
       setError("Email invalide. Vérifie le format (ex. prenom@mail.fr).");
       return;
     }
     setError(null);
-    setStep("password");
+    setIsChecking(true);
+    try {
+      const { data, error: rpcError } = await supabase.rpc("email_is_registered", {
+        p_email: trimmedEmail,
+      });
+      if (rpcError) throw rpcError;
+      if (data === true) {
+        // Compte existant → « Content de te revoir ».
+        setStep("password");
+      } else {
+        // E-mail inconnu → inscription directe, étape « Comment tu t'appelles ? ».
+        router.push({ pathname: "/sign-up", params: { email: trimmedEmail } });
+      }
+    } catch {
+      // Erreur réseau : on ne bloque jamais — repli sur l'écran mot de passe.
+      setStep("password");
+    } finally {
+      setIsChecking(false);
+    }
   }
 
   async function handleSignIn() {
@@ -62,6 +85,12 @@ export default function SignInScreen() {
       setError(authErrorMessage(signInError));
     }
     // Succès : l'AuthProvider met à jour la session, le Stack.Protected bascule.
+  }
+
+  function backToEmail() {
+    setStep("email");
+    setPassword("");
+    setError(null);
   }
 
   function goToSignUp() {
@@ -91,6 +120,7 @@ export default function SignInScreen() {
               </Text>
             </View>
 
+            {/* Champ e-mail seul, directement sous le hero (maquette 4f). */}
             <View style={styles.form}>
               <TextField
                 label="Email"
@@ -105,12 +135,12 @@ export default function SignInScreen() {
                   setEmail(value);
                   setError(null);
                 }}
-                onSubmitEditing={goToPassword}
+                onSubmitEditing={handleContinue}
               />
               {error ? (
                 <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
               ) : null}
-              <Button label="Continuer →" onPress={goToPassword} />
+              <Button label="Continuer →" onPress={handleContinue} isLoading={isChecking} />
             </View>
 
             {/* « Essayer sans compte » + note : FERRÉS EN BAS (maquette 4f). */}
@@ -123,18 +153,27 @@ export default function SignInScreen() {
             </View>
           </View>
         ) : (
-          <View style={styles.content}>
-            <Text style={[styles.welcomeBack, { color: colors.text }]}>Content de te revoir</Text>
+          <View style={[styles.content, { paddingTop: insets.top + 12 }]}>
+            {/* Retour carré + titre (maquette 4f, écran « Content de te revoir »). */}
+            <View style={styles.header}>
+              <Pressable
+                accessibilityLabel="Retour"
+                onPress={backToEmail}
+                hitSlop={10}
+                style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <Ionicons name="chevron-back" size={20} color={colors.text} />
+              </Pressable>
+              <Text style={[styles.welcomeBack, { color: colors.text }]}>Content de te revoir</Text>
+            </View>
+
             <View style={styles.form}>
               <Pressable
-                onPress={() => {
-                  setStep("email");
-                  setError(null);
-                }}
+                onPress={backToEmail}
                 style={[styles.emailRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
               >
                 <View style={styles.emailRowText}>
-                  <Text style={[styles.emailRowLabel, { color: colors.textMuted }]}>EMAIL</Text>
+                  <Text style={[styles.emailRowLabel, { color: colors.textMuted }]}>Email</Text>
                   <Text style={[styles.emailRowValue, { color: colors.text }]} numberOfLines={1}>
                     {trimmedEmail}
                   </Text>
@@ -181,8 +220,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: 84,
-    gap: spacing.lg,
+    gap: spacing.sm + 4,
   },
   hero: {
     alignItems: "center",
@@ -193,11 +231,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.hero,
   },
   form: {
-    flex: 1,
-    justifyContent: "center",
+    paddingTop: 22,
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.md,
+    gap: spacing.sm + 4,
   },
   footer: {
     marginTop: "auto",
@@ -211,21 +247,27 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   header: {
-    gap: spacing.sm + 2,
+    flexDirection: "row",
     alignItems: "center",
-    borderRadius: radius.hero,
-    paddingVertical: spacing.xl + 8,
-    paddingHorizontal: spacing.lg,
+    gap: spacing.sm + 4,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.input,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   welcomeBack: {
-    fontSize: typeScale.title,
+    flex: 1,
+    fontSize: typeScale.heading,
     fontFamily: fonts.bold,
-    letterSpacing: letterSpacing.title,
-    textAlign: "center",
+    letterSpacing: letterSpacing.heading,
   },
   tagline: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.regular,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.medium,
     textAlign: "center",
   },
   error: {
@@ -239,34 +281,35 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
     borderWidth: 1,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.sm + 4,
   },
   emailRowText: {
     flex: 1,
     gap: 1,
   },
   emailRowLabel: {
-    fontSize: typeScale.caption,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
   },
   emailRowValue: {
     fontSize: typeScale.body,
-    fontFamily: fonts.bold,
+    fontFamily: fonts.semiBold,
   },
   emailRowAction: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.extraBold,
+    fontFamily: fonts.bold,
   },
   signUpLink: {
     alignItems: "center",
+    paddingVertical: spacing.xs,
   },
   link: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.bold,
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
     textAlign: "center",
   },
 });
