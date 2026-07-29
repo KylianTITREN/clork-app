@@ -226,7 +226,10 @@ export default function HomeScreen() {
     close: null,
   });
 
-  useEffect(() => {
+  // Profil rechargé à CHAQUE focus : de retour de Compte, l'avatar et le
+  // prénom sont à jour sans relancer l'app.
+  useFocusEffect(
+    useCallback(() => {
     if (!userId) return;
     supabase
       .from("profiles")
@@ -261,7 +264,8 @@ export default function HomeScreen() {
           }
         }
       });
-  }, [userId, isGuest]);
+    }, [userId, isGuest]),
+  );
 
   useEffect(() => {
     getReminderPrefs().then((prefs) =>
