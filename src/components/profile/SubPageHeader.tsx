@@ -17,7 +17,11 @@ type SubPageHeaderProps = {
   right?: React.ReactNode;
 };
 
-/** En-tête des sous-pages du profil : bouton retour rond bordé + titre aligné à gauche. */
+/**
+ * En-tête des sous-pages du profil : bouton retour CARRÉ bordé + titre aligné
+ * à gauche. Gabarit unique de la maquette v2 (carré 42 r12, titre 19/700) —
+ * il revient sur 22 écrans, l'ancien 36/r11 + titre 26 était notre écart.
+ */
 export function SubPageHeader({ title, right }: SubPageHeaderProps) {
   const colors = useThemeColors();
 
@@ -37,7 +41,7 @@ export function SubPageHeader({ title, right }: SubPageHeaderProps) {
           },
         ]}
       >
-        <Ionicons name="chevron-back" size={18} color={colors.text} />
+        <Ionicons name="chevron-back" size={20} color={colors.text} />
       </Pressable>
       <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
         {title}
@@ -55,17 +59,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   back: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   title: {
     flex: 1,
-    fontSize: typeScale.title,
+    fontSize: typeScale.heading,
     fontFamily: fonts.bold,
-    letterSpacing: letterSpacing.title,
+    letterSpacing: letterSpacing.heading,
   },
 });

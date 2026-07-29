@@ -1,5 +1,6 @@
 // Profil & réglages v2 (maquette 4c) : hub CLAIR — bouton ✕ rond bordé,
-// avatar (invité : cercle pointillé « ? », connecté : rond accent + initiale),
+// avatar (invité : cercle pointillé « ? », connecté : l'avatar CHOISI dans
+// Compte — initiale ou animal de la collection Premium),
 // carte création de compte bordée accent (invité), 4-5 lignes de nav à dot
 // couleur, encart danger pointillé (invité) ou « Se déconnecter » (connecté).
 
@@ -18,6 +19,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AvatarFace } from "@/components/ui/AvatarFace";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { NavRow } from "@/components/profile/NavRow";
@@ -39,6 +41,7 @@ export default function ProfileHubScreen() {
   const { session } = useAuth();
 
   const [displayName, setDisplayName] = useState("");
+  const [avatar, setAvatar] = useState<string>("letter");
   const [plan, setPlan] = useState<string>("free");
   const [upgradeEmail, setUpgradeEmail] = useState("");
   const [upgradePassword, setUpgradePassword] = useState("");
@@ -47,21 +50,22 @@ export default function ProfileHubScreen() {
   const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
   const email = session?.user.email ?? null;
-  const initial = (displayName.trim() || email || "C").charAt(0).toUpperCase();
 
-  // Rechargé au focus : le prénom peut changer depuis la sous-page Planning.
+  // Rechargé au focus : le prénom peut changer depuis la sous-page Planning,
+  // l'avatar depuis la sous-page Compte.
   useFocusEffect(
     useCallback(() => {
       if (!userId) return;
       supabase
         .from("profiles")
-        .select("display_name, plan")
+        .select("display_name, plan, avatar")
         .eq("id", userId)
-        .single<{ display_name: string; plan: string }>()
+        .single<{ display_name: string; plan: string; avatar: string | null }>()
         .then(({ data }) => {
           if (data) {
             setDisplayName(data.display_name);
             setPlan(data.plan);
+            setAvatar(data.avatar ?? "letter");
           }
         });
     }, [userId]),
@@ -136,9 +140,14 @@ export default function ProfileHubScreen() {
               <Ionicons name="help" size={22} color={colors.textMuted} />
             </View>
           ) : (
-            <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
-              <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
-            </View>
+            <AvatarFace
+              avatar={avatar}
+              name={displayName || email || ""}
+              size={52}
+              // L'initiale vit sur l'accent ; les animaux sur le fond doux.
+              background={avatar === "letter" ? colors.accent : colors.accentMuted}
+              color={colors.onAccent}
+            />
           )}
           <View style={styles.headerTextBox}>
             <View style={styles.titleRow}>
@@ -298,10 +307,6 @@ const styles = StyleSheet.create({
   avatarGuest: {
     borderWidth: 1.5,
     borderStyle: "dashed",
-  },
-  avatarLetter: {
-    fontSize: typeScale.heading,
-    fontFamily: fonts.bold,
   },
   headerTextBox: { flex: 1, gap: 2 },
   titleRow: {

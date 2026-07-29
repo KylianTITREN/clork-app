@@ -1,110 +1,131 @@
-import { Ionicons } from "@expo/vector-icons";
+// Compte v2 (maquette 4c) : carte « Image de profil » (collection d'avatars,
+// Premium), Email, Mot de passe, accès VIP et zone danger. Les flux existants
+// (changement d'e-mail, mot de passe, code VIP/promo, suppression du compte)
+// sont conservés — seule leur mise en scène suit la maquette.
+
 import { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Section } from "@/components/profile/Section";
 import { SubPageHeader } from "@/components/profile/SubPageHeader";
+import { AvatarFace } from "@/components/ui/AvatarFace";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
-import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
+import { AVATAR_COLLECTION } from "@/constants/avatars";
+import {
+  fonts,
+  letterSpacing,
+  radius,
+  spacing,
+  typeScale,
+  useThemeColors,
+} from "@/constants/tokens";
 import { authErrorMessage } from "@/lib/auth-errors";
-import { setCachedPlan } from "@/lib/plan-service";
+import {
+  isPremiumPlan,
+  setCachedPlan,
+  showPremiumGate,
+  usePlan,
+  type Plan,
+} from "@/lib/plan-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
 const MIN_PASSWORD_LENGTH = 8;
+/** Avatar gratuit : l'initiale du prénom. */
+const DEFAULT_AVATAR = "letter";
+const AVATAR_SIZE = 52;
 
-/** Force simple en 3 niveaux : 0 = invalide, 1 = fragile, 2 = correct, 3 = solide. */
-function passwordStrength(password: string): 0 | 1 | 2 | 3 {
-  if (password.length < MIN_PASSWORD_LENGTH) return 0;
-  const hasMix = /\d/.test(password) && /[a-zA-Z]/.test(password);
-  const hasUpper = /[A-Z]/.test(password);
-  const hasSymbol = /[^a-zA-Z0-9]/.test(password);
-  if (password.length >= 12 && hasMix && (hasUpper || hasSymbol)) return 3;
-  if (password.length >= 10 && hasMix) return 2;
-  return 1;
+/** Force 0-3 — même barème que l'inscription (longueur, casses, chiffre/symbole). */
+function passwordStrength(password: string): number {
+  let score = 0;
+  if (password.length >= MIN_PASSWORD_LENGTH) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password) || /[^a-zA-Z0-9]/.test(password)) score += 1;
+  return score;
 }
 
-const STRENGTH_LABELS: Record<1 | 2 | 3, string> = {
-  1: "Fragile",
-  2: "Correct",
-  3: "Solide",
-};
-
-function StrengthBar({ password }: { password: string }) {
-  const colors = useThemeColors();
-  const strength = passwordStrength(password);
-  const barColors: Record<1 | 2 | 3, string> = {
-    1: colors.danger,
-    2: colors.shiftCp,
-    3: colors.success,
-  };
-  const active = strength === 0 ? colors.surfaceMuted : barColors[strength];
-
-  if (!password) return null;
-
-  return (
-    <View style={strengthStyles.row}>
-      <View style={strengthStyles.bars}>
-        {[1, 2, 3].map((level) => (
-          <View
-            key={level}
-            style={[
-              strengthStyles.bar,
-              { backgroundColor: level <= strength ? active : colors.surfaceMuted },
-            ]}
-          />
-        ))}
-      </View>
-      <Text style={[strengthStyles.label, { color: strength === 0 ? colors.textMuted : active }]}>
-        {strength === 0 ? `${MIN_PASSWORD_LENGTH} caractères minimum` : STRENGTH_LABELS[strength]}
-      </Text>
-    </View>
-  );
-}
+const STRENGTH_LABELS = ["Trop court", "Fragile", "Correct", "Solide"] as const;
 
 export default function AccountSettingsScreen() {
   const colors = useThemeColors();
   const { session } = useAuth();
+  const livePlan = usePlan();
 
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [isChangingEmail, setIsChangingEmail] = useState(false);
-
+  const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
   const email = session?.user.email ?? "";
 
-  const isPasswordValid = newPassword.length >= MIN_PASSWORD_LENGTH;
-  const doPasswordsMatch = newPassword === confirmPassword;
-  const canSubmitPassword = isPasswordValid && doPasswordsMatch && confirmPassword.length > 0;
-  const canSubmitEmail = newEmail.trim().length > 0 && newEmail.trim() !== email;
+  // Plan : usePlan rafraîchit à chaque focus ; l'activation d'un code met à
+  // jour l'état local tout de suite, sans attendre l'aller-retour suivant.
+  const [plan, setPlan] = useState<Plan>(livePlan);
+  useEffect(() => {
+    setPlan(livePlan);
+  }, [livePlan]);
+  const isPremium = isPremiumPlan(plan);
 
+  const [displayName, setDisplayName] = useState("");
+  const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR);
+
+  const [newPassword, setNewPassword] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isChangingEmail, setIsChangingEmail] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [isRedeeming, setIsRedeeming] = useState(false);
-  const [plan, setPlan] = useState<string>("free");
 
+  const isPasswordValid = newPassword.length >= MIN_PASSWORD_LENGTH;
+  const canSubmitEmail = newEmail.trim().length > 0 && newEmail.trim() !== email;
+
+  const strength = passwordStrength(newPassword);
+  // Jauge : « Correct » = accent du thème, les états faibles gardent leur
+  // couleur sémantique (rouge / orange), « Solide » = succès.
+  const strengthColors = [colors.danger, colors.shiftCp, colors.accent, colors.success];
+
+  // Profil : prénom (initiale de l'avatar par défaut) + avatar choisi.
   useEffect(() => {
-    if (!session?.user.id) return;
+    if (!userId) return;
+    let isMounted = true;
     supabase
       .from("profiles")
-      .select("plan")
-      .eq("id", session.user.id)
-      .single<{ plan: string }>()
+      .select("display_name, avatar")
+      .eq("id", userId)
+      .single<{ display_name: string | null; avatar: string | null }>()
       .then(({ data }) => {
-        if (data) setPlan(data.plan);
+        if (!isMounted || !data) return;
+        setDisplayName(data.display_name ?? "");
+        setAvatar(data.avatar ?? DEFAULT_AVATAR);
       });
-  }, [session?.user.id]);
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
+
+  /** Sélection optimiste : rollback + alerte si l'écriture échoue. */
+  async function handleSelectAvatar(slug: string) {
+    if (!userId || slug === avatar) return;
+    const previous = avatar;
+    setAvatar(slug);
+    const { error } = await supabase.from("profiles").update({ avatar: slug }).eq("id", userId);
+    if (error) {
+      setAvatar(previous);
+      Alert.alert(
+        "Avatar non enregistré",
+        "Ton avatar n'a pas pu être enregistré. Réessaie dans un instant.",
+      );
+    }
+  }
 
   async function handleRedeemCode() {
     if (!promoCode.trim()) return;
@@ -115,11 +136,12 @@ export default function AccountSettingsScreen() {
       Alert.alert("Code refusé", "Ce code est invalide ou a déjà été utilisé au maximum.");
     } else {
       setPromoCode("");
-      setPlan(data === "founder" ? "founder" : "premium");
-      setCachedPlan(data === "founder" ? "founder" : "premium");
+      const redeemed: Plan = data === "founder" ? "founder" : "premium";
+      setPlan(redeemed);
+      setCachedPlan(redeemed);
       Alert.alert(
         "Accès débloqué",
-        data === "founder"
+        redeemed === "founder"
           ? "Tu fais partie des VIP : scans illimités, à vie."
           : "Tu fais désormais partie des membres Premium : scans illimités.",
       );
@@ -127,7 +149,7 @@ export default function AccountSettingsScreen() {
   }
 
   async function handleChangePassword() {
-    if (!canSubmitPassword) return;
+    if (!isPasswordValid) return;
     setIsChangingPassword(true);
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setIsChangingPassword(false);
@@ -135,7 +157,6 @@ export default function AccountSettingsScreen() {
       Alert.alert("Erreur", authErrorMessage(error));
     } else {
       setNewPassword("");
-      setConfirmPassword("");
       Alert.alert("Mot de passe mis à jour");
     }
   }
@@ -158,6 +179,7 @@ export default function AccountSettingsScreen() {
               Alert.alert("Erreur", authErrorMessage(error));
             } else {
               setNewEmail("");
+              setIsEditingEmail(false);
               Alert.alert("Email mis à jour", "Pense à valider l'email de confirmation.");
             }
           },
@@ -203,148 +225,313 @@ export default function AccountSettingsScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.flex}
+      >
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
         >
+          {/* Gabarit d'en-tête commun aux sous-pages (maquette : carré 42 r12). */}
           <SubPageHeader title="Compte" />
 
           {isGuest ? (
-            <Section
-              icon="person-circle"
-              iconBg={colors.accentMuted}
-              iconColor={colors.accent}
-              title="Mode invité"
-              subtitle="Pas encore de compte associé"
+            <View
+              style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
-              <Text style={[styles.bodyText, { color: colors.textSoft }]}>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Mode invité</Text>
+              <Text style={[styles.cardBody, { color: colors.textSoft }]}>
                 Crée ton compte gratuit depuis l'accueil du profil pour définir un email et un mot
                 de passe — toutes tes données seront conservées.
               </Text>
-            </Section>
+            </View>
           ) : (
             <>
-              <Section
-                icon="mail"
-                iconBg={colors.accentMuted}
-                iconColor={colors.accent}
-                title="Email"
-                subtitle="Adresse de connexion actuelle"
+              {/* ---- Image de profil : collection d'avatars (Premium) ---- */}
+              <View
+                style={[
+                  styles.card,
+                  styles.avatarCard,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
               >
-                <Text style={[styles.emailValue, { color: colors.text, backgroundColor: colors.background }]}>
-                  {email}
-                </Text>
-                <TextField
-                  label="Nouvel email"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  placeholder="nouveau@exemple.fr"
-                  value={newEmail}
-                  onChangeText={setNewEmail}
-                />
-                {newEmail.trim() ? (
-                  <Button
-                    label="Changer d'email"
-                    onPress={handleChangeEmail}
-                    disabled={!canSubmitEmail}
-                    isLoading={isChangingEmail}
-                  />
-                ) : null}
-              </Section>
+                <View style={styles.cardHeadRow}>
+                  <View style={styles.flex}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>Image de profil</Text>
+                    <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+                      {isPremium
+                        ? "Choisis ton avatar."
+                        : "Changer d'avatar est une fonction Premium."}
+                    </Text>
+                  </View>
+                  {!isPremium ? (
+                    <View style={[styles.premiumPill, { backgroundColor: colors.ink }]}>
+                      <Text style={[styles.premiumPillLabel, { color: colors.onInk }]}>
+                        Premium
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
 
-              <Section
-                icon="key"
-                iconBg={colors.surfaceMuted}
-                iconColor={colors.text}
-                title="Mot de passe"
-                subtitle="8 caractères minimum"
+                <View style={styles.avatarGrid}>
+                  {[DEFAULT_AVATAR, ...AVATAR_COLLECTION].map((slug) => {
+                    const isLetter = slug === DEFAULT_AVATAR;
+                    const isSelected = slug === avatar;
+                    // Sans Premium, les animaux sont inertes : la porte passe
+                    // par la rangée « Collection verrouillée » en bas de carte.
+                    const isLocked = !isPremium && !isLetter;
+                    return (
+                      <Pressable
+                        key={slug}
+                        disabled={isLocked || isSelected}
+                        onPress={() => handleSelectAvatar(slug)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: isSelected, disabled: isLocked }}
+                        accessibilityLabel={
+                          isLetter ? "Avatar par défaut : ton initiale" : `Avatar ${slug}`
+                        }
+                        style={styles.avatarItem}
+                      >
+                        <View
+                          style={[
+                            styles.avatarRing,
+                            { borderColor: isSelected ? colors.accent : "transparent" },
+                          ]}
+                        >
+                          {/* Verrouillé : cercle neutre estompé (pas de grayscale en RN). */}
+                          <View style={isLocked ? styles.avatarLocked : null}>
+                            <AvatarFace
+                              avatar={slug}
+                              name={displayName || email}
+                              size={AVATAR_SIZE}
+                              background={
+                                isLetter
+                                  ? colors.accent
+                                  : isLocked
+                                    ? colors.surfaceMuted
+                                    : colors.accentMuted
+                              }
+                              color={colors.onAccent}
+                            />
+                          </View>
+                          {isLocked ? (
+                            <View style={[styles.lockBadge, { backgroundColor: colors.ink }]}>
+                              <Text style={styles.lockGlyph}>🔒</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        {isSelected ? (
+                          <Text
+                            style={[styles.avatarLabel, { color: colors.accent }]}
+                            numberOfLines={1}
+                          >
+                            {isLetter ? "Par défaut" : "Choisi"}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {!isPremium ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => showPremiumGate("La collection d'avatars")}
+                    style={({ pressed }) => [
+                      styles.lockedRow,
+                      { backgroundColor: colors.background, opacity: pressed ? 0.85 : 1 },
+                    ]}
+                  >
+                    <Text style={[styles.lockedLabel, { color: colors.textMuted }]}>
+                      Collection verrouillée
+                    </Text>
+                    <View style={[styles.lockedCta, { backgroundColor: colors.accent }]}>
+                      <Text style={[styles.lockedCtaLabel, { color: colors.onAccent }]}>
+                        Passer Premium
+                      </Text>
+                    </View>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              {/* ---- Email ---- */}
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
               >
-                <TextField
-                  label="Nouveau mot de passe"
-                  secureToggle
-                  placeholder="8 caractères minimum"
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Email</Text>
+                <View style={[styles.valueBox, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.valueText, { color: colors.text }]} numberOfLines={1}>
+                    {email}
+                  </Text>
+                </View>
+                {isEditingEmail ? (
+                  <>
+                    <TextField
+                      label="Nouvel email"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                      keyboardType="email-address"
+                      placeholder="nouveau@exemple.fr"
+                      value={newEmail}
+                      onChangeText={setNewEmail}
+                    />
+                    <Button
+                      label="Changer d'email"
+                      onPress={handleChangeEmail}
+                      disabled={!canSubmitEmail}
+                      isLoading={isChangingEmail}
+                    />
+                  </>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setIsEditingEmail(true)}
+                    hitSlop={8}
+                  >
+                    <Text style={[styles.cardLink, { color: colors.accent }]}>
+                      Changer d'email ›
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* ---- Mot de passe ---- */}
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Mot de passe</Text>
+                <TextInput
+                  style={[
+                    styles.valueBox,
+                    styles.valueInput,
+                    { backgroundColor: colors.background, color: colors.text },
+                  ]}
+                  placeholder="Nouveau mot de passe"
+                  placeholderTextColor={colors.textDisabled}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  textContentType="newPassword"
                   value={newPassword}
                   onChangeText={setNewPassword}
                 />
-                <StrengthBar password={newPassword} />
-                <TextField
-                  label="Confirmation"
-                  secureToggle
-                  placeholder="Le même, pour être sûr·e"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  hint={
-                    confirmPassword.length > 0 && !doPasswordsMatch
-                      ? "Les deux mots de passe ne correspondent pas."
-                      : undefined
-                  }
-                />
-                {newPassword ? (
+                {/* Jauge 3 segments + libellé d'état (barème de l'inscription). */}
+                <View style={styles.gaugeRow}>
+                  {[0, 1, 2].map((index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.gaugeSegment,
+                        {
+                          backgroundColor:
+                            newPassword.length > 0 && index < strength
+                              ? strengthColors[strength]
+                              : colors.surfaceMuted,
+                        },
+                      ]}
+                    />
+                  ))}
+                  <Text
+                    style={[
+                      styles.gaugeLabel,
+                      {
+                        color:
+                          newPassword.length > 0 ? strengthColors[strength] : colors.textMuted,
+                      },
+                    ]}
+                  >
+                    {newPassword.length > 0 ? STRENGTH_LABELS[strength] : " "}
+                  </Text>
+                </View>
+                {newPassword.length > 0 ? (
                   <Button
                     label="Mettre à jour le mot de passe"
                     onPress={handleChangePassword}
-                    disabled={!canSubmitPassword}
+                    disabled={!isPasswordValid}
                     isLoading={isChangingPassword}
                   />
                 ) : null}
-              </Section>
+              </View>
 
-              <Section
-                icon="sparkles"
-                iconBg={colors.accentMuted}
-                iconColor={colors.accent}
-                title="Code d'accès"
-                subtitle="Code VIP ou Premium reçu par l'équipe Clork"
-              >
-                {plan !== "free" ? (
-                  // Carte membre sobre : fond doux du thème, encre pour le texte.
-                  <View style={[styles.planCard, { backgroundColor: colors.accentMuted }]}>
-                    <Ionicons name="sparkles" size={18} color={colors.accent} />
-                    <View style={styles.planTextBox}>
-                      <Text style={[styles.planTitle, { color: colors.text }]}>
-                        {plan === "founder" ? "Accès VIP actif" : "Accès Premium actif"}
-                      </Text>
-                      <Text style={[styles.planSubtitle, { color: colors.textSoft }]}>
-                        {plan === "founder" ? "Scans illimités, à vie — merci." : "Scans illimités."}
-                      </Text>
-                    </View>
+              {/* ---- Accès VIP / Premium ---- */}
+              {isPremium ? (
+                <View style={[styles.vipCard, { backgroundColor: colors.ink }]}>
+                  <View style={[styles.vipDot, { backgroundColor: colors.accent }]} />
+                  <View style={styles.flex}>
+                    <Text style={[styles.vipTitle, { color: colors.onInk }]}>
+                      {plan === "founder" ? "Accès VIP actif" : "Accès Premium actif"}
+                    </Text>
+                    <Text style={[styles.vipSubtitle, { color: colors.onInk }]}>
+                      {plan === "founder"
+                        ? "Scans illimités, à vie — merci."
+                        : "Scans illimités."}
+                    </Text>
                   </View>
-                ) : (
-                  <>
-                    <TextField
-                      label="Code"
-                      autoCapitalize="characters"
-                      autoCorrect={false}
-                      placeholder="EX : CLORK-VIP"
-                      value={promoCode}
-                      onChangeText={setPromoCode}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.card,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                >
+                  <View>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>
+                      J'ai un code d'accès
+                    </Text>
+                    <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+                      Code VIP ou Premium reçu par l'équipe Clork.
+                    </Text>
+                  </View>
+                  <TextInput
+                    style={[
+                      styles.valueBox,
+                      styles.valueInput,
+                      { backgroundColor: colors.background, color: colors.text },
+                    ]}
+                    placeholder="EX : CLORK-VIP"
+                    placeholderTextColor={colors.textDisabled}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    value={promoCode}
+                    onChangeText={setPromoCode}
+                  />
+                  {promoCode.trim() ? (
+                    <Button
+                      label="Activer mon accès"
+                      onPress={handleRedeemCode}
+                      isLoading={isRedeeming}
                     />
-                    {promoCode.trim() ? (
-                      <Button
-                        label="Activer mon accès"
-                        onPress={handleRedeemCode}
-                        isLoading={isRedeeming}
-                      />
-                    ) : null}
-                  </>
-                )}
-              </Section>
+                  ) : null}
+                </View>
+              )}
 
-              {/* Zone danger v2 : carte blanche bordée dangerBorder, titre danger. */}
+              {/* ---- Zone danger ---- */}
               <View
                 style={[
+                  styles.card,
                   styles.dangerCard,
                   { backgroundColor: colors.surface, borderColor: colors.dangerBorder },
                 ]}
               >
                 <Text style={[styles.dangerTitle, { color: colors.danger }]}>Zone danger</Text>
                 <Text style={[styles.dangerText, { color: colors.textMuted }]}>
-                  Plannings, scans et partages seront effacés. Cette action est irréversible.
+                  Plannings, scans et partages seront effacés. Action irréversible.
                 </Text>
-                <Button label="Supprimer mon compte" variant="danger" onPress={handleDeleteAccount} />
+                <Button
+                  label="Supprimer mon compte"
+                  variant="danger"
+                  onPress={handleDeleteAccount}
+                />
               </View>
             </>
           )}
@@ -354,43 +541,182 @@ export default function AccountSettingsScreen() {
   );
 }
 
-const strengthStyles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  bars: { flex: 1, flexDirection: "row", gap: spacing.xs + 2 },
-  bar: { flex: 1, height: 5, borderRadius: radius.pill },
-  label: { fontSize: typeScale.caption, fontFamily: fonts.semiBold },
-});
-
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   flex: { flex: 1 },
-  content: { padding: spacing.lg, gap: 12 },
-  bodyText: { fontSize: typeScale.caption, fontFamily: fonts.regular, lineHeight: 18 },
-  emailValue: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.semiBold,
-    paddingVertical: spacing.sm + 4,
-    paddingHorizontal: spacing.md - 2,
-    borderRadius: radius.input,
-    overflow: "hidden",
+  content: { padding: spacing.lg, gap: 10 },
+
+  // Carte blanche r16 p18 — langage commun des sous-pages v2.
+  card: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: 18,
+    gap: 12,
   },
-  planCard: {
+  cardHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
+  },
+  cardSubtitle: {
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
+    marginTop: 2,
+  },
+  cardBody: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.regular,
+    lineHeight: 18,
+  },
+  cardLink: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  valueBox: {
+    borderRadius: radius.input,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  valueText: {
+    fontSize: typeScale.body - 0.5,
+    fontFamily: fonts.semiBold,
+  },
+  valueInput: {
+    fontSize: typeScale.body - 0.5,
+    fontFamily: fonts.medium,
+    minHeight: 44,
+  },
+
+  // ---- Image de profil ----
+  avatarCard: { gap: 14 },
+  premiumPill: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexShrink: 0,
+  },
+  premiumPillLabel: {
+    fontSize: 10,
+    fontFamily: fonts.bold,
+    letterSpacing: 0.5,
+  },
+  avatarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    rowGap: 12,
+  },
+  avatarItem: {
+    // Largeur de l'anneau (52 + offset 2 + bordure 2.5, des deux côtés).
+    width: AVATAR_SIZE + 9,
+    alignItems: "center",
+    gap: 4,
+  },
+  avatarRing: {
+    width: AVATAR_SIZE + 9,
+    height: AVATAR_SIZE + 9,
+    borderRadius: radius.pill,
+    borderWidth: 2.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarLocked: { opacity: 0.4 },
+  lockBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 20,
+    height: 20,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockGlyph: { fontSize: 10 },
+  avatarLabel: {
+    fontSize: 9.5,
+    fontFamily: fonts.bold,
+  },
+  lockedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    borderRadius: radius.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  lockedLabel: {
+    fontSize: 12,
+    fontFamily: fonts.semiBold,
+  },
+  lockedCta: {
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  lockedCtaLabel: {
+    fontSize: 11.5,
+    fontFamily: fonts.bold,
+  },
+
+  // ---- Mot de passe ----
+  gaugeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  gaugeSegment: {
+    flex: 1,
+    height: 5,
+    borderRadius: radius.pill,
+  },
+  gaugeLabel: {
+    fontSize: 11.5,
+    fontFamily: fonts.semiBold,
+    marginLeft: 6,
+    minWidth: 62,
+    textAlign: "right",
+  },
+
+  // ---- Accès VIP ----
+  vipCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md - 2,
-  },
-  planTextBox: { flex: 1, gap: 1 },
-  planTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.bold },
-  planSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.regular },
-  dangerCard: {
     borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-    gap: spacing.sm + 2,
+    padding: 18,
   },
-  dangerTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.bold },
-  dangerText: { fontSize: typeScale.caption, fontFamily: fonts.medium, lineHeight: 17 },
+  vipDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  vipTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+  },
+  vipSubtitle: {
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
+    opacity: 0.6,
+    marginTop: 2,
+  },
+
+  // ---- Zone danger ----
+  dangerCard: { gap: 10 },
+  dangerTitle: {
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+  },
+  dangerText: {
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
+    lineHeight: 17,
+  },
 });
