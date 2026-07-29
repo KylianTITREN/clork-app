@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { pressOpacity } from "@/components/ui/press";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 const PRESETS: { minutes: number; label: string }[] = [
@@ -53,6 +55,7 @@ export function DurationChips({ value, onChange, allowCustom = false }: Duration
   function commit() {
     const minutes = Math.round(Number(text));
     if (Number.isFinite(minutes) && minutes >= 0 && minutes <= MAX_CUSTOM_MINUTES) {
+      void Haptics.selectionAsync();
       onChange(minutes);
     }
     setEditing(false);
@@ -68,12 +71,17 @@ export function DurationChips({ value, onChange, allowCustom = false }: Duration
               key={minutes}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              onPress={() => onChange(minutes)}
-              style={[
+              onPress={() => {
+                // Choix d'un preset de durée : retour tactile discret.
+                void Haptics.selectionAsync();
+                onChange(minutes);
+              }}
+              style={({ pressed }) => [
                 styles.chip,
                 selected
                   ? { backgroundColor: colors.accent, borderColor: colors.accent }
                   : { backgroundColor: colors.surface, borderColor: colors.border },
+                { opacity: pressed ? pressOpacity.control : 1 },
               ]}
             >
               <Text
@@ -95,7 +103,15 @@ export function DurationChips({ value, onChange, allowCustom = false }: Duration
             onPress={openEditor}
             accessibilityRole="button"
             accessibilityState={{ selected: true }}
-            style={[styles.chip, styles.customChip, { backgroundColor: colors.ink, borderColor: colors.ink }]}
+            style={({ pressed }) => [
+              styles.chip,
+              styles.customChip,
+              {
+                backgroundColor: colors.ink,
+                borderColor: colors.ink,
+                opacity: pressed ? pressOpacity.control : 1,
+              },
+            ]}
           >
             <Text style={[styles.label, styles.labelSelected, { color: colors.onInk }]}>
               {formatMinutes(value)}
@@ -108,7 +124,14 @@ export function DurationChips({ value, onChange, allowCustom = false }: Duration
           <Pressable
             onPress={openEditor}
             accessibilityRole="button"
-            style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            style={({ pressed }) => [
+              styles.chip,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+                opacity: pressed ? pressOpacity.control : 1,
+              },
+            ]}
           >
             <Text style={[styles.label, { color: colors.textSoft }]}>Autre…</Text>
           </Pressable>
@@ -138,7 +161,10 @@ export function DurationChips({ value, onChange, allowCustom = false }: Duration
           <Pressable
             onPress={commit}
             accessibilityRole="button"
-            style={[styles.okButton, { backgroundColor: colors.accent }]}
+            style={({ pressed }) => [
+              styles.okButton,
+              { backgroundColor: colors.accent, opacity: pressed ? pressOpacity.control : 1 },
+            ]}
           >
             <Text style={[styles.okLabel, { color: colors.onAccent }]}>OK</Text>
           </Pressable>

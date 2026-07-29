@@ -1,5 +1,7 @@
+import * as Haptics from "expo-haptics";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { pressOpacity } from "@/components/ui/press";
 import { fonts, typeScale, useThemeColors } from "@/constants/tokens";
 
 type ChoiceChipsProps<T extends string | number> = {
@@ -30,12 +32,17 @@ export function ChoiceChips<T extends string | number>({
             key={String(option)}
             accessibilityRole="button"
             accessibilityState={{ selected }}
-            onPress={() => onChange(option)}
-            style={[
+            onPress={() => {
+              // La sélection se confirme au doigt, pas seulement à l'œil.
+              void Haptics.selectionAsync();
+              onChange(option);
+            }}
+            style={({ pressed }) => [
               styles.chip,
               selected
                 ? { backgroundColor: colors.ink, borderColor: colors.ink }
                 : { backgroundColor: colors.surface, borderColor: colors.border },
+              { opacity: pressed ? pressOpacity.control : 1 },
             ]}
           >
             <Text

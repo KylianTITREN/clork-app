@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 
+import { pressOpacity } from "@/components/ui/press";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 type TextFieldProps = TextInputProps & {
@@ -39,7 +40,10 @@ export function TextField({ label, hint, style, secureToggle, ...inputProps }: T
           <Pressable
             onPress={() => setIsHidden((v) => !v)}
             hitSlop={10}
-            style={styles.toggle}
+            style={({ pressed }) => [
+              styles.toggle,
+              { opacity: pressed ? pressOpacity.control : 1 },
+            ]}
             accessibilityRole="button"
             accessibilityLabel={isHidden ? "Afficher le mot de passe" : "Masquer le mot de passe"}
           >

@@ -15,6 +15,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -48,7 +49,7 @@ import {
 } from "@/constants/tokens";
 import { listCustomTypes, type CustomShiftType } from "@/lib/custom-types-service";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
-import { addDays, isoDate, mondayOf, weekLabel } from "@/lib/dates";
+import { addDays, dateToTime, isoDate, mondayOf, timeToDate, weekLabel } from "@/lib/dates";
 import {
   applyDefaultBreak,
   applyWeekStart,
@@ -67,7 +68,6 @@ import {
   startExtraction,
   toDraftShifts,
   undoImport,
-  uploadScanPhoto,
   validateDraft,
   waitForExtraction,
   type DraftShift,
@@ -185,22 +185,14 @@ function paidHoursLabel(start: string, end: string, pauseMinutes: number): strin
   return `${String(rounded).replace(".", ",")}h payées`;
 }
 
-function timeToDate(value: string): Date {
-  const d = new Date();
-  const [h, m] = value.split(":").map(Number);
-  d.setHours(h || 9, m || 0, 0, 0);
-  return d;
-}
-
-function toHHMM(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
 // Quota de scans du plan gratuit : 1 / 30 jours (compte), 1 / 7 jours (invité).
 const SCAN_QUOTA = 1;
 const FREE_SCAN_WINDOW_DAYS = 30;
 const GUEST_SCAN_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Mêmes statuts que le garde-fou serveur (extract-planning) : un scan raté ne
+// consomme pas le quota, le badge ne doit donc pas le compter non plus.
+const QUOTA_STATUSES = ["extracted", "validated"];
 
 type ManualDateCardProps = {
   label: string;
@@ -310,7 +302,7 @@ function ManualTimeZone({ value, onChange }: ManualTimeZoneProps) {
   }
 
   function confirm() {
-    onChange(toHHMM(draft));
+    onChange(dateToTime(draft));
     setIsOpen(false);
   }
 
@@ -349,7 +341,7 @@ function ManualTimeZone({ value, onChange }: ManualTimeZoneProps) {
             display="clock"
             onChange={(event, date) => {
               setIsOpen(false);
-              if (event.type === "set" && date) onChange(toHHMM(date));
+              if (event.type === "set" && date) onChange(dateToTime(date));
             }}
           />
         )
@@ -575,6 +567,7 @@ export default function AddWizardScreen() {
           .from("scans")
           .select("id", { count: "exact", head: true })
           .eq("uploader_id", userId)
+          .in("status", QUOTA_STATUSES)
           .gte("created_at", since);
         if (cancelled || error) return;
         setScansLeft(Math.max(0, SCAN_QUOTA - (count ?? 0)));
@@ -725,14 +718,18 @@ export default function AddWizardScreen() {
       setState({ step: "processing", processingStep: "compress" });
       const image = await prepareImage(uri, width, height, autoOrient);
 
+      // « Envoi » = la requête d'extraction elle-même : l'image voyage en
+      // base64 dans son corps, plus aucun dépôt dans Storage.
       setState({ step: "processing", processingStep: "upload" });
       const scanId = await createScan(userId);
-      await uploadScanPhoto(userId, scanId, image.base64);
+      await startExtraction(scanId, image.base64);
 
       setState({ step: "processing", processingStep: "extract" });
-      await startExtraction(scanId, image.base64);
       const extraction = await waitForExtraction(scanId);
 
+      // Filet de sécurité : la fonction serveur marque désormais les photos
+      // illisibles en `failed` (le scan n'est alors pas décompté). Ce garde-fou
+      // couvre une version de la fonction encore déployée sans ce correctif.
       if (extraction.photo_quality === "unusable") {
         await supabase.from("scans").update({ status: "failed" }).eq("id", scanId);
         setState({ step: "method" });
@@ -777,7 +774,12 @@ export default function AddWizardScreen() {
     setIsSaving(true);
     try {
       const scanRowId = ctx.rowIds.get(ctx.target.row_index) ?? null;
-      const savedIds = await saveShifts(userId, drafts, scanRowId);
+      // La réconciliation porte sur les jours réellement validés : un créneau
+      // retiré pendant la correction disparaît du planning, les jours mis de
+      // côté « à revoir » restent intacts.
+      const { createdIds, writtenCount } = await saveShifts(userId, drafts, scanRowId, [
+        ...allowedDates,
+      ]);
       // Trace les erreurs de lecture de l'IA (best-effort, jamais bloquant).
       void logScanCorrections(userId, ctx.scanId, scanRowId, diffDrafts(ctx.baseline, ctx.drafts));
       await markScanValidated(ctx.scanId); // sans effet (RLS) sur un scan partagé, voulu
@@ -789,8 +791,10 @@ export default function AddWizardScreen() {
         .reduce((acc, d) => acc + paidOf(d), 0);
       setState({
         step: "success",
-        savedIds,
-        slotCount: savedIds.length,
+        // `savedIds` = uniquement les créations : « Annuler cet import » ne doit
+        // pas supprimer des créneaux que l'import a seulement mis à jour.
+        savedIds: createdIds,
+        slotCount: writtenCount,
         totalHours,
         monday: ctx.extraction.week_start as string,
         scanId: ctx.scanId,
@@ -953,7 +957,15 @@ export default function AddWizardScreen() {
   }
 
   function confirmUndoImport(shiftIds: string[]) {
-    if (shiftIds.length === 0) return;
+    // Aucune création : l'import n'a fait que mettre à jour des créneaux déjà
+    // présents — les supprimer serait une perte de données, pas une annulation.
+    if (shiftIds.length === 0) {
+      Alert.alert(
+        "Rien à annuler",
+        "Cet import a mis à jour des créneaux qui existaient déjà. Modifie-les depuis ta semaine.",
+      );
+      return;
+    }
     Alert.alert(
       "Annuler cet import ?",
       `Les ${shiftIds.length} créneau${shiftIds.length > 1 ? "x" : ""} qui viennent d'être ajoutés seront retirés de ton planning.`,
@@ -1236,141 +1248,147 @@ export default function AddWizardScreen() {
     const cardSurface = { backgroundColor: colors.surface, borderColor: colors.border };
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
-        <ScrollView
-          contentContainerStyle={[styles.stepContent, styles.stepContentFill, footerPadding]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+        {/* Clavier : la saisie de pause libre et le CTA sont en bas d'écran. */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.flex}
         >
-          <Text style={[styles.stepTitle, { color: colors.text }]}>Ajouter à la main</Text>
-          <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
-            Un jour ou une suite de jours
-          </Text>
+          <ScrollView
+            contentContainerStyle={[styles.stepContent, styles.stepContentFill, footerPadding]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={[styles.stepTitle, { color: colors.text }]}>Ajouter à la main</Text>
+            <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
+              Un jour ou une suite de jours
+            </Text>
 
-          {/* Carte 1 — dates : « DU » + « AU — optionnel » */}
-          <View style={[styles.manualCard, cardSurface]}>
-            <View style={styles.dateRow}>
-              <ManualDateCard label="Du" value={manualDate} onChange={handleManualStartChange} />
-              <ManualDateCard
-                label="Au — optionnel"
-                value={manualEndDate}
-                placeholder="même jour"
-                muted
-                onChange={setManualEndDate}
-                minimumDate={addDays(manualDate, 1)}
-              />
+            {/* Carte 1 — dates : « DU » + « AU — optionnel » */}
+            <View style={[styles.manualCard, cardSurface]}>
+              <View style={styles.dateRow}>
+                <ManualDateCard label="Du" value={manualDate} onChange={handleManualStartChange} />
+                <ManualDateCard
+                  label="Au — optionnel"
+                  value={manualEndDate}
+                  placeholder="même jour"
+                  muted
+                  onChange={setManualEndDate}
+                  minimumDate={addDays(manualDate, 1)}
+                />
+              </View>
             </View>
-          </View>
-          <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
-            Une plage crée le même créneau sur chaque jour — pratique pour les CP.
-          </Text>
+            <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
+              Une plage crée le même créneau sur chaque jour — pratique pour les CP.
+            </Text>
 
-          {/* Carte 2 — type : sélection encre, types persos + « + Autre… » */}
-          <View style={[styles.manualCard, cardSurface]}>
-            <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>Type</Text>
-            <TypeChipsRow options={manualTypeChips} onAddPress={() => setIsTypeSheetOpen(true)} />
-          </View>
+            {/* Carte 2 — type : sélection encre, types persos + « + Autre… » */}
+            <View style={[styles.manualCard, cardSurface]}>
+              <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>Type</Text>
+              <TypeChipsRow options={manualTypeChips} onAddPress={() => setIsTypeSheetOpen(true)} />
+            </View>
 
-          {isTimed ? (
-            <>
-              {/* Carte 3 — horaires : créneaux types + gros horaire */}
-              <View style={[styles.manualCard, cardSurface]}>
-                <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
-                  Horaires — créneaux types
-                </Text>
-                <View style={styles.presetPillRow}>
-                  {manualPresets.map((preset) => {
-                    const selected = manualPresetId === preset.id;
-                    return (
-                      <Pressable
-                        key={preset.id}
-                        onPress={() => applyManualPreset(preset)}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        style={[
-                          styles.presetPill,
-                          selected
-                            ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
-                            : { backgroundColor: colors.surface, borderColor: colors.border },
-                        ]}
-                      >
-                        <Text
-                          numberOfLines={1}
+            {isTimed ? (
+              <>
+                {/* Carte 3 — horaires : créneaux types + gros horaire */}
+                <View style={[styles.manualCard, cardSurface]}>
+                  <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
+                    Horaires — créneaux types
+                  </Text>
+                  <View style={styles.presetPillRow}>
+                    {manualPresets.map((preset) => {
+                      const selected = manualPresetId === preset.id;
+                      return (
+                        <Pressable
+                          key={preset.id}
+                          onPress={() => applyManualPreset(preset)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
                           style={[
-                            styles.presetPillLabel,
-                            { color: selected ? colors.text : colors.textSoft },
+                            styles.presetPill,
+                            selected
+                              ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
+                              : { backgroundColor: colors.surface, borderColor: colors.border },
                           ]}
                         >
-                          {preset.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  <Pressable
-                    onPress={() => setManualPresetId(null)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: manualPresetId === null }}
-                    style={[
-                      styles.presetPill,
-                      manualPresetId === null
-                        ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
-                        : { backgroundColor: colors.surface, borderColor: colors.border },
-                    ]}
-                  >
-                    <Text
-                      numberOfLines={1}
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.presetPillLabel,
+                              { color: selected ? colors.text : colors.textSoft },
+                            ]}
+                          >
+                            {preset.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    <Pressable
+                      onPress={() => setManualPresetId(null)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: manualPresetId === null }}
                       style={[
-                        styles.presetPillLabel,
-                        { color: manualPresetId === null ? colors.text : colors.textSoft },
+                        styles.presetPill,
+                        manualPresetId === null
+                          ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
+                          : { backgroundColor: colors.surface, borderColor: colors.border },
                       ]}
                     >
-                      ✏️ Inventé
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.presetPillLabel,
+                          { color: manualPresetId === null ? colors.text : colors.textSoft },
+                        ]}
+                      >
+                        ✏️ Inventé
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={[styles.bigTimeBox, { backgroundColor: colors.background }]}>
+                    <ManualTimeZone
+                      value={manualStart}
+                      onChange={(value) => handleManualTimeChange("start", value)}
+                    />
+                    <Text style={[styles.bigTimeArrow, { color: colors.textMuted }]}>→</Text>
+                    <ManualTimeZone
+                      value={manualEnd}
+                      onChange={(value) => handleManualTimeChange("end", value)}
+                    />
+                  </View>
+                  <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
+                    Un créneau type remplit heures et pause en un tap.
+                  </Text>
+                </View>
+
+                {/* Carte 4 — pause : durée + total payé en vert */}
+                <View style={[styles.manualCard, cardSurface]}>
+                  <View style={styles.pauseHeaderRow}>
+                    <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
+                      Pause — durée
                     </Text>
-                  </Pressable>
+                    <Text style={[styles.paidHours, { color: colors.accent }]}>
+                      {paidHoursLabel(manualStart, manualEnd, manualPause)}
+                    </Text>
+                  </View>
+                  <ManualPauseChips value={manualPause} onChange={setManualPause} />
+                  {manualPause > 0 ? (
+                    <TimePickerField
+                      value={manualPauseStart}
+                      onChange={setManualPauseStart}
+                      placeholder="12:30"
+                      label="Prise à"
+                      variant="row"
+                    />
+                  ) : null}
                 </View>
+              </>
+            ) : null}
 
-                <View style={[styles.bigTimeBox, { backgroundColor: colors.background }]}>
-                  <ManualTimeZone
-                    value={manualStart}
-                    onChange={(value) => handleManualTimeChange("start", value)}
-                  />
-                  <Text style={[styles.bigTimeArrow, { color: colors.textMuted }]}>→</Text>
-                  <ManualTimeZone
-                    value={manualEnd}
-                    onChange={(value) => handleManualTimeChange("end", value)}
-                  />
-                </View>
-                <Text style={[styles.manualCaption, { color: colors.textMuted }]}>
-                  Un créneau type remplit heures et pause en un tap.
-                </Text>
-              </View>
-
-              {/* Carte 4 — pause : durée + total payé en vert */}
-              <View style={[styles.manualCard, cardSurface]}>
-                <View style={styles.pauseHeaderRow}>
-                  <Text style={[styles.manualSectionLabel, { color: colors.textMuted }]}>
-                    Pause — durée
-                  </Text>
-                  <Text style={[styles.paidHours, { color: colors.accent }]}>
-                    {paidHoursLabel(manualStart, manualEnd, manualPause)}
-                  </Text>
-                </View>
-                <ManualPauseChips value={manualPause} onChange={setManualPause} />
-                {manualPause > 0 ? (
-                  <TimePickerField
-                    value={manualPauseStart}
-                    onChange={setManualPauseStart}
-                    placeholder="12:30"
-                    label="Prise à"
-                    variant="row"
-                  />
-                ) : null}
-              </View>
-            </>
-          ) : null}
-
-          <View style={styles.flexSpacer} />
-          <Button label="Ajouter à ma semaine" onPress={saveManualDays} isLoading={isSaving} />
-        </ScrollView>
+            <View style={styles.flexSpacer} />
+            <Button label="Ajouter à ma semaine" onPress={saveManualDays} isLoading={isSaving} />
+          </ScrollView>
+        </KeyboardAvoidingView>
 
         {/* Feuille « Nouveau type » : le type créé est sélectionné d'office */}
         {isTypeSheetOpen ? (
@@ -1386,28 +1404,34 @@ export default function AddWizardScreen() {
   if (state.step === "code") {
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
-        <ScrollView
-          contentContainerStyle={[styles.stepContent, footerPadding]}
-          keyboardShouldPersistTaps="handled"
+        {/* Clavier : le champ code et son CTA doivent rester visibles. */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.flex}
         >
-          <Text style={[styles.stepTitle, { color: colors.text }]}>J'ai reçu un code</Text>
-          <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
-            Un·e collègue a déjà scanné le planning ? Récupère tes horaires sans re-scanner.
-          </Text>
-          <TextInput
-            value={joinCode}
-            onChangeText={setJoinCode}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            placeholder="A3F2B1C4"
-            placeholderTextColor={colors.textDisabled}
-            style={[
-              styles.codeInput,
-              { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
-            ]}
-          />
-          <Button label="Récupérer mes horaires" onPress={handleJoin} isLoading={isJoining} />
-        </ScrollView>
+          <ScrollView
+            contentContainerStyle={[styles.stepContent, footerPadding]}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={[styles.stepTitle, { color: colors.text }]}>J'ai reçu un code</Text>
+            <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
+              Un·e collègue a déjà scanné le planning ? Récupère tes horaires sans re-scanner.
+            </Text>
+            <TextInput
+              value={joinCode}
+              onChangeText={setJoinCode}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder="A3F2B1C4"
+              placeholderTextColor={colors.textDisabled}
+              style={[
+                styles.codeInput,
+                { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
+              ]}
+            />
+            <Button label="Récupérer mes horaires" onPress={handleJoin} isLoading={isJoining} />
+          </ScrollView>
+        </KeyboardAvoidingView>
       </WizardFrame>
     );
   }
@@ -1536,6 +1560,7 @@ export default function AddWizardScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
+  flex: { flex: 1 },
   stepContent: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,

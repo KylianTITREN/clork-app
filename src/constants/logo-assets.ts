@@ -13,12 +13,8 @@ export const appIconByTheme: Record<ThemeId, number> = {
   graphite: require("../../assets/icons/icon-graphite.png"),
 };
 
-// Marques transparentes (cadran seul) par thème.
-export const logoByTheme: Record<ThemeId, number> = {
-  forest: require("../../assets/images/logos/logo-forest.png"),
-  honey: require("../../assets/images/logos/logo-honey.png"),
-  blossom: require("../../assets/images/logos/logo-blossom.png"),
-  plum: require("../../assets/images/logos/logo-plum.png"),
-  water: require("../../assets/images/logos/logo-water.png"),
-  graphite: require("../../assets/images/logos/logo-graphite.png"),
-};
+// NOTE : les marques transparentes (assets/images/logos/logo-<thème>.png) ne
+// sont plus exposées ici. Leur map n'avait aucun appelant et ses require()
+// embarquaient ~314 Ko de PNG dans le bundle. Les fichiers restent sur disque :
+// ils sont produits par scripts/generate-icons-v2.mjs et consommés par
+// scripts/generate-splash-v2.py au moment du build, pas à l'exécution.

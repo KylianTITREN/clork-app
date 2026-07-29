@@ -5,6 +5,7 @@
 // pour garder le même langage visuel dans l'éditeur de jour et le wizard.
 
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import {
   Alert,
@@ -30,6 +31,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { pressOpacity } from "@/components/ui/press";
 import { useSheetDrag } from "@/components/ui/useSheetDrag";
 import { createCustomType, type CustomShiftType } from "@/lib/custom-types-service";
 
@@ -66,12 +68,17 @@ export function TypeChipsRow({ options, onAddPress }: TypeChipsRowProps) {
           key={key}
           accessibilityRole="button"
           accessibilityState={{ selected }}
-          onPress={onPress}
-          style={[
+          onPress={() => {
+            // Choisir un type est une décision : on la confirme au doigt.
+            void Haptics.selectionAsync();
+            onPress();
+          }}
+          style={({ pressed }) => [
             styles.chip,
             selected
               ? { backgroundColor: colors.ink, borderColor: colors.ink }
               : { backgroundColor: colors.surface, borderColor: colors.border },
+            { opacity: pressed ? pressOpacity.control : 1 },
           ]}
         >
           <Text
@@ -91,7 +98,11 @@ export function TypeChipsRow({ options, onAddPress }: TypeChipsRowProps) {
         accessibilityRole="button"
         accessibilityLabel="Créer un type personnalisé"
         onPress={onAddPress}
-        style={[styles.chip, styles.addChip, { borderColor: colors.border }]}
+        style={({ pressed }) => [
+          styles.chip,
+          styles.addChip,
+          { borderColor: colors.border, opacity: pressed ? pressOpacity.control : 1 },
+        ]}
       >
         <Text style={[styles.chipLabel, { color: colors.textMuted }]}>+ Autre…</Text>
       </Pressable>
@@ -109,7 +120,12 @@ type TypeSheetProps = {
 
 export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
   const colors = useThemeColors();
-  const { panHandlers, grabberHandlers, dragStyle } = useSheetDrag(onClose);
+  // animateIn : la feuille pilote son entrée (Modal en `none`) pour que le
+  // voile puisse fondre au lieu de monter avec elle.
+  const { panHandlers, grabberHandlers, dragStyle, backdropStyle, requestClose } = useSheetDrag(
+    onClose,
+    { animateIn: true },
+  );
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [isPaid, setIsPaid] = useState(true);
@@ -122,6 +138,9 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
     setIsCreating(true);
     try {
       const created = await createCustomType(trimmedName, isPaid);
+      // Le type est écrit en base : on le signale au doigt avant de rendre
+      // la main au parent (qui sélectionne le type et ferme la feuille).
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onCreated(created);
     } catch (error) {
       Alert.alert(
@@ -134,20 +153,18 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
   }
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    // `animationType="none"` : l'entrée est jouée ici (voile en fondu, feuille
+    // qui glisse) — le slide natif déplaçait le voile avec la feuille.
+    <Modal visible transparent animationType="none" onRequestClose={requestClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
       >
-        <Pressable
-          style={styles.backdropFill}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Fermer"
-        />
+        {/* Voile pur décor : la zone tappable est le `backdrop` au-dessus. */}
+        <Animated.View style={[styles.backdropFill, backdropStyle]} pointerEvents="none" />
         <Pressable
           style={styles.backdrop}
-          onPress={onClose}
+          onPress={requestClose}
           accessibilityRole="button"
           accessibilityLabel="Fermer"
         />
@@ -170,13 +187,17 @@ export function TypeSheet({ onClose, onCreated }: TypeSheetProps) {
           <View style={styles.headerRow}>
             <Text style={[styles.title, { color: colors.text }]}>Nouveau type</Text>
             <Pressable
-              onPress={onClose}
+              onPress={requestClose}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Fermer"
-              style={[
+              style={({ pressed }) => [
                 styles.closeButton,
-                { backgroundColor: colors.surface, borderColor: colors.border },
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                  opacity: pressed ? pressOpacity.control : 1,
+                },
               ]}
             >
               <Ionicons name="close" size={16} color={colors.text} />

@@ -7,8 +7,8 @@
 // on ne bloque jamais la connexion.
 
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -34,14 +34,29 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function SignInScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
+  // Paramètres posés par l'inscription quand elle repart d'où elle vient
+  // (compte déjà existant) : e-mail à pré-remplir + raison du renvoi.
+  const params = useLocalSearchParams<{ email?: string; notice?: string }>();
+  const paramEmail = typeof params.email === "string" ? params.email : "";
+  const paramNotice = typeof params.notice === "string" ? params.notice : "";
   const [step, setStep] = useState<"email" | "password">("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const trimmedEmail = email.trim();
+
+  // Renvoi depuis l'inscription : on ré-ouvre « Content de te revoir » avec
+  // l'e-mail concerné plutôt que de rejeter la personne à l'écran vide.
+  useEffect(() => {
+    if (!paramEmail) return;
+    setEmail(paramEmail);
+    setStep("password");
+    setNotice(paramNotice || null);
+  }, [paramEmail, paramNotice]);
 
   async function handleContinue() {
     if (!EMAIL_RE.test(trimmedEmail)) {
@@ -91,10 +106,19 @@ export default function SignInScreen() {
     setStep("email");
     setPassword("");
     setError(null);
+    setNotice(null);
   }
 
   function goToSignUp() {
     router.push({ pathname: "/sign-up", params: { email: trimmedEmail } });
+  }
+
+  function goToForgotPassword() {
+    // Route hors types générés tant que le serveur de dev n'a pas re-tourné.
+    router.push({
+      pathname: "/forgot-password",
+      params: { email: trimmedEmail },
+    } as Parameters<typeof router.push>[0]);
   }
 
   async function continueAsGuest() {
@@ -169,6 +193,13 @@ export default function SignInScreen() {
             </View>
 
             <View style={styles.form}>
+              {notice ? (
+                <View style={[styles.noticeCard, { backgroundColor: colors.accentMuted }]}>
+                  <View style={[styles.noticeDot, { backgroundColor: colors.accent }]} />
+                  <Text style={[styles.noticeText, { color: colors.text }]}>{notice}</Text>
+                </View>
+              ) : null}
+
               <Pressable
                 onPress={backToEmail}
                 style={[styles.emailRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -197,6 +228,11 @@ export default function SignInScreen() {
                 }}
                 onSubmitEditing={handleSignIn}
               />
+              {/* Seule sortie quand le mot de passe est perdu : le parcours
+                  « e-mail d'abord » ne laisse aucune autre issue. */}
+              <Pressable onPress={goToForgotPassword} hitSlop={8} style={styles.forgotLink}>
+                <Text style={[styles.link, { color: colors.accent }]}>Mot de passe oublié ?</Text>
+              </Pressable>
               {error ? (
                 <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
               ) : null}
@@ -309,9 +345,35 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.bold,
   },
+  forgotLink: {
+    alignSelf: "flex-end",
+    marginTop: -spacing.xs,
+    paddingVertical: spacing.xs,
+  },
   signUpLink: {
     alignItems: "center",
     paddingVertical: spacing.xs,
+  },
+  // Bandeau d'information (compte déjà existant) : langage des cartes vertes
+  // de l'inscription, pas le rouge des erreurs de saisie.
+  noticeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+  },
+  noticeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
+    lineHeight: 17,
   },
   link: {
     fontSize: typeScale.bodySm,

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
@@ -33,24 +33,68 @@ type ProcessingViewProps = {
 export function ProcessingView({ currentStep }: ProcessingViewProps) {
   const colors = useThemeColors();
   const [hintIndex, setHintIndex] = useState(0);
+  // ~2 min d'attente : chaque changement était un à-coup. Le message se
+  // remplace en fondu et le cadran respire au lieu de tourner en rond.
+  const hintOpacity = useRef(new Animated.Value(1)).current;
+  const breath = useRef(new Animated.Value(0)).current;
 
   const currentIndex = STEPS.findIndex((s) => s.key === currentStep);
 
   useEffect(() => {
     if (currentStep !== "extract") return;
-    const interval = setInterval(
-      () => setHintIndex((i) => (i + 1) % EXTRACT_HINTS.length),
-      HINT_INTERVAL_MS,
-    );
+    const interval = setInterval(() => {
+      // Fondu sortant, changement de texte à mi-course, fondu entrant.
+      Animated.timing(hintOpacity, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }).start(() => {
+        setHintIndex((i) => (i + 1) % EXTRACT_HINTS.length);
+        Animated.timing(hintOpacity, {
+          toValue: 1,
+          duration: 320,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      });
+    }, HINT_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [currentStep]);
+  }, [currentStep, hintOpacity]);
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breath, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breath, {
+          toValue: 0,
+          duration: 1600,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [breath]);
+
+  const breathStyle = {
+    transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }) }],
+    opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }),
+  };
 
   return (
     <View style={styles.container}>
-      <View style={[styles.heroCircle, { backgroundColor: colors.accentMuted }]}>
+      <Animated.View
+        style={[styles.heroCircle, { backgroundColor: colors.accentMuted }, breathStyle]}
+      >
         <Ionicons name="scan" size={40} color={colors.accent} />
-      </View>
-      <ActivityIndicator size="large" color={colors.accent} />
+      </Animated.View>
       <View
         style={[styles.steps, { backgroundColor: colors.surface, borderColor: colors.border }]}
       >
@@ -87,9 +131,11 @@ export function ProcessingView({ currentStep }: ProcessingViewProps) {
       </View>
       {currentStep === "extract" ? (
         <>
-          <Text style={[styles.hint, { color: colors.textMuted }]}>
+          <Animated.Text
+            style={[styles.hint, { color: colors.textMuted, opacity: hintOpacity }]}
+          >
             {EXTRACT_HINTS[hintIndex]}
-          </Text>
+          </Animated.Text>
           {/* La lecture tourne côté serveur : l'app peut être fermée, une
               notification push signale la fin (sendPushNotification), et la
               reprise propose le scan à valider (bannière d'accueil). */}

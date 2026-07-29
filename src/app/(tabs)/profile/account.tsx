@@ -3,6 +3,7 @@
 // (changement d'e-mail, mot de passe, code VIP/promo, suppression du compte)
 // sont conservés — seule leur mise en scène suit la maquette.
 
+import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -247,14 +248,23 @@ export default function AccountSettingsScreen() {
           <SubPageHeader title="Compte" />
 
           {isGuest ? (
+            // En invité, cet écran est la destination de la porte Premium
+            // (« J'ai un code d'accès ») : il doit proposer la seule action
+            // utile ici — créer le compte — au lieu d'un texte sans issue.
             <View
               style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Mode invité</Text>
-              <Text style={[styles.cardBody, { color: colors.textSoft }]}>
-                Crée ton compte gratuit depuis l'accueil du profil pour définir un email et un mot
-                de passe — toutes tes données seront conservées.
+              <Text style={[styles.cardTitle, { color: colors.text }]}>
+                Crée ton compte gratuit
               </Text>
+              <Text style={[styles.cardBody, { color: colors.textSoft }]}>
+                Email, mot de passe, code d'accès Premium : tout ça vit sur un compte. Toutes tes
+                données actuelles sont conservées.
+              </Text>
+              <Button
+                label="Créer mon compte gratuit"
+                onPress={() => router.push("/upgrade" as Parameters<typeof router.push>[0])}
+              />
             </View>
           ) : (
             <>

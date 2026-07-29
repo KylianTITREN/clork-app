@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
+import { pressOpacity } from "@/components/ui/press";
 import {
   fonts,
   radius,
@@ -12,6 +14,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { dateToTime, timeToDate } from "@/lib/dates";
 
 type TimePickerFieldProps = {
   value: string | null; // "HH:MM"
@@ -28,21 +31,6 @@ type TimePickerFieldProps = {
   variant?: "pill" | "card" | "row";
 };
 
-function toDate(value: string | null): Date {
-  const d = new Date();
-  if (value) {
-    const [h, m] = value.split(":").map(Number);
-    d.setHours(h || 9, m || 0, 0, 0);
-  } else {
-    d.setHours(9, 0, 0, 0);
-  }
-  return d;
-}
-
-function toHHMM(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
 /** Sélecteur d'heure natif (roue iOS / horloge Android) derrière un champ v2. */
 export function TimePickerField({
   value,
@@ -53,15 +41,18 @@ export function TimePickerField({
 }: TimePickerFieldProps) {
   const colors = useThemeColors();
   const [isOpen, setIsOpen] = useState(false);
-  const [draft, setDraft] = useState<Date>(() => toDate(value));
+  // timeToDate/dateToTime partagés : la copie locale faisait `setHours(h || 9)`
+  // et remontait donc 00:30 à 09:30 (minuit est falsy).
+  const [draft, setDraft] = useState<Date>(() => timeToDate(value));
 
   function open() {
-    setDraft(toDate(value));
+    setDraft(timeToDate(value));
     setIsOpen(true);
   }
 
   function confirm() {
-    onChange(toHHMM(draft));
+    void Haptics.selectionAsync();
+    onChange(dateToTime(draft));
     setIsOpen(false);
   }
 
@@ -71,14 +62,28 @@ export function TimePickerField({
   return (
     <>
       {variant === "card" ? (
-        <Pressable onPress={open} style={[styles.card, surfaceStyle]}>
+        <Pressable
+          onPress={open}
+          style={({ pressed }) => [
+            styles.card,
+            surfaceStyle,
+            { opacity: pressed ? pressOpacity.surface : 1 },
+          ]}
+        >
           {label ? (
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>{label}</Text>
           ) : null}
           <Text style={[styles.cardValue, { color: valueColor }]}>{value ?? placeholder}</Text>
         </Pressable>
       ) : variant === "row" ? (
-        <Pressable onPress={open} style={[styles.rowField, surfaceStyle]}>
+        <Pressable
+          onPress={open}
+          style={({ pressed }) => [
+            styles.rowField,
+            surfaceStyle,
+            { opacity: pressed ? pressOpacity.surface : 1 },
+          ]}
+        >
           {label ? (
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>{label}</Text>
           ) : null}
@@ -88,7 +93,14 @@ export function TimePickerField({
           </View>
         </Pressable>
       ) : (
-        <Pressable onPress={open} style={[styles.pill, surfaceStyle]}>
+        <Pressable
+          onPress={open}
+          style={({ pressed }) => [
+            styles.pill,
+            surfaceStyle,
+            { opacity: pressed ? pressOpacity.surface : 1 },
+          ]}
+        >
           <Text style={[styles.pillValue, { color: valueColor }]}>{value ?? placeholder}</Text>
         </Pressable>
       )}
@@ -122,7 +134,10 @@ export function TimePickerField({
             display="clock"
             onChange={(event, date) => {
               setIsOpen(false);
-              if (event.type === "set" && date) onChange(toHHMM(date));
+              if (event.type === "set" && date) {
+                void Haptics.selectionAsync();
+                onChange(dateToTime(date));
+              }
             }}
           />
         )

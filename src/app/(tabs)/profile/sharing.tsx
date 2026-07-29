@@ -69,7 +69,11 @@ export default function SharingSettingsScreen() {
   const [followCode, setFollowCode] = useState("");
   const [followInput, setFollowInput] = useState("");
   const [followed, setFollowed] = useState<FollowedUser[]>([]);
+  // Scan validé de la semaine : condition d'existence du code équipe. Le code
+  // lui-même n'est PAS créé au chargement (voir handleShareTeamCode).
+  const [teamScanId, setTeamScanId] = useState<string | null>(null);
   const [teamCode, setTeamCode] = useState<string | null>(null);
+  const [isCreatingTeamCode, setIsCreatingTeamCode] = useState(false);
 
   const userId = session?.user.id;
   const isGuest = session?.user.is_anonymous ?? false;
@@ -88,7 +92,7 @@ export default function SharingSettingsScreen() {
     }
     listFollowed().then(setFollowed);
     if (!isGuest) {
-      // Code équipe : scan validé de la semaine → code affiché directement.
+      // Code équipe : scan validé de la semaine → le partage devient possible.
       const { data: scan } = await supabase
         .from("scans")
         .select("id")
@@ -98,10 +102,20 @@ export default function SharingSettingsScreen() {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ id: string }>();
+      setTeamScanId(scan?.id ?? null);
       if (scan?.id) {
-        createShare(scan.id)
-          .then(setTeamCode)
-          .catch(() => setTeamCode(null));
+        // LECTURE SEULE : on récupère un code déjà émis et encore libre.
+        // Générer ici insérait une ligne scan_shares à CHAQUE ouverture de
+        // l'écran ; la création est désormais liée à l'action de partage.
+        const { data: share } = await supabase
+          .from("scan_shares")
+          .select("invite_code")
+          .eq("scan_id", scan.id)
+          .is("invited_user_id", null)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle<{ invite_code: string }>();
+        setTeamCode(share?.invite_code ?? null);
       } else {
         setTeamCode(null);
       }
@@ -131,16 +145,39 @@ export default function SharingSettingsScreen() {
     }
   }
 
+  /**
+   * Partage du code équipe. Le code est créé ICI, à la demande — et seulement
+   * pour un compte premium : une génération à l'ouverture de l'écran remplissait
+   * la table de codes jamais transmis.
+   */
   async function handleShareTeamCode() {
-    if (!teamCode) return;
+    if (!teamScanId || isCreatingTeamCode) return;
+    // Plan re-vérifié au moment de l'action : il peut avoir changé depuis le
+    // chargement, et cette action écrit en base.
     if (!isPremiumPlan(await fetchPlan())) {
       showPremiumGate("Le partage de planning par code");
       return;
     }
+    let code = teamCode;
+    if (!code) {
+      setIsCreatingTeamCode(true);
+      try {
+        code = await createShare(teamScanId);
+        setTeamCode(code);
+      } catch {
+        Alert.alert(
+          "Code indisponible",
+          "Le code de la semaine n'a pas pu être créé. Réessaie dans un instant.",
+        );
+        return;
+      } finally {
+        setIsCreatingTeamCode(false);
+      }
+    }
     await Share.share({
       message:
         `Récupère tes horaires sur Clork sans re-scanner le planning ! ` +
-        `Ouvre l'app → Ajouter → « J'ai reçu un code » et saisis : ${teamCode.toUpperCase()}`,
+        `Ouvre l'app → Ajouter → « J'ai reçu un code » et saisis : ${code.toUpperCase()}`,
     });
   }
 
@@ -257,13 +294,16 @@ export default function SharingSettingsScreen() {
                 <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
                   Partage par code de la semaine scannée
                 </Text>
+                {/* En invité, la porte Premium mène au compte — écran sans
+                    offre ni champ de code tant qu'il n'y a pas de compte.
+                    On envoie donc directement à la création de compte. */}
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => showPremiumGate("Le partage de planning par code")}
+                  onPress={() => router.push("/upgrade" as Parameters<typeof router.push>[0])}
                   style={[styles.premiumBanner, { backgroundColor: colors.background }]}
                 >
                   <Text style={[styles.premiumBannerText, { color: colors.textSoft }]}>
-                    Le partage par code est une fonction Premium
+                    Le partage par code demande un compte, puis Premium
                   </Text>
                   <Text style={[styles.premiumBannerCta, { color: colors.accent }]}>Débloquer ›</Text>
                 </Pressable>
@@ -302,17 +342,31 @@ export default function SharingSettingsScreen() {
                     ? "Tes collègues récupèrent leurs horaires sans re-scanner"
                     : "Partage par code de la semaine scannée"}
                 </Text>
-                {teamCode ? (
+                {teamScanId ? (
                   isPremium ? (
                     <View style={[styles.teamRow, { backgroundColor: colors.background }]}>
-                      <Text style={[styles.teamCode, { color: colors.text }]}>
-                        {teamCode.toUpperCase()}
+                      {/* Sans code déjà émis, les tirets disent l'attente : il
+                          naîtra au partage, pas à l'ouverture de l'écran. */}
+                      <Text
+                        style={[
+                          styles.teamCode,
+                          { color: teamCode ? colors.text : colors.textDisabled },
+                        ]}
+                      >
+                        {teamCode ? teamCode.toUpperCase() : "· · · · · ·"}
                       </Text>
                       <Pressable
                         onPress={handleShareTeamCode}
+                        disabled={isCreatingTeamCode}
                         style={[styles.teamShare, { backgroundColor: colors.ink }]}
                       >
-                        <Text style={[styles.teamShareLabel, { color: colors.onInk }]}>Partager</Text>
+                        <Text style={[styles.teamShareLabel, { color: colors.onInk }]}>
+                          {isCreatingTeamCode
+                            ? "Création…"
+                            : teamCode
+                              ? "Partager"
+                              : "Créer & partager"}
+                        </Text>
                       </Pressable>
                     </View>
                   ) : (

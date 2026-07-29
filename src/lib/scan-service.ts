@@ -1,7 +1,7 @@
-// Pipeline du scan : compression → upload storage → extraction IA → helpers
-// de ciblage et de conversion vers les shifts.
+// Pipeline du scan : compression → extraction IA → helpers de ciblage et de
+// conversion vers les shifts. L'image part en base64 dans la requête de
+// l'Edge Function : rien n'est déposé dans Storage.
 
-import { decode } from "base64-arraybuffer";
 import * as ImageManipulator from "expo-image-manipulator";
 
 import type {
@@ -104,6 +104,9 @@ export async function prepareImage(
   return { base64: result.base64, width: result.width, height: result.height };
 }
 
+// `photo_path` reste vide : la photo n'est jamais déposée dans Storage
+// (l'Edge Function la reçoit en base64 et personne ne relit l'objet), ce qui
+// évite un upload de plusieurs Mo en 4G avant chaque extraction.
 export async function createScan(userId: string): Promise<string> {
   const { data, error } = await supabase
     .from("scans")
@@ -114,22 +117,6 @@ export async function createScan(userId: string): Promise<string> {
     throw new Error("Création du scan impossible : " + (error?.message ?? "?"));
   }
   return data.id;
-}
-
-export async function uploadScanPhoto(
-  userId: string,
-  scanId: string,
-  base64: string,
-): Promise<string> {
-  const path = `${userId}/${scanId}.jpg`;
-  const { error } = await supabase.storage
-    .from("scans")
-    .upload(path, decode(base64), { contentType: "image/jpeg", upsert: true });
-  if (error) {
-    throw new Error("Upload de la photo impossible : " + error.message);
-  }
-  await supabase.from("scans").update({ photo_path: path }).eq("id", scanId);
-  return path;
 }
 
 // Lance l'extraction côté serveur : la fonction répond 202 immédiatement et
@@ -471,11 +458,30 @@ function toTimestamp(date: string, time: string): string {
   return new Date(`${date}T${time}:00`).toISOString();
 }
 
+export type SaveShiftsResult = {
+  /** Créneaux réellement CRÉÉS — seuls ceux-là sont retirés par « Annuler l'import ». */
+  createdIds: string[];
+  /** Total écrit (créations + mises à jour) : ce que l'utilisatrice voit importé. */
+  writtenCount: number;
+};
+
+/**
+ * Écrit les créneaux d'un scan et réconcilie les jours validés.
+ *
+ * `reconciledDates` = les jours effectivement couverts par cette validation
+ * (pas toute la semaine : les jours mis de côté « à revoir » ne sont pas
+ * importés, on ne doit donc pas toucher à ce qu'ils contiennent déjà).
+ * Sur ces jours, un créneau issu d'un scan qui n'est plus dans le lot est
+ * SUPPRIMÉ — sans quoi un créneau retiré pendant la correction survivait à
+ * l'upsert. Les créneaux saisis à la main (source = 'manual') ne sont jamais
+ * touchés.
+ */
 export async function saveShifts(
   userId: string,
   drafts: DraftShift[],
   scanRowId: string | null,
-): Promise<string[]> {
+  reconciledDates: readonly string[],
+): Promise<SaveShiftsResult> {
   const rows = drafts
     .filter((d) => d.include)
     .map((d) => ({
@@ -492,18 +498,52 @@ export async function saveShifts(
       source: "scan" as const,
       is_edited: d.fromHandwriting,
     }));
-  if (rows.length === 0) return [];
 
-  // `select()` renvoie les lignes écrites : leurs IDs permettent d'annuler
-  // l'import en bloc juste après (« Annuler l'import »).
-  const { data, error } = await supabase
+  const dates = [...new Set(reconciledDates)];
+  if (dates.length === 0) return { createdIds: [], writtenCount: 0 };
+
+  // Photo de l'existant AVANT écriture : elle sert deux fois — distinguer les
+  // créations des simples mises à jour (l'upsert renvoie les deux) et repérer
+  // les créneaux de scan devenus obsolètes.
+  const { data: before, error: beforeError } = await supabase
     .from("shifts")
-    .upsert(rows, { onConflict: "user_id,date,start_at" })
-    .select("id");
-  if (error) {
-    throw new Error("Enregistrement des créneaux impossible : " + error.message);
+    .select("id, source")
+    .eq("user_id", userId)
+    .in("date", dates);
+  if (beforeError) {
+    throw new Error("Lecture du planning impossible : " + beforeError.message);
   }
-  return ((data as { id: string }[]) ?? []).map((row) => row.id);
+  const existing = (before ?? []) as { id: string; source: string }[];
+  const existingIds = new Set(existing.map((row) => row.id));
+  const existingScanIds = existing
+    .filter((row) => row.source === "scan")
+    .map((row) => row.id);
+
+  let writtenIds: string[] = [];
+  if (rows.length > 0) {
+    const { data, error } = await supabase
+      .from("shifts")
+      .upsert(rows, { onConflict: "user_id,date,start_at" })
+      .select("id");
+    if (error) {
+      throw new Error("Enregistrement des créneaux impossible : " + error.message);
+    }
+    writtenIds = ((data as { id: string }[]) ?? []).map((row) => row.id);
+  }
+
+  const written = new Set(writtenIds);
+  const staleIds = existingScanIds.filter((id) => !written.has(id));
+  if (staleIds.length > 0) {
+    const { error } = await supabase.from("shifts").delete().in("id", staleIds);
+    if (error) {
+      throw new Error("Mise à jour du planning impossible : " + error.message);
+    }
+  }
+
+  return {
+    createdIds: writtenIds.filter((id) => !existingIds.has(id)),
+    writtenCount: writtenIds.length,
+  };
 }
 
 /** Annule un import : supprime les créneaux fraîchement enregistrés. */

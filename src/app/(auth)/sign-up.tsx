@@ -98,10 +98,11 @@ export default function SignUpScreen() {
       setError(`Au moins ${MIN_PASSWORD_LENGTH} caractères.`);
       return;
     }
+    const trimmedEmail = email.trim();
     setIsSubmitting(true);
     setError(null);
     const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
+      email: trimmedEmail,
       password,
       // Le prénom saisi à l'étape 1 alimente le profil dès la création.
       options: { data: { display_name: firstName.trim() } },
@@ -111,14 +112,32 @@ export default function SignUpScreen() {
       Alert.alert("Inscription impossible", authErrorMessage(signUpError));
       return;
     }
-    // Compte neuf → l'accueil doit ouvrir « BIENVENUE 1/4 ». Drapeau posé ICI
-    // (et pas déduit d'un prénom vide : l'inscription le renseigne désormais).
-    await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, "1");
-    // Confirmation e-mail activée : pas de session tant que le code n'est pas
-    // validé → Étape 3 sur 3 (code à 6 chiffres).
-    if (!data.session) {
-      router.push({ pathname: "/verify-otp", params: { email: email.trim() } });
+    // Anti-énumération Supabase : si l'e-mail est déjà pris, l'API renvoie un
+    // utilisateur factice SANS erreur et SANS identité — aucun code ne partira.
+    // On renvoie donc vers la connexion au lieu de pousser un écran de code qui
+    // attendrait indéfiniment.
+    if (data.user && data.user.identities?.length === 0) {
+      router.dismissTo({
+        pathname: "/sign-in",
+        params: {
+          email: trimmedEmail,
+          notice: "Ce compte existe déjà — connecte-toi.",
+        },
+      });
+      return;
     }
+    // Le drapeau « compte neuf » (accueil → « BIENVENUE 1/4 ») n'est posé que
+    // lorsque le compte existe VRAIMENT : posé avant la validation du code, une
+    // inscription abandonnée le laissait traîner pour le compte suivant créé
+    // sur l'appareil.
+    if (data.session) {
+      // Confirmation e-mail désactivée : session immédiate, pas d'étape 3.
+      await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, "1");
+      return;
+    }
+    // Confirmation e-mail activée : pas de session tant que le code n'est pas
+    // validé → Étape 3 sur 3 (code à 6 chiffres), qui posera le drapeau.
+    router.push({ pathname: "/verify-otp", params: { email: trimmedEmail } });
   }
 
   return (

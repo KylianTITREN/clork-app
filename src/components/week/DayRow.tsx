@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 
+import { pressOpacity } from "@/components/ui/press";
 import {
   fonts,
   shiftTypeColor,
@@ -65,7 +66,7 @@ export function DayRow({
           opacity: isOff ? 0.65 : 1,
         },
         isTodo && [styles.cardTodo, { borderColor: colors.textDisabled }],
-        pressed && onPress ? styles.pressed : null,
+        pressed && onPress ? { opacity: pressOpacity.surface } : null,
         style,
       ]}
     >
@@ -129,9 +130,6 @@ const styles = StyleSheet.create({
   cardTodo: {
     borderStyle: "dashed",
     backgroundColor: "transparent",
-  },
-  pressed: {
-    opacity: 0.85,
   },
   dateSquare: {
     width: 48,

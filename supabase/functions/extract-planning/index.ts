@@ -21,6 +21,18 @@ declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 // ~8 MB of base64 ≈ 6 MB image, well above what the app sends after compression.
 const MAX_BASE64_LENGTH = 8_000_000;
 
+// Statuts qui consomment le quota : un scan raté ne doit JAMAIS en manger un
+// (sinon « reprends la photo » devient impossible pendant 30 jours).
+const QUOTA_STATUSES = ["extracted", "validated"];
+
+// Messages affichés tels quels dans l'app (waitForExtraction relaie
+// `error_message`) : ils doivent inviter à reprendre une photo, pas exposer la
+// cause technique — celle-ci part dans les logs.
+const UNUSABLE_MESSAGE =
+  "La photo n'est pas assez nette pour une lecture fiable. Rapproche-toi, évite les reflets et cadre tout le tableau, puis reprends la photo.";
+const FAILURE_MESSAGE =
+  "La lecture du planning a échoué. Reprends une photo bien cadrée et réessaie — ce scan ne t'a pas été décompté.";
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -107,60 +119,69 @@ async function processInBackground(
     const customTypes = await loadCustomShiftTypes(service, uploaderId);
     const result = await extractPlanning({ imageBase64, mediaType, apiKey, customTypes });
     const extraction: PlanningExtraction = result.data;
+    // Photo illisible = échec, pas un scan abouti : le statut `failed` le sort
+    // du décompte de quota et de la reprise de validation (findPendingValidation).
+    const isUnusable = extraction.photo_quality === "unusable";
 
     const { error: updateError } = await service
       .from("scans")
       .update({
-        status: "extracted",
+        status: isUnusable ? "failed" : "extracted",
         photo_quality: extraction.photo_quality,
         store_label: extraction.store_label,
         week_start: extraction.week_start,
         week_end: extraction.week_end,
         raw_extraction: extraction,
-        error_message: null,
+        error_message: isUnusable ? UNUSABLE_MESSAGE : null,
       })
       .eq("id", scanId);
     if (updateError) throw new Error("scan update failed: " + updateError.message);
 
-    const rows = extraction.employees.map((employee) => ({
-      scan_id: scanId,
-      employee_label: employee.name,
-      row_index: employee.row_index,
-      raw: employee,
-    }));
+    // Aucune ligne à écrire pour une photo illisible : l'extraction ne sera
+    // jamais validée, les lignes seraient du bruit.
+    const rows = isUnusable
+      ? []
+      : extraction.employees.map((employee) => ({
+          scan_id: scanId,
+          employee_label: employee.name,
+          row_index: employee.row_index,
+          raw: employee,
+        }));
     if (rows.length > 0) {
       const { error: rowsError } = await service.from("scan_rows").insert(rows);
       if (rowsError) throw new Error("scan_rows insert failed: " + rowsError.message);
     }
-    console.log(`scan ${scanId}: extracted ${rows.length} rows (${result.usage.output_tokens} tokens out)`);
+    console.log(
+      `scan ${scanId}: ${isUnusable ? "unusable photo" : `extracted ${rows.length} rows`} (${result.usage.output_tokens} tokens out)`,
+    );
     await sendPushNotification(
       service,
       uploaderId,
-      "Planning prêt ✅",
-      extraction.photo_quality === "unusable"
-        ? "La photo était illisible — reprends-la dans Clork."
+      isUnusable ? "Photo illisible 📷" : "Planning prêt ✅",
+      isUnusable
+        ? "La photo n'était pas assez nette — reprends-la dans Clork, ce scan ne t'a pas été décompté."
         : "Tes horaires sont extraits, ouvre Clork pour les valider.",
     );
   } catch (error) {
+    // Le détail technique reste dans les logs ; l'app affiche un message qui
+    // dit quoi faire (reprendre la photo).
     console.error(`scan ${scanId} failed:`, error);
     await service
       .from("scans")
-      .update({
-        status: "failed",
-        error_message:
-          error instanceof Error ? error.message.slice(0, 500) : "Extraction failed",
-      })
+      .update({ status: "failed", error_message: FAILURE_MESSAGE })
       .eq("id", scanId);
     await sendPushNotification(
       service,
       uploaderId,
       "Scan échoué",
-      "La lecture du planning a échoué — réessaie dans Clork.",
+      "La lecture du planning a échoué — reprends une photo dans Clork.",
     );
   } finally {
     // RGPD : la photo contient des données de tiers (noms + horaires des
     // collègues) et n'a plus aucune utilité une fois les horaires extraits
     // (on conserve le résultat structuré, pas l'image). Suppression immédiate.
+    // L'app n'uploade plus l'image (elle arrive en base64 dans la requête) :
+    // ce nettoyage ne sert plus qu'aux versions antérieures encore installées.
     try {
       await service.storage.from("scans").remove([`${uploaderId}/${scanId}.jpg`]);
     } catch (cleanupError) {
@@ -270,11 +291,14 @@ Deno.serve(async (req) => {
     const windowStart = new Date(
       Date.now() - quota.windowDays * 24 * 3600 * 1000,
     ).toISOString();
+    // Seuls les scans ABOUTIS comptent : une photo illisible ou une extraction
+    // en erreur laisse un scan `failed`, qui ne doit pas bloquer la reprise.
     const { count } = await service
       .from("scans")
       .select("id", { count: "exact", head: true })
       .eq("uploader_id", userData.user.id)
       .neq("id", scanId)
+      .in("status", QUOTA_STATUSES)
       .gte("created_at", windowStart);
     if ((count ?? 0) >= quota.max) {
       await service.from("scans").delete().eq("id", scanId);

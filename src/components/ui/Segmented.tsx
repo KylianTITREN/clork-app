@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 
+import { pressOpacity } from "@/components/ui/press";
 import { fonts, typeScale, useThemeColors } from "@/constants/tokens";
 
 // Segmented v2 (Aujourd'hui ⇄ Semaine, Moi/Léa/…) : rail #EBE9E2 r10,
@@ -35,7 +36,11 @@ export function Segmented<T extends string>({
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
             onPress={() => onChange(option.value)}
-            style={[styles.segment, isActive && { backgroundColor: activeBg }]}
+            style={({ pressed }) => [
+              styles.segment,
+              isActive && { backgroundColor: activeBg },
+              { opacity: pressed ? pressOpacity.control : 1 },
+            ]}
           >
             <Text
               style={[

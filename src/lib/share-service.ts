@@ -5,6 +5,19 @@ import type { PlanningExtraction } from "@/lib/extraction-types";
 import { supabase } from "@/lib/supabase";
 
 export async function createShare(scanId: string): Promise<string> {
+  // Idempotent : « Partage & suivi » et la vue Équipe appellent cette fonction
+  // à chaque ouverture. Tant qu'un code n'a pas été réclamé il reste valable,
+  // donc on le réutilise au lieu d'empiler une ligne de plus dans scan_shares.
+  const { data: pending } = await supabase
+    .from("scan_shares")
+    .select("invite_code")
+    .eq("scan_id", scanId)
+    .is("invited_user_id", null)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle<{ invite_code: string }>();
+  if (pending) return pending.invite_code;
+
   const { data, error } = await supabase
     .from("scan_shares")
     .insert({ scan_id: scanId })
@@ -51,13 +64,21 @@ export async function claimShare(code: string): Promise<ClaimedShare> {
   };
 }
 
-/** Mémorise la ligne choisie par l'invitée sur le partage. */
+/**
+ * Mémorise la ligne choisie par l'invitée sur le partage.
+ *
+ * Passe par une RPC verrouillée : l'UPDATE direct portait sur toute la ligne
+ * scan_shares, donc sur scan_id — de quoi s'attribuer le scan d'un tiers. La
+ * RPC ne touche que claimed_row_id, sur le partage de l'appelant, et vérifie
+ * que la ligne appartient au scan. Sans effet quand l'uploader valide son
+ * propre scan (il n'a pas de partage à son nom) : c'est le comportement voulu.
+ */
 export async function recordClaimedRow(scanId: string, scanRowId: string): Promise<void> {
-  const { data: user } = await supabase.auth.getUser();
-  if (!user.user) return;
-  await supabase
-    .from("scan_shares")
-    .update({ claimed_row_id: scanRowId })
-    .eq("scan_id", scanId)
-    .eq("invited_user_id", user.user.id);
+  const { error } = await supabase.rpc("record_claimed_row", {
+    p_scan_id: scanId,
+    p_row_id: scanRowId,
+  });
+  // Best-effort : le lien Équipe est un confort, il ne doit jamais faire
+  // échouer l'enregistrement des créneaux déjà écrits juste avant.
+  if (error) console.warn("recordClaimedRow failed:", error.message);
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { pressOpacity } from "@/components/ui/press";
 import { fonts, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 // Cadre des parcours par étapes v2 (wizard Ajouter, inscription) :
@@ -52,7 +53,15 @@ export function WizardFrame({
           accessibilityLabel={closeIcon === "close" ? "Fermer" : "Retour"}
           onPress={onClose}
           hitSlop={12}
-          style={[styles.closeButton, { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 11 }]}
+          style={({ pressed }) => [
+            styles.closeButton,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              borderRadius: 11,
+              opacity: pressed ? pressOpacity.control : 1,
+            },
+          ]}
         >
           <Ionicons
             name={closeIcon === "close" ? "close" : "chevron-back"}
@@ -80,7 +89,12 @@ export function WizardFrame({
           </Text>
         </View>
         {rightAction ? (
-          <Pressable onPress={rightAction.onPress} hitSlop={8}>
+          <Pressable
+            onPress={rightAction.onPress}
+            hitSlop={8}
+            accessibilityRole="button"
+            style={({ pressed }) => ({ opacity: pressed ? pressOpacity.control : 1 })}
+          >
             <Text style={[styles.rightLabel, { color: colors.textMuted }]}>
               {rightAction.label}
             </Text>

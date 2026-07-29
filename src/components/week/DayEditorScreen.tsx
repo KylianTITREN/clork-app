@@ -6,6 +6,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -22,6 +23,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
+import { pressOpacity } from "@/components/ui/press";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import {
@@ -35,7 +37,7 @@ import {
   type ShiftType,
 } from "@/constants/tokens";
 import { listCustomTypes, type CustomShiftType } from "@/lib/custom-types-service";
-import { mondayOf, weekLabel } from "@/lib/dates";
+import { dateToTime, mondayOf, timeToDate, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import type { Shift } from "@/lib/types";
 
@@ -115,21 +117,6 @@ function formatMinutes(minutes: number): string {
   return rest ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
 }
 
-function toPickerDate(value: string | null): Date {
-  const d = new Date();
-  if (value) {
-    const [h, m] = value.split(":").map(Number);
-    d.setHours(h || 9, m || 0, 0, 0);
-  } else {
-    d.setHours(9, 0, 0, 0);
-  }
-  return d;
-}
-
-function toHHMM(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
 function hydrateSlots(shifts: Shift[]): SlotDraft[] {
   const timed = shifts
     .filter((s) => s.start_at && s.end_at)
@@ -172,15 +159,18 @@ type TimeTapProps = {
 function TimeTap({ value, onChange, accessibilityLabel }: TimeTapProps) {
   const colors = useThemeColors();
   const [isOpen, setIsOpen] = useState(false);
-  const [draft, setDraft] = useState<Date>(() => toPickerDate(value));
+  // timeToDate/dateToTime partagés : la copie locale faisait `setHours(h || 9)`
+  // et remontait donc 00:30 à 09:30 (minuit est falsy).
+  const [draft, setDraft] = useState<Date>(() => timeToDate(value));
 
   function open() {
-    setDraft(toPickerDate(value));
+    setDraft(timeToDate(value));
     setIsOpen(true);
   }
 
   function confirm() {
-    onChange(toHHMM(draft));
+    void Haptics.selectionAsync();
+    onChange(dateToTime(draft));
     setIsOpen(false);
   }
 
@@ -191,6 +181,7 @@ function TimeTap({ value, onChange, accessibilityLabel }: TimeTapProps) {
         hitSlop={10}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
+        style={({ pressed }) => ({ opacity: pressed ? pressOpacity.surface : 1 })}
       >
         <Text style={[styles.timeTapValue, { color: value ? colors.text : colors.textDisabled }]}>
           {value ?? "--:--"}
@@ -225,7 +216,10 @@ function TimeTap({ value, onChange, accessibilityLabel }: TimeTapProps) {
             display="clock"
             onChange={(event, date) => {
               setIsOpen(false);
-              if (event.type === "set" && date) onChange(toHHMM(date));
+              if (event.type === "set" && date) {
+                void Haptics.selectionAsync();
+                onChange(dateToTime(date));
+              }
             }}
           />
         )
@@ -257,6 +251,7 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
   function commit() {
     const minutes = Math.round(Number(text));
     if (Number.isFinite(minutes) && minutes >= 0 && minutes <= MAX_CUSTOM_PAUSE_MINUTES) {
+      void Haptics.selectionAsync();
       onChange(minutes);
     }
     setIsEditing(false);
@@ -272,12 +267,17 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
               key={minutes}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              onPress={() => onChange(minutes)}
-              style={[
+              onPress={() => {
+                // Preset de pause : même retour tactile que les autres chips.
+                void Haptics.selectionAsync();
+                onChange(minutes);
+              }}
+              style={({ pressed }) => [
                 styles.chip,
                 selected
                   ? { backgroundColor: colors.ink, borderColor: colors.ink }
                   : { backgroundColor: colors.surface, borderColor: colors.border },
+                { opacity: pressed ? pressOpacity.control : 1 },
               ]}
             >
               <Text
@@ -299,10 +299,14 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
             onPress={openEditor}
             accessibilityRole="button"
             accessibilityState={{ selected: true }}
-            style={[
+            style={({ pressed }) => [
               styles.chip,
               styles.customChip,
-              { backgroundColor: colors.ink, borderColor: colors.ink },
+              {
+                backgroundColor: colors.ink,
+                borderColor: colors.ink,
+                opacity: pressed ? pressOpacity.control : 1,
+              },
             ]}
           >
             <Text style={[styles.chipLabel, styles.chipLabelSelected, { color: colors.onInk }]}>
@@ -315,7 +319,14 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
         <Pressable
           onPress={openEditor}
           accessibilityRole="button"
-          style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={({ pressed }) => [
+            styles.chip,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              opacity: pressed ? pressOpacity.control : 1,
+            },
+          ]}
         >
           <Text style={[styles.chipLabel, { color: colors.textSoft }]}>Autre…</Text>
         </Pressable>
@@ -344,7 +355,10 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
           <Pressable
             onPress={commit}
             accessibilityRole="button"
-            style={[styles.customOk, { backgroundColor: colors.ink }]}
+            style={({ pressed }) => [
+              styles.customOk,
+              { backgroundColor: colors.ink, opacity: pressed ? pressOpacity.control : 1 },
+            ]}
           >
             <Text style={[styles.customOkLabel, { color: colors.onInk }]}>OK</Text>
           </Pressable>
@@ -614,6 +628,8 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
       }
     }
     setIsSaving(false);
+    // La journée est écrite en base : validation confirmée au doigt.
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onClose(true);
   }
 
@@ -661,9 +677,13 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
               onPress={() => onClose(false)}
               accessibilityLabel="Retour"
               hitSlop={8}
-              style={[
+              style={({ pressed }) => [
                 styles.backButton,
-                { backgroundColor: colors.surface, borderColor: colors.border },
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                  opacity: pressed ? pressOpacity.control : 1,
+                },
               ]}
             >
               <Ionicons name="chevron-back" size={18} color={colors.text} />
@@ -724,7 +744,11 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
                         <Pressable
                           onPress={() => removeSlot(slot.key)}
                           hitSlop={10}
+                          accessibilityRole="button"
                           accessibilityLabel={`Supprimer le créneau ${index + 1}`}
+                          style={({ pressed }) => ({
+                            opacity: pressed ? pressOpacity.control : 1,
+                          })}
                         >
                           <Text style={[styles.slotDelete, { color: colors.danger }]}>
                             Supprimer
@@ -772,7 +796,10 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
               <Pressable
                 onPress={addSlot}
                 accessibilityRole="button"
-                style={[styles.addRow, { borderColor: colors.border }]}
+                style={({ pressed }) => [
+                  styles.addRow,
+                  { borderColor: colors.border, opacity: pressed ? pressOpacity.surface : 1 },
+                ]}
               >
                 <Text style={[styles.addRowLabel, { color: colors.textMuted }]}>
                   {`+ Ajouter un ${slots.length + 1}ᵉ créneau ce jour`}
@@ -798,7 +825,10 @@ export function DayEditorScreen({ date, shifts, userId, onClose }: DayEditorScre
               <Pressable
                 onPress={handleDeleteDay}
                 accessibilityRole="button"
-                style={styles.deleteDayButton}
+                style={({ pressed }) => [
+                  styles.deleteDayButton,
+                  { opacity: pressed ? pressOpacity.control : 1 },
+                ]}
               >
                 <Text style={[styles.deleteDayLabel, { color: colors.danger }]}>
                   Supprimer la journée
@@ -915,6 +945,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: 8,
     paddingHorizontal: 14,
+    // Cible tactile alignée sur les chips jumelles (ChoiceChips, TypeChipsRow) :
+    // le padding seul laissait ces chips-ci sous les 44pt.
+    minHeight: 44,
     justifyContent: "center",
   },
   chipLabel: {

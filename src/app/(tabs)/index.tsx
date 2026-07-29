@@ -43,7 +43,7 @@ import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { getReminderPrefs, rescheduleFromShifts } from "@/lib/reminder-service";
 import { findShiftMates, findTargetEmployee } from "@/lib/scan-service";
-import { addDays, addMinutesToTime, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
+import { addDays, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { refreshWidgetSnapshot } from "@/lib/widget-data";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
@@ -52,6 +52,8 @@ import { useAuth } from "@/providers/auth-provider";
 import { ONBOARDING_DONE_KEY, ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 
 const DAY_LABELS = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"] as const;
+// Lignes du squelette de chargement (« La suite » en montre 3).
+const SKELETON_DAYS = ["s1", "s2", "s3"] as const;
 const AVATAR_BUTTON_SIZE = 38;
 // Easter egg splash v2 (façon fantôme Snapchat) : seuil du tirage élastique
 // en haut de l'accueil, et seuil de réarmement du verrou en fin de geste.
@@ -108,6 +110,9 @@ export default function HomeScreen() {
   const [view, setView] = useState<"today" | "week">("today");
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [shifts, setShifts] = useState<Shift[]>([]);
+  // Premier chargement : sans lui l'accueil affiche « Repos — rien de prévu »
+  // avant l'arrivée des données (contenu faux à chaque ouverture).
+  const [isLoading, setIsLoading] = useState(true);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   // Écran plein « Édition d'un jour » : date + créneaux existants du jour.
   const [dayEditor, setDayEditor] = useState<{ date: string; shifts: Shift[] } | null>(null);
@@ -129,33 +134,35 @@ export default function HomeScreen() {
   const sunday = addDays(monday, 6);
   const todayIso = new Date().toISOString().slice(0, 10);
 
+  // Dépendances volontairement RÉDUITES à des valeurs stables (chaînes + objet
+  // `viewing`) : `followedList` est un NOUVEAU tableau à chaque `listFollowed()`,
+  // le garder ici recréait `loadShifts`, donc relançait l'effet de focus qui
+  // rappelle `listFollowed()` — boucle de rechargement infinie. Le rafraîchi
+  // des widgets vit désormais dans son seul effet dédié (plus bas).
   const loadShifts = useCallback(async () => {
     const targetId = viewing?.id ?? userId;
-    if (!targetId) return;
-    const { data } = await supabase
-      .from("shifts")
-      .select("*")
-      .eq("user_id", targetId)
-      .gte("date", monday)
-      .lte("date", sunday)
-      .order("date")
-      .order("start_at");
-    setShifts((data as Shift[]) ?? []);
-    // Rappels locaux : seulement sur MON planning de la semaine courante.
-    if (!viewing && monday === mondayOf(new Date())) {
-      void rescheduleFromShifts((data as Shift[]) ?? []);
+    if (!targetId) {
+      setIsLoading(false);
+      return;
     }
-    // Widgets : re-pousser l'instantané après CHAQUE (re)chargement — sinon une
-    // suppression/édition laisse des horaires fantômes sur l'écran d'accueil.
-    // L'instantané reste ancré au jour J + planning par défaut, jamais à la vue.
-    if (userId) {
-      const widgetTarget = followedList.find((f) => f.isDefaultView)?.id ?? userId;
-      void refreshWidgetSnapshot(widgetTarget, {
-        accent: colors.accent,
-        onAccent: colors.onAccent,
-      });
+    try {
+      const { data } = await supabase
+        .from("shifts")
+        .select("*")
+        .eq("user_id", targetId)
+        .gte("date", monday)
+        .lte("date", sunday)
+        .order("date")
+        .order("start_at");
+      setShifts((data as Shift[]) ?? []);
+      // Rappels locaux : seulement sur MON planning de la semaine courante.
+      if (!viewing && monday === mondayOf(new Date())) {
+        void rescheduleFromShifts((data as Shift[]) ?? []);
+      }
+    } finally {
+      setIsLoading(false);
     }
-  }, [userId, monday, sunday, viewing, followedList, colors.accent, colors.onAccent]);
+  }, [userId, monday, sunday, viewing]);
 
   const loadTeam = useCallback(async () => {
     if (!userId) {
@@ -197,6 +204,12 @@ export default function HomeScreen() {
       loadTeam();
       listFollowed().then((list) => {
         setFollowedList(list);
+        // Purge AVANT la vue par défaut : après un « ne plus suivre », le
+        // planning consulté n'existe plus dans la liste — sans ça l'accueil
+        // restait bloqué en lecture seule sur ce planning fantôme.
+        setViewing((current) =>
+          current && list.some((f) => f.id === current.id) ? current : null,
+        );
         // Vue par défaut (mode conjoint) : l'accueil s'ouvre sur ce planning
         // tant que l'utilisateur n'a pas changé de vue à la main.
         const defaultView = list.find((f) => f.isDefaultView) ?? null;
@@ -210,6 +223,9 @@ export default function HomeScreen() {
   // Widgets : instantané ancré sur le JOUR J (semaine réelle + suivante) et
   // sur le planning PAR DÉFAUT (le mien, ou le suivi choisi par défaut) —
   // indépendant de la semaine ou du planning consultés à l'écran.
+  // `defaultViewId` est une chaîne (identité stable même si `followedList`
+  // change d'objet) ; `shifts` déclenche le re-push après une modification de
+  // planning, puisque `loadShifts` ne pousse plus l'instantané lui-même.
   const defaultViewId = followedList.find((f) => f.isDefaultView)?.id ?? null;
   useEffect(() => {
     if (!userId) return;
@@ -217,7 +233,7 @@ export default function HomeScreen() {
       accent: colors.accent,
       onAccent: colors.onAccent,
     });
-  }, [userId, defaultViewId, colors.accent, colors.onAccent]);
+  }, [userId, defaultViewId, shifts, colors.accent, colors.onAccent]);
 
   const isGuest = session?.user.is_anonymous ?? false;
   // Horaires du magasin : « tu ouvres / tu fermes » sur le hero du jour.
@@ -304,7 +320,24 @@ export default function HomeScreen() {
     } as never);
   }
 
+  // Segment et flèches de semaine : petit retour haptique de sélection, comme
+  // le reste des bascules v2.
+  function changeView(next: "today" | "week") {
+    void Haptics.selectionAsync();
+    setView(next);
+    if (next === "week") setMonday(mondayOf(new Date()));
+  }
+
+  function shiftWeek(offsetDays: number) {
+    void Haptics.selectionAsync();
+    setMonday((current) => addDays(current, offsetDays));
+  }
+
   async function handleExport() {
+    // Mode conjoint : `shifts` contient le planning de la personne CONSULTÉE.
+    // L'exporter écrirait ses créneaux dans MON calendrier et effacerait mes
+    // propres événements de la semaine (le raccourci est aussi désactivé).
+    if (viewing) return;
     if (!isPremiumPlan(plan)) {
       showPremiumGate("L'export vers ton calendrier");
       return;
@@ -366,8 +399,6 @@ export default function HomeScreen() {
     return source.slice(0, 3);
   }, [days, todayIso]);
 
-  // Avatar = TOUJOURS moi (jamais la personne suivie) ; invité = pastille « ? ».
-  const initial = (displayName || "C").charAt(0).toUpperCase();
   // Raccourci épinglé : la vue par défaut si définie, sinon le premier suivi.
   const pinnedFollow = followedList.find((f) => f.isDefaultView) ?? followedList[0] ?? null;
 
@@ -429,15 +460,15 @@ export default function HomeScreen() {
           { value: "week", label: "Semaine" },
         ]}
         value={view}
-        onChange={(next) => {
-          setView(next);
-          if (next === "week") setMonday(mondayOf(new Date()));
-        }}
+        onChange={changeView}
       />
       <Pressable
         accessibilityLabel="Profil"
         onPress={() => router.navigate("/(tabs)/profile")}
-        style={isGuest ? [styles.avatar, { backgroundColor: colors.accent }] : null}
+        style={({ pressed }) => [
+          isGuest ? [styles.avatar, { backgroundColor: colors.accent }] : null,
+          pressed ? styles.pressed : null,
+        ]}
       >
         {isGuest ? (
           <Ionicons name="person-outline" size={18} color={colors.onAccent} />
@@ -467,27 +498,42 @@ export default function HomeScreen() {
           setViewing(null);
         }}
         hitSlop={8}
+        style={({ pressed }) => (pressed ? styles.pressed : null)}
       >
         <Text style={[styles.viewingBack, { color: colors.accentDeep }]}>Revenir à moi</Text>
       </Pressable>
     </View>
   ) : null;
 
+  // Export désactivé en mode conjoint, comme le CTA flottant : `shifts` est
+  // alors le planning consulté, pas le mien. Désactivé aussi tant que la
+  // semaine charge, sinon il répond « Rien à exporter » sur un état vide.
+  const isExportBlocked = isExporting || isLoading || !!viewing;
+
   const shortcuts = (
     <View style={styles.shortcutRow}>
       <Pressable
         onPress={openEquipe}
-        style={[styles.shortcut, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        style={({ pressed }) => [
+          styles.shortcut,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+          pressed ? styles.pressedSoft : null,
+        ]}
       >
         <Ionicons name="people-outline" size={18} color={colors.accent} />
         <Text style={[styles.shortcutLabel, { color: colors.textSoft }]}>Équipe</Text>
       </Pressable>
       <Pressable
         onPress={handleExport}
-        disabled={isExporting}
-        style={[
+        disabled={isExportBlocked}
+        accessibilityState={{ disabled: isExportBlocked }}
+        style={({ pressed }) => [
           styles.shortcut,
-          { backgroundColor: colors.surface, borderColor: colors.border, opacity: isExporting ? 0.5 : 1 },
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            opacity: isExportBlocked ? 0.45 : pressed ? 0.85 : 1,
+          },
         ]}
       >
         <Ionicons name="share-outline" size={18} color={colors.accent} />
@@ -499,11 +545,12 @@ export default function HomeScreen() {
             setHasChosenView(true);
             setViewing(viewing ? null : pinnedFollow);
           }}
-          style={[
+          style={({ pressed }) => [
             styles.shortcut,
             viewing
               ? { backgroundColor: colors.accentMuted, borderColor: colors.accent }
               : { backgroundColor: colors.surface, borderColor: colors.border },
+            pressed ? styles.pressedSoft : null,
           ]}
         >
           <Ionicons name="heart-outline" size={18} color={colors.accent} />
@@ -513,6 +560,29 @@ export default function HomeScreen() {
         </Pressable>
       ) : null}
     </View>
+  );
+
+  // Squelette du premier chargement (pas de spinner) : mêmes gabarits que le
+  // contenu réel — hero, carte rappel, titre de section et 3 lignes de jour.
+  const todaySkeleton = (
+    <>
+      <View style={styles.hero}>
+        <View style={[styles.skeletonKicker, { backgroundColor: colors.surfaceMuted }]} />
+        <View style={[styles.skeletonHeroTime, { backgroundColor: colors.surfaceMuted }]} />
+        <View style={styles.heroChips}>
+          <View style={[styles.skeletonChip, { backgroundColor: colors.surfaceMuted }]} />
+          <View style={[styles.skeletonChipSm, { backgroundColor: colors.surfaceMuted }]} />
+        </View>
+      </View>
+      <View style={[styles.skeletonReminder, { backgroundColor: colors.surfaceMuted }]} />
+      {shortcuts}
+      <View style={[styles.skeletonSectionTitle, { backgroundColor: colors.surfaceMuted }]} />
+      <View style={styles.dayList}>
+        {SKELETON_DAYS.map((key) => (
+          <View key={key} style={[styles.skeletonDayRow, { backgroundColor: colors.surfaceMuted }]} />
+        ))}
+      </View>
+    </>
   );
 
   return (
@@ -525,116 +595,126 @@ export default function HomeScreen() {
           {topBar}
           {viewingBanner}
 
-          {/* Hero du jour */}
-          <View style={styles.hero}>
-            <Text style={[styles.heroKicker, { color: colors.accent }]}>
-              {HERO_DAY_FORMATTER.format(new Date(`${todayIso}T12:00:00`)).toUpperCase()}
-            </Text>
-            {heroShift?.start_at && heroShift.end_at ? (
-              <>
-                <Text style={[styles.heroTime, { color: colors.text }]}>
-                  {toLocalTime(heroShift.start_at)} → {toLocalTime(heroShift.end_at)}
+          {isLoading ? (
+            todaySkeleton
+          ) : (
+            <>
+              {/* Hero du jour */}
+              <View style={styles.hero}>
+                <Text style={[styles.heroKicker, { color: colors.accent }]}>
+                  {HERO_DAY_FORMATTER.format(new Date(`${todayIso}T12:00:00`)).toUpperCase()}
                 </Text>
-                <View style={styles.heroChips}>
-                  <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
-                    <Text style={[styles.chipStrongText, { color: colors.accent }]}>
-                      {shiftTypeLabel[heroShift.type]}
-                      {heroShift.type === "work"
-                        ? ` · ${
-                            heroShift.period
-                              ? shiftPeriodLabels[heroShift.period]
-                              : shiftPeriodLabel(
-                                  toLocalTime(heroShift.start_at),
-                                  toLocalTime(heroShift.end_at),
-                                ) ?? ""
-                          }`
-                        : ""}
+                {heroShift?.start_at && heroShift.end_at ? (
+                  <>
+                    <Text style={[styles.heroTime, { color: colors.text }]}>
+                      {toLocalTime(heroShift.start_at)} → {toLocalTime(heroShift.end_at)}
                     </Text>
-                  </View>
-                  {heroShift.break_minutes > 0 ? (
-                    <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                      <Text style={[styles.chipText, { color: colors.textSoft }]}>
-                        Pause {formatBreak(heroShift.break_minutes)}
-                        {heroShift.break_start ? ` à ${toShortTime(heroShift.break_start)}` : ""}
-                      </Text>
+                    <View style={styles.heroChips}>
+                      <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                        <Text style={[styles.chipStrongText, { color: colors.accent }]}>
+                          {shiftTypeLabel[heroShift.type]}
+                          {heroShift.type === "work"
+                            ? ` · ${
+                                heroShift.period
+                                  ? shiftPeriodLabels[heroShift.period]
+                                  : shiftPeriodLabel(
+                                      toLocalTime(heroShift.start_at),
+                                      toLocalTime(heroShift.end_at),
+                                    ) ?? ""
+                              }`
+                            : ""}
+                        </Text>
+                      </View>
+                      {heroShift.break_minutes > 0 ? (
+                        <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                          <Text style={[styles.chipText, { color: colors.textSoft }]}>
+                            Pause {formatBreak(heroShift.break_minutes)}
+                            {heroShift.break_start ? ` à ${toShortTime(heroShift.break_start)}` : ""}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                        <Text style={[styles.chipText, { color: colors.textSoft }]}>
+                          {formatHours(paidHoursOf(heroShift))} payées
+                        </Text>
+                      </View>
+                      {/* Déduit des horaires du magasin (les mentions O/F du scan priment
+                          déjà via le type opening/closing du créneau). */}
+                      {storeHours.open && toLocalTime(heroShift.start_at) <= storeHours.open ? (
+                        <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                          <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu ouvres</Text>
+                        </View>
+                      ) : null}
+                      {storeHours.close && toLocalTime(heroShift.end_at) >= storeHours.close ? (
+                        <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
+                          <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu fermes</Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ) : null}
-                  <View style={[styles.chip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <Text style={[styles.chipText, { color: colors.textSoft }]}>
-                      {formatHours(paidHoursOf(heroShift))} payées
+                    {todayShifts.filter((s) => s.id !== heroShift.id && s.start_at && s.end_at)
+                      .map((s) => (
+                        <Text key={s.id} style={[styles.heroExtra, { color: colors.textSoft }]}>
+                          Puis {toLocalTime(s.start_at as string)} – {toLocalTime(s.end_at as string)} ·{" "}
+                          {shiftTypeLabel[s.type]}
+                        </Text>
+                      ))}
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.heroTime, { color: colors.text }]}>
+                      {heroStatus ? shiftTypeLabel[heroStatus.type] : "Repos"}
                     </Text>
-                  </View>
-                  {/* Déduit des horaires du magasin (les mentions O/F du scan priment
-                      déjà via le type opening/closing du créneau). */}
-                  {storeHours.open && toLocalTime(heroShift.start_at) <= storeHours.open ? (
-                    <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
-                      <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu ouvres</Text>
-                    </View>
-                  ) : null}
-                  {storeHours.close && toLocalTime(heroShift.end_at) >= storeHours.close ? (
-                    <View style={[styles.chipStrong, { backgroundColor: colors.accentMuted }]}>
-                      <Text style={[styles.chipStrongText, { color: colors.accent }]}>Tu fermes</Text>
-                    </View>
-                  ) : null}
+                    <Text style={[styles.heroExtra, { color: colors.textMuted }]}>
+                      {heroStatus && heroStatus.type !== "off"
+                        ? "Journée sans horaires précis."
+                        : "Rien de prévu aujourd'hui — profite."}
+                    </Text>
+                  </>
+                )}
+              </View>
+
+              {departure ? (
+                <View style={[styles.reminderCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={[styles.reminderDot, { backgroundColor: colors.accent }]} />
+                  <Text style={[styles.reminderText, { color: colors.textSoft }]}>{departure}</Text>
                 </View>
-                {todayShifts.filter((s) => s.id !== heroShift.id && s.start_at && s.end_at)
-                  .map((s) => (
-                    <Text key={s.id} style={[styles.heroExtra, { color: colors.textSoft }]}>
-                      Puis {toLocalTime(s.start_at as string)} – {toLocalTime(s.end_at as string)} ·{" "}
-                      {shiftTypeLabel[s.type]}
-                    </Text>
-                  ))}
-              </>
-            ) : (
-              <>
-                <Text style={[styles.heroTime, { color: colors.text }]}>
-                  {heroStatus ? shiftTypeLabel[heroStatus.type] : "Repos"}
-                </Text>
-                <Text style={[styles.heroExtra, { color: colors.textMuted }]}>
-                  {heroStatus && heroStatus.type !== "off"
-                    ? "Journée sans horaires précis."
-                    : "Rien de prévu aujourd'hui — profite."}
-                </Text>
-              </>
-            )}
-          </View>
+              ) : null}
 
-          {departure ? (
-            <View style={[styles.reminderCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.reminderDot, { backgroundColor: colors.accent }]} />
-              <Text style={[styles.reminderText, { color: colors.textSoft }]}>{departure}</Text>
-            </View>
-          ) : null}
+              {shortcuts}
 
-          {shortcuts}
-
-          {/* La suite */}
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>La suite</Text>
-            <Pressable onPress={() => setView("week")} hitSlop={8}>
-              <Text style={[styles.sectionMeta, { color: colors.accent }]}>
-                Semaine · {formatHours(weekHours)}
-              </Text>
-            </Pressable>
-          </View>
-          <View style={styles.dayList}>
-            {upcoming.map(({ date, shifts: dayShifts }) => (
-              <DayRow
-                key={date}
-                dayLabel={DAY_LABELS[days.findIndex((d) => d.date === date)]}
-                dayNumber={date.slice(8)}
-                slots={toDayRowSlots(dayShifts)}
-                status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
-                readOnly={!!viewing}
-                onPress={() => openDayEditor(date, dayShifts)}
-              />
-            ))}
-            {upcoming.length === 0 ? (
-              <Text style={[styles.emptyNote, { color: colors.textMuted }]}>
-                Fin de semaine — la suite arrive avec ton prochain planning.
-              </Text>
-            ) : null}
-          </View>
+              {/* La suite */}
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>La suite</Text>
+                <Pressable
+                  onPress={() => setView("week")}
+                  hitSlop={8}
+                  style={({ pressed }) => (pressed ? styles.pressed : null)}
+                >
+                  <Text style={[styles.sectionMeta, { color: colors.accent }]}>
+                    Semaine · {formatHours(weekHours)}
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.dayList}>
+                {upcoming.map(({ date, shifts: dayShifts }) => (
+                  <DayRow
+                    key={date}
+                    dayLabel={DAY_LABELS[days.findIndex((d) => d.date === date)]}
+                    dayNumber={date.slice(8)}
+                    slots={toDayRowSlots(dayShifts)}
+                    status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
+                    readOnly={!!viewing}
+                    onPress={() => openDayEditor(date, dayShifts)}
+                  />
+                ))}
+                {upcoming.length === 0 ? (
+                  <Text style={[styles.emptyNote, { color: colors.textMuted }]}>
+                    Fin de semaine — la suite arrive avec ton prochain planning.
+                  </Text>
+                ) : null}
+              </View>
+            </>
+          )}
         </Animated.ScrollView>
       ) : (
         <Animated.ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
@@ -645,12 +725,19 @@ export default function HomeScreen() {
           <View style={styles.weekNav}>
             <Pressable
               accessibilityLabel="Semaine précédente"
-              onPress={() => setMonday((c) => addDays(c, -7))}
-              style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => shiftWeek(-7)}
+              style={({ pressed }) => [
+                styles.navButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                pressed ? styles.pressedSoft : null,
+              ]}
             >
               <Ionicons name="chevron-back" size={20} color={colors.text} />
             </Pressable>
-            <Pressable onPress={() => setMonday(mondayOf(new Date()))} style={styles.weekNavCenter}>
+            <Pressable
+              onPress={() => setMonday(mondayOf(new Date()))}
+              style={({ pressed }) => [styles.weekNavCenter, pressed ? styles.pressed : null]}
+            >
               <Text style={[styles.weekNavLabel, { color: colors.text }]}>{weekLabel(monday)}</Text>
               <Text style={[styles.weekNavSub, { color: colors.textMuted }]}>
                 {monday === mondayOf(new Date())
@@ -662,8 +749,12 @@ export default function HomeScreen() {
             </Pressable>
             <Pressable
               accessibilityLabel="Semaine suivante"
-              onPress={() => setMonday((c) => addDays(c, 7))}
-              style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => shiftWeek(7)}
+              style={({ pressed }) => [
+                styles.navButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                pressed ? styles.pressedSoft : null,
+              ]}
             >
               <Ionicons name="chevron-forward" size={20} color={colors.text} />
             </Pressable>
@@ -725,7 +816,11 @@ export default function HomeScreen() {
                 <Pressable
                   key={date}
                   onPress={() => setExpandedDay(null)}
-                  style={[styles.expandedCard, { backgroundColor: colors.surface, borderColor: colors.accent }]}
+                  style={({ pressed }) => [
+                    styles.expandedCard,
+                    { backgroundColor: colors.surface, borderColor: colors.accent },
+                    pressed ? styles.pressedSoft : null,
+                  ]}
                 >
                   <View style={styles.expandedHeader}>
                     <View style={[styles.dateSquare, { backgroundColor: colors.background }]}>
@@ -785,7 +880,11 @@ export default function HomeScreen() {
                     {!viewing ? (
                       <Pressable
                         onPress={() => openDayEditor(date, dayShifts)}
-                        style={[styles.modifyButton, { backgroundColor: colors.ink }]}
+                        style={({ pressed }) => [
+                          styles.modifyButton,
+                          { backgroundColor: colors.ink },
+                          pressed ? styles.pressedSoft : null,
+                        ]}
                       >
                         <Text style={[styles.modifyLabel, { color: colors.onInk }]}>Modifier ce jour</Text>
                       </Pressable>
@@ -822,21 +921,28 @@ export default function HomeScreen() {
             { value: "week", label: "Semaine" },
           ]}
           value={view}
-          onChange={(next) => {
-            setView(next);
-            if (next === "week") setMonday(mondayOf(new Date()));
-          }}
+          onChange={changeView}
         />
         {view === "week" ? (
           // Maquette « hero replié » : la navigation de semaine reste disponible.
           <View style={styles.collapsedWeekNav}>
-            <Pressable onPress={() => setMonday((c) => addDays(c, -7))} hitSlop={10}>
+            <Pressable
+              accessibilityLabel="Semaine précédente"
+              onPress={() => shiftWeek(-7)}
+              hitSlop={10}
+              style={({ pressed }) => (pressed ? styles.pressed : null)}
+            >
               <Ionicons name="chevron-back" size={16} color={colors.text} />
             </Pressable>
             <Text style={[styles.collapsedWeekLabel, { color: colors.text }]} numberOfLines={1}>
               {weekLabel(monday)}
             </Text>
-            <Pressable onPress={() => setMonday((c) => addDays(c, 7))} hitSlop={10}>
+            <Pressable
+              accessibilityLabel="Semaine suivante"
+              onPress={() => shiftWeek(7)}
+              hitSlop={10}
+              style={({ pressed }) => (pressed ? styles.pressed : null)}
+            >
               <Ionicons name="chevron-forward" size={16} color={colors.text} />
             </Pressable>
             <Text style={[styles.collapsedTotal, { color: colors.accent }]}>
@@ -924,9 +1030,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarLetter: {
-    fontSize: typeScale.body,
-    fontFamily: fonts.bold,
+  // Retour de pression : marqué sur le texte/les icônes, plus discret sur les
+  // cartes et boutons pleins.
+  pressed: {
+    opacity: 0.7,
+  },
+  pressedSoft: {
+    opacity: 0.85,
   },
   viewingBanner: {
     flexDirection: "row",
@@ -987,6 +1097,43 @@ const styles = StyleSheet.create({
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
     marginTop: 2,
+  },
+  // Squelette : rectangles muets calés sur les hauteurs réelles (hero 44,
+  // carte rappel 46, ligne jour 70 = 48 + 10 de padding + bordures).
+  skeletonKicker: {
+    height: 12,
+    width: 150,
+    borderRadius: 6,
+  },
+  skeletonHeroTime: {
+    height: 44,
+    width: "72%",
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  skeletonChip: {
+    height: 26,
+    width: 104,
+    borderRadius: 8,
+  },
+  skeletonChipSm: {
+    height: 26,
+    width: 76,
+    borderRadius: 8,
+  },
+  skeletonReminder: {
+    height: 46,
+    borderRadius: radius.sm,
+  },
+  skeletonSectionTitle: {
+    height: 20,
+    width: 120,
+    borderRadius: 6,
+    marginTop: spacing.xs,
+  },
+  skeletonDayRow: {
+    height: 70,
+    borderRadius: 12,
   },
   reminderCard: {
     flexDirection: "row",

@@ -4,6 +4,7 @@
 // est incomplet + caption « Le bouton s'active quand les 6 chiffres sont
 // saisis. » ferrés en bas.
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
@@ -28,6 +29,7 @@ import {
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
+import { ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
 
@@ -58,10 +60,15 @@ export default function VerifyOtpScreen() {
     setIsVerifying(false);
     if (error) {
       Alert.alert("Code invalide", authErrorMessage(error));
+      return;
     }
-    // Succès : la session apparaît, le RootStack bascule sur (tabs) et
-    // l'accueil ouvre l'onboarding via ONBOARDING_PENDING_KEY — pas de
-    // navigation d'ici, elle serait avalée par le changement de pile.
+    // Le compte existe désormais pour de bon : c'est ICI qu'on marque
+    // « compte neuf » — posé à l'inscription, le drapeau survivait à un
+    // abandon et forçait l'onboarding du compte suivant sur l'appareil.
+    await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, "1");
+    // La session apparaît, le RootStack bascule sur (tabs) et l'accueil ouvre
+    // l'onboarding via ONBOARDING_PENDING_KEY — pas de navigation d'ici, elle
+    // serait avalée par le changement de pile.
   }
 
   async function handleResend() {
