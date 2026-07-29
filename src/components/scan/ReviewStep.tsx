@@ -1,5 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import type { WizardDay } from "@/components/scan/RecapStep";
@@ -7,23 +7,27 @@ import {
   fonts,
   letterSpacing,
   radius,
+  shiftTypeColor,
   shiftTypeLabel,
+  shiftTypeSoftColor,
   spacing,
   typeScale,
   useThemeColors,
 } from "@/constants/tokens";
 import type { DraftShift } from "@/lib/scan-service";
 
-// Correction card-by-card (maquette 4b, écran 3 « Vérifie tes jours ») :
-// dots des 7 jours (✓ validé, encre = en cours, vide = à venir), grande carte
-// du jour (horaire géant 32px, pause + payées, encart rature manuscrite),
-// boutons « Corriger » / « C'est bon ✓ », compteur « x validé · plus que y ».
+// Correction jour par jour (maquette 4b, écran 3 « Vérifie tes jours ») :
+// pastilles de progression (une par jour de la file), carte du jour (date
+// longue + badge type, bandeau horaire géant, pause / heures payées), deux
+// boutons « Corriger » et « C'est bon ✓ », encart rature manuscrite,
+// compteur « x validé · plus que y » avec coussin bas.
 
 const DAY_TITLE_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
   day: "numeric",
   month: "long",
 });
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", { weekday: "long" });
 
 type ReviewStepProps = {
   days: WizardDay[];
@@ -31,10 +35,12 @@ type ReviewStepProps = {
   queue: string[]; // dates à corriger, dans l'ordre
   queueIndex: number;
   onEditSlot: (draftIndex: number) => void;
-  /** Jour non lu : ouvre l'éditeur pour créer les horaires. */
+  /** Jour non lu : ouvre la correction sur un créneau vierge. */
   onFillDay: (date: string) => void;
   onApprove: () => void;
 };
+
+type Slot = { draft: DraftShift; index: number };
 
 function formatHours(value: number): string {
   return `${value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h`;
@@ -46,12 +52,39 @@ function formatBreak(minutes: number): string {
     : `${minutes} min`;
 }
 
-function paidOf(draft: DraftShift): number {
-  if (draft.durationHours != null) return draft.durationHours;
+function spanOf(draft: DraftShift): number {
   if (!draft.start || !draft.end) return 0;
   const [sh, sm] = draft.start.split(":").map(Number);
   const [eh, em] = draft.end.split(":").map(Number);
   return (eh * 60 + em - sh * 60 - sm) / 60;
+}
+
+function paidOf(draft: DraftShift): number {
+  return draft.durationHours ?? spanOf(draft);
+}
+
+/** Pause déduite (amplitude − durée payée), en minutes. */
+function pauseOf(draft: DraftShift): number {
+  return Math.max(0, Math.round((spanOf(draft) - paidOf(draft)) * 60));
+}
+
+/** « mercredi 29 juillet » → « Mercredi 29 Juillet » (capitalize maquette). */
+function capitalizeWords(value: string): string {
+  return value
+    .split(" ")
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(" ");
+}
+
+/** Pastilles M / V / M2 : initiale du jour, suffixée si l'initiale se répète. */
+function progressPills(queue: string[]): { date: string; label: string }[] {
+  const seen = new Map<string, number>();
+  return queue.map((date) => {
+    const letter = WEEKDAY_FORMATTER.format(new Date(`${date}T12:00:00`)).charAt(0).toUpperCase();
+    const occurrence = (seen.get(letter) ?? 0) + 1;
+    seen.set(letter, occurrence);
+    return { date, label: occurrence > 1 ? `${letter}${occurrence}` : letter };
+  });
 }
 
 export function ReviewStep({
@@ -64,44 +97,60 @@ export function ReviewStep({
   onApprove,
 }: ReviewStepProps) {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const currentDate = queue[queueIndex];
   const day = days.find((d) => d.date === currentDate);
   const validated = queueIndex;
   const remaining = queue.length - queueIndex;
-  const isTodo = day?.status === "todo" && (day?.draftIndexes.length ?? 0) === 0;
-  const mainDraft = day?.draftIndexes.map((i) => drafts[i]).find((d) => d?.start && d.end);
-  const hasHandwriting = day?.draftIndexes.some((i) => drafts[i]?.fromHandwriting) ?? false;
+  const pills = progressPills(queue);
+
+  const slots: Slot[] = day
+    ? day.draftIndexes
+        .map((i) => ({ draft: drafts[i], index: i }))
+        .filter((slot): slot is Slot => Boolean(slot.draft))
+    : [];
+  const timedSlots = slots.filter(({ draft }) => draft.start && draft.end);
+  // Cible du bouton « Corriger » : premier créneau horaire, sinon premier
+  // brouillon du jour, sinon création (jour non lu).
+  const primarySlot = timedSlots[0] ?? slots[0] ?? null;
+  const badgeType = primarySlot?.draft.type ?? null;
+  const hasHandwriting = slots.some(({ draft }) => draft.fromHandwriting);
 
   return (
     <View style={styles.flex}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.title, { color: colors.text }]}>Vérifie tes jours</Text>
-        <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-          Tes jours sélectionnés, un par un — corrige ou confirme.
-        </Text>
+        <View style={styles.titleBlock}>
+          <Text style={[styles.title, { color: colors.text }]}>Vérifie tes jours</Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            Tes jours sélectionnés, un par un — {queueIndex + 1} sur {queue.length}.
+          </Text>
+        </View>
 
-        {/* Dots des 7 jours */}
-        <View style={styles.dots}>
-          {days.map((d) => {
-            const posInQueue = queue.indexOf(d.date);
-            const inQueue = posInQueue !== -1;
-            const isDone = inQueue && posInQueue < queueIndex;
-            const isCurrent = inQueue && posInQueue === queueIndex;
+        {/* Pastilles de progression : faite = encre atténuée, courante = encre */}
+        <View style={styles.pillRow}>
+          {pills.map((pill, position) => {
+            const isDone = position < queueIndex;
+            const isCurrent = position === queueIndex;
             return (
               <View
-                key={d.date}
+                key={pill.date}
                 style={[
-                  styles.dot,
-                  isDone
-                    ? { backgroundColor: colors.success }
-                    : isCurrent
-                      ? { backgroundColor: colors.ink }
-                      : inQueue
-                        ? { borderWidth: 1.5, borderColor: colors.textDisabled }
-                        : { backgroundColor: colors.surfaceMuted },
+                  styles.pill,
+                  isDone || isCurrent
+                    ? { backgroundColor: colors.ink, borderColor: colors.ink, opacity: isDone ? 0.45 : 1 }
+                    : { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
               >
-                {isDone ? <Ionicons name="checkmark" size={11} color="#FFF" /> : null}
+                <Text
+                  style={[
+                    styles.pillLabel,
+                    isDone || isCurrent
+                      ? [styles.pillLabelActive, { color: colors.onInk }]
+                      : { color: colors.textDisabled },
+                  ]}
+                >
+                  {pill.label}
+                </Text>
               </View>
             );
           })}
@@ -110,93 +159,87 @@ export function ReviewStep({
         {day ? (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeader}>
-              <Text style={[styles.cardDate, { color: colors.text }]}>
-                {DAY_TITLE_FORMATTER.format(new Date(`${day.date}T12:00:00`))
-                  .replace(/^./, (c) => c.toUpperCase())}
+              <Text style={[styles.cardDate, { color: colors.text }]} numberOfLines={1}>
+                {capitalizeWords(DAY_TITLE_FORMATTER.format(new Date(`${day.date}T12:00:00`)))}
               </Text>
-              {mainDraft ? (
-                <View style={[styles.typeChip, { backgroundColor: colors.accentMuted }]}>
-                  <Text style={[styles.typeChipText, { color: colors.accent }]}>
-                    {shiftTypeLabel[mainDraft.type]}
+              {badgeType ? (
+                <View style={[styles.typeBadge, { backgroundColor: shiftTypeSoftColor[badgeType] }]}>
+                  <Text style={[styles.typeBadgeText, { color: shiftTypeColor[badgeType] }]}>
+                    {shiftTypeLabel[badgeType]}
                   </Text>
                 </View>
               ) : null}
             </View>
 
-            {isTodo ? (
-              <>
-                <Text style={[styles.todoTitle, { color: colors.textMuted }]}>
-                  Jour non lu sur la photo
-                </Text>
-                <Button label="Ajouter les horaires" onPress={() => onFillDay(day.date)} />
-              </>
-            ) : (
-              <>
-                {day.draftIndexes
-                  .map((i) => ({ draft: drafts[i], index: i }))
-                  .filter(({ draft }) => draft && draft.start && draft.end)
-                  .map(({ draft, index }) => (
-                    <View key={index} style={styles.slotBlock}>
-                      <Text style={[styles.bigTime, { color: colors.text }]}>
-                        {draft.start} → {draft.end}
+            {timedSlots.length > 0 ? (
+              timedSlots.map(({ draft, index }) => {
+                const pause = pauseOf(draft);
+                return (
+                  <View key={index} style={styles.slotBlock}>
+                    {/* Bandeau horaire géant — tappable pour corriger CE créneau */}
+                    <Pressable
+                      onPress={() => onEditSlot(index)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Corriger le créneau ${draft.start} ${draft.end}`}
+                      style={[styles.timeBand, { backgroundColor: colors.background }]}
+                    >
+                      <Text style={[styles.timeBandValue, { color: colors.text }]}>
+                        {draft.start}
                       </Text>
-                      <Text style={[styles.slotDetail, { color: colors.textSoft }]}>
-                        {(() => {
-                          const paid = paidOf(draft);
-                          const span =
-                            draft.start && draft.end
-                              ? (Number(draft.end.slice(0, 2)) * 60 +
-                                  Number(draft.end.slice(3)) -
-                                  Number(draft.start.slice(0, 2)) * 60 -
-                                  Number(draft.start.slice(3))) /
-                                60
-                              : 0;
-                          const pause = Math.round((span - paid) * 60);
-                          return `${pause > 0 ? `Pause ${formatBreak(pause)}${draft.breakStart ? ` à ${draft.breakStart}` : ""} · ` : ""}${formatHours(paid)} payées`;
-                        })()}
+                      <Text style={[styles.timeBandArrow, { color: colors.textDisabled }]}>→</Text>
+                      <Text style={[styles.timeBandValue, { color: colors.text }]}>{draft.end}</Text>
+                    </Pressable>
+                    <View style={styles.metaRow}>
+                      <Text style={[styles.metaLeft, { color: colors.textMuted }]}>
+                        {pause > 0
+                          ? `Pause : ${formatBreak(pause)}${draft.breakStart ? ` à ${draft.breakStart}` : ""}`
+                          : "Sans pause"}
                       </Text>
-                      <Button
-                        label="Corriger"
-                        variant="secondary"
-                        onPress={() => onEditSlot(index)}
-                      />
+                      <Text style={[styles.metaRight, { color: colors.accent }]}>
+                        {formatHours(paidOf(draft))} payées
+                      </Text>
                     </View>
-                  ))}
-                {day.draftIndexes.every((i) => !drafts[i]?.start) ? (
-                  <>
-                    <Text style={[styles.bigTime, { color: colors.text }]}>
-                      {drafts[day.draftIndexes[0] ?? -1]
-                        ? shiftTypeLabel[drafts[day.draftIndexes[0]].type]
-                        : "Repos"}
-                    </Text>
-                    <Button
-                      label="Changer"
-                      variant="secondary"
-                      onPress={() =>
-                        day.draftIndexes.length > 0
-                          ? onEditSlot(day.draftIndexes[0])
-                          : onFillDay(day.date)
-                      }
-                    />
-                  </>
-                ) : null}
-              </>
-            )}
-
-            {hasHandwriting ? (
-              <View style={[styles.handNote, { backgroundColor: colors.accentMuted }]}>
-                <View style={[styles.handDot, { backgroundColor: colors.accent }]} />
-                <Text style={[styles.handText, { color: colors.accentDeep }]}>
-                  Corrigé au stylo sur le planning — la version manuscrite est retenue.
+                  </View>
+                );
+              })
+            ) : (
+              <View style={[styles.timeBand, { backgroundColor: colors.background }]}>
+                <Text style={[styles.timeBandLabel, { color: colors.textMuted }]}>
+                  {primarySlot ? shiftTypeLabel[primarySlot.draft.type] : "Jour non lu"}
                 </Text>
               </View>
-            ) : null}
+            )}
+
+            {/* Deux boutons côte à côte, séparés du contenu par un filet */}
+            <View style={[styles.cardActions, { borderTopColor: colors.separator }]}>
+              <View style={styles.actionCorrect}>
+                <Button
+                  label="Corriger"
+                  variant="secondary"
+                  onPress={() =>
+                    primarySlot ? onEditSlot(primarySlot.index) : onFillDay(day.date)
+                  }
+                />
+              </View>
+              <View style={styles.actionApprove}>
+                <Button label="C'est bon ✓" onPress={onApprove} />
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {hasHandwriting ? (
+          <View style={[styles.handNote, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.handDot, { backgroundColor: colors.accent }]} />
+            <Text style={[styles.handText, { color: colors.textSoft }]}>
+              Corrigé au stylo sur le planning — la version manuscrite est retenue.
+            </Text>
           </View>
         ) : null}
       </ScrollView>
 
-      <View style={styles.actions}>
-        <Button label="C'est bon ✓" onPress={onApprove} />
+      {/* Coussin bas : le compteur ne colle plus au bord de l'écran */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Text style={[styles.counter, { color: colors.textMuted }]}>
           {validated} validé{validated > 1 ? "s" : ""} · plus que {remaining}
         </Text>
@@ -210,36 +253,47 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-    gap: spacing.sm,
+    gap: 14,
+  },
+  titleBlock: {
+    gap: 4,
+    marginTop: spacing.sm,
   },
   title: {
     fontSize: typeScale.title,
     fontFamily: fonts.bold,
     letterSpacing: letterSpacing.title,
-    marginTop: spacing.sm,
   },
   subtitle: {
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
   },
-  dots: {
+  pillRow: {
     flexDirection: "row",
-    gap: 8,
     justifyContent: "center",
-    marginVertical: spacing.sm,
+    flexWrap: "wrap",
+    gap: 7,
   },
-  dot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  pill: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  pillLabel: {
+    fontSize: 11.5,
+    fontFamily: fonts.semiBold,
+  },
+  pillLabelActive: {
+    fontFamily: fonts.bold,
   },
   card: {
     borderRadius: radius.lg,
     borderWidth: 1,
-    padding: spacing.md + 2,
-    gap: spacing.sm + 2,
+    padding: spacing.lg - 4,
+    gap: 14,
   },
   cardHeader: {
     flexDirection: "row",
@@ -249,60 +303,93 @@ const styles = StyleSheet.create({
   },
   cardDate: {
     flex: 1,
-    fontSize: typeScale.heading,
+    fontSize: 17,
     fontFamily: fonts.bold,
-    letterSpacing: letterSpacing.heading,
+    letterSpacing: -0.3,
   },
-  typeChip: {
+  typeBadge: {
     borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
-  typeChipText: {
+  typeBadgeText: {
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
   slotBlock: {
-    gap: 8,
+    gap: 14,
   },
-  bigTime: {
-    fontSize: 32,
+  timeBand: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    borderRadius: radius.sm,
+    paddingVertical: 18,
+  },
+  timeBandValue: {
+    fontSize: 28,
     fontFamily: fonts.bold,
-    letterSpacing: letterSpacing.title,
+    letterSpacing: -1,
   },
-  slotDetail: {
-    fontSize: typeScale.bodySm,
+  timeBandArrow: {
+    fontSize: 16,
     fontFamily: fonts.medium,
   },
-  todoTitle: {
-    fontSize: typeScale.bodySm,
+  timeBandLabel: {
+    fontSize: 22,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.5,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  metaLeft: {
+    fontSize: 13,
     fontFamily: fonts.medium,
   },
+  metaRight: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+  },
+  cardActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  actionCorrect: { flex: 1 },
+  actionApprove: { flex: 1.4 },
   handNote: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderRadius: 10,
-    padding: 10,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
   },
   handDot: {
-    width: 7,
-    height: 7,
+    width: 8,
+    height: 8,
     borderRadius: 4,
   },
   handText: {
     flex: 1,
     fontSize: typeScale.caption,
     fontFamily: fonts.medium,
+    lineHeight: 18,
   },
-  actions: {
+  footer: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: 8,
+    paddingTop: spacing.sm,
   },
   counter: {
     fontSize: typeScale.caption,
-    fontFamily: fonts.medium,
+    fontFamily: fonts.semiBold,
     textAlign: "center",
   },
 });

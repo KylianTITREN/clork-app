@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ScrollView, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -55,6 +56,7 @@ export function RecapStep({
   isSaving,
 }: RecapStepProps) {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const unreadCount = days.filter((d) => d.status === "todo").length;
   const checkedCount = checked.size;
   const validCount = days.filter(
@@ -88,6 +90,7 @@ export function RecapStep({
             .map((i) => drafts[i])
             .filter((d): d is DraftShift => !!d && d.start != null && d.end != null);
           const isOff = day.status === "off" && slots.length === 0;
+          const isRh = drafts[day.draftIndexes[0] ?? -1]?.type === "rh";
           return (
             <Pressable
               key={day.date}
@@ -95,30 +98,46 @@ export function RecapStep({
               style={[
                 styles.dayCard,
                 { backgroundColor: colors.surface, borderColor: colors.border },
-                isTodo && { borderColor: colors.shiftCp, borderStyle: "dashed", backgroundColor: "transparent" },
+                isTodo && { borderColor: colors.shiftCp, borderStyle: "dashed", borderWidth: 1.5 },
                 isChecked && !isTodo && { borderColor: colors.accent },
-                isOff && styles.dayCardOff,
+                isOff && !isRh && styles.dayCardOff,
               ]}
             >
-              <View style={[styles.dateSquare, { backgroundColor: colors.background }]}>
+              {/* Colonne date : « LUN » au-dessus du quantième, sans fond */}
+              <View style={styles.dateColumn}>
                 <Text style={[styles.dateDay, { color: colors.textMuted }]}>
                   {DAY_LABELS[day.index]}
                 </Text>
-                <Text style={[styles.dateNumber, { color: colors.text }]}>
-                  {day.date.slice(8)}
+                <Text
+                  style={[styles.dateNumber, { color: isOff ? colors.textSoft : colors.text }]}
+                >
+                  {Number(day.date.slice(8))}
                 </Text>
               </View>
               <View style={styles.dayBody}>
                 {isTodo ? (
                   <View style={styles.slotRow}>
-                    <Ionicons name="help-circle-outline" size={15} color={colors.shiftCp} />
+                    <View style={[styles.todoBadge, { backgroundColor: colors.shiftCpSoft }]}>
+                      <Text style={[styles.todoBadgeMark, { color: colors.shiftCp }]}>?</Text>
+                    </View>
                     <Text style={[styles.todoLabel, { color: colors.shiftCp }]}>À compléter</Text>
                   </View>
                 ) : slots.length === 0 ? (
                   <View style={styles.slotRow}>
-                    <View style={[styles.slotBar, { backgroundColor: "#C9C5B8" }]} />
-                    <Text style={[styles.offLabel, { color: colors.textMuted }]}>
-                      {drafts[day.draftIndexes[0] ?? -1]?.type === "rh" ? "RH" : "Repos"}
+                    <View
+                      style={[
+                        styles.slotBar,
+                        { backgroundColor: isRh ? colors.shiftRh : "#C9C5B8" },
+                      ]}
+                    />
+                    <Text
+                      style={
+                        isRh
+                          ? [styles.rhLabel, { color: colors.text }]
+                          : [styles.offLabel, { color: colors.textMuted }]
+                      }
+                    >
+                      {isRh ? "RH" : "Repos"}
                     </Text>
                   </View>
                 ) : (
@@ -158,15 +177,16 @@ export function RecapStep({
         </Text>
       </ScrollView>
 
-      <View style={styles.actions}>
+      {/* Coussin bas : les CTA ne collent plus au bord de l'écran */}
+      <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.lg }]}>
         {checkedCount === 0 ? (
           <Button label="Tout valider" onPress={onValidate} isLoading={isSaving} />
         ) : (
           <View style={styles.actionRow}>
-            <View style={styles.flex}>
+            <View style={styles.actionCorrect}>
               <Button label={`Corriger (${checkedCount})`} variant="dark" onPress={onCorrect} />
             </View>
-            <View style={styles.flex}>
+            <View style={styles.actionValidate}>
               <Button
                 label={`Valider (${validCount})`}
                 onPress={onValidate}
@@ -231,22 +251,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   dayCardOff: {
-    opacity: 0.65,
+    opacity: 0.6,
   },
-  dateSquare: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
+  dateColumn: {
+    width: 40,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 1,
   },
   dateDay: {
-    fontSize: 10,
+    fontSize: typeScale.tiny,
     fontFamily: fonts.semiBold,
   },
   dateNumber: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: fonts.bold,
   },
   dayBody: {
@@ -260,8 +276,23 @@ const styles = StyleSheet.create({
   },
   slotBar: {
     width: 3,
-    height: 14,
+    height: 22,
     borderRadius: 2,
+  },
+  todoBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  todoBadgeMark: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.bold,
+  },
+  rhLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
   },
   slotTime: {
     flex: 1,
@@ -281,25 +312,28 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
   },
   checkbox: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: 7,
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
   },
   footNote: {
-    fontSize: typeScale.tiny,
+    fontSize: 11.5,
     fontFamily: fonts.medium,
     textAlign: "center",
     marginTop: spacing.xs,
   },
   actions: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
   },
   actionRow: {
     flexDirection: "row",
     gap: spacing.sm,
   },
+  // Maquette : « Corriger (n) » un peu plus large que « Valider (n) ».
+  actionCorrect: { flex: 1.2 },
+  actionValidate: { flex: 1 },
 });

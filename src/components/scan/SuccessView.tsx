@@ -4,14 +4,7 @@ import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
-import {
-  fonts,
-  letterSpacing,
-  radius,
-  spacing,
-  typeScale,
-  useThemeColors,
-} from "@/constants/tokens";
+import { fonts, letterSpacing, spacing, typeScale, useThemeColors } from "@/constants/tokens";
 
 // Écran de succès du wizard (maquette 4b, dernier écran) : cercle ✓, confettis
 // DISCRETS (5 particules, une seule salve), haptique légère, stats, 4 actions.
@@ -101,10 +94,12 @@ export function SuccessView({
         </Animated.View>
       </View>
 
-      <Text style={[styles.title, { color: colors.text }]}>Semaine enregistrée !</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Semaine enregistrée</Text>
       <Text style={[styles.stats, { color: colors.textMuted }]}>
         {slotCount} créneau{slotCount > 1 ? "x" : ""} ajouté{slotCount > 1 ? "s" : ""} ·{" "}
-        {totalHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h payées
+        <Text style={[styles.statsHours, { color: colors.accent }]}>
+          {totalHours.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}h payées
+        </Text>
       </Text>
 
       <View style={styles.actions}>
@@ -123,6 +118,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.lg,
+    // Coussin bas : les actions ne collent jamais au bord de l'écran.
+    paddingBottom: spacing.lg,
     gap: spacing.sm,
   },
   heroBox: {
@@ -131,9 +128,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   checkCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: radius.pill,
+    width: 96,
+    height: 96,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -149,9 +146,12 @@ const styles = StyleSheet.create({
     letterSpacing: letterSpacing.title,
   },
   stats: {
-    fontSize: typeScale.bodySm,
+    fontSize: typeScale.body,
     fontFamily: fonts.medium,
     marginBottom: spacing.lg,
+  },
+  statsHours: {
+    fontFamily: fonts.bold,
   },
   actions: {
     alignSelf: "stretch",

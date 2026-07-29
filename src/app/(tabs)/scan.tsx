@@ -25,13 +25,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { RecapStep, type WizardDay } from "@/components/scan/RecapStep";
 import { ReviewStep } from "@/components/scan/ReviewStep";
+import { ScanCorrectionScreen } from "@/components/scan/ScanCorrectionScreen";
 import { SuccessView } from "@/components/scan/SuccessView";
-import { ShiftEditorModal, type EditorTarget } from "@/components/week/ShiftEditorModal";
 import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import { Button } from "@/components/ui/Button";
 import { TimePickerField } from "@/components/ui/TimePickerField";
@@ -484,6 +484,7 @@ function paidOf(draft: DraftShift): number {
 
 export default function AddWizardScreen() {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [state, setState] = useState<WizardState>({ step: "method" });
   const [isSaving, setIsSaving] = useState(false);
@@ -509,8 +510,13 @@ export default function AddWizardScreen() {
   // est ensuite ajusté à la main — même logique que ShiftEditorModal).
   const [manualPeriod, setManualPeriod] = useState<ShiftPeriod | null>(null);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
-  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  // Index du brouillon en cours de correction (écran plein « Corriger »).
+  const [correctionIndex, setCorrectionIndex] = useState<number | null>(null);
   const [pickWeekChoice, setPickWeekChoice] = useState<string>(mondayOf(new Date()));
+
+  // Coussin bas commun aux pieds d'écran du wizard (retour Kylian : les CTA
+  // ne doivent plus coller au bord de l'écran).
+  const footerPadding = { paddingBottom: insets.bottom + spacing.lg };
 
   const userId = session?.user.id;
   const plan = usePlan();
@@ -970,9 +976,9 @@ export default function AddWizardScreen() {
     );
   }
 
-  // --- Édition d'un jour (mode draft du ShiftEditorModal) --------------------
-  function editDraft(ctx: WizardContext, draftIndex: number) {
-    setEditorTarget({ mode: "draft", draft: ctx.drafts[draftIndex], index: draftIndex });
+  // --- Correction d'un créneau (écran plein « Corriger ») --------------------
+  function editDraft(draftIndex: number) {
+    setCorrectionIndex(draftIndex);
   }
 
   function fillTodoDay(ctx: WizardContext, date: string) {
@@ -997,7 +1003,7 @@ export default function AddWizardScreen() {
     const nextCtx = { ...ctx, drafts, days };
     if (state.step === "review") setState({ ...state, ctx: nextCtx });
     else if (state.step === "recap") setState({ step: "recap", ctx: nextCtx });
-    setEditorTarget({ mode: "draft", draft: blank, index: drafts.length - 1 });
+    setCorrectionIndex(drafts.length - 1);
   }
 
   function applyDraftEdit(index: number, next: DraftShift) {
@@ -1049,7 +1055,7 @@ export default function AddWizardScreen() {
     ];
     return (
       <WizardFrame step={2} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
-        <ScrollView contentContainerStyle={styles.stepContent}>
+        <ScrollView contentContainerStyle={[styles.stepContent, footerPadding]}>
           <Text style={[styles.stepTitle, { color: colors.text }]}>C'est pour quelle semaine ?</Text>
           <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
             Le planning n'imprime pas ses dates — choisis la semaine concernée.
@@ -1101,7 +1107,7 @@ export default function AddWizardScreen() {
   if (state.step === "pickTarget") {
     return (
       <WizardFrame step={2} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
-        <ScrollView contentContainerStyle={styles.stepContent}>
+        <ScrollView contentContainerStyle={[styles.stepContent, footerPadding]}>
           <Text style={[styles.stepTitle, { color: colors.text }]}>C'est quelle ligne, toi ?</Text>
           <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
             On n'a pas reconnu ton nom sur le planning — choisis ta ligne.
@@ -1134,6 +1140,14 @@ export default function AddWizardScreen() {
     const readHours = ctx.drafts
       .filter((d) => d.include && (d.type === "work" || d.type === "meeting" || d.type === "training"))
       .reduce((acc, d) => acc + paidOf(d), 0);
+    // Créneau en cours de correction + ce que le SCAN avait lu (badge repère) :
+    // un jour ajouté à la main n'a pas de ligne dans la baseline → pas de badge.
+    const correctedDraft = correctionIndex != null ? ctx.drafts[correctionIndex] : undefined;
+    const readSource = correctionIndex != null ? ctx.baseline[correctionIndex] : undefined;
+    const readTimes =
+      readSource?.start && readSource.end
+        ? { start: readSource.start, end: readSource.end }
+        : null;
     return (
       <WizardFrame
         step={2}
@@ -1176,7 +1190,7 @@ export default function AddWizardScreen() {
             drafts={ctx.drafts}
             queue={state.queue}
             queueIndex={state.queueIndex}
-            onEditSlot={(index) => editDraft(ctx, index)}
+            onEditSlot={editDraft}
             onFillDay={(date) => fillTodoDay(ctx, date)}
             onApprove={() => {
               if (state.queueIndex + 1 < state.queue.length) {
@@ -1188,13 +1202,17 @@ export default function AddWizardScreen() {
             }}
           />
         )}
-        {editorTarget ? (
-          <ShiftEditorModal
-            target={editorTarget}
-            onClose={() => setEditorTarget(null)}
-            onDraftSave={(index, next) => {
+        {/* Correction d'un créneau : plein écran maquette, plus de modale */}
+        {correctionIndex != null && correctedDraft ? (
+          <ScanCorrectionScreen
+            key={correctionIndex}
+            draft={correctedDraft}
+            index={correctionIndex}
+            readTimes={readTimes}
+            onCancel={() => setCorrectionIndex(null)}
+            onSave={(index, next) => {
               applyDraftEdit(index, next);
-              setEditorTarget(null);
+              setCorrectionIndex(null);
             }}
           />
         ) : null}
@@ -1224,7 +1242,7 @@ export default function AddWizardScreen() {
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
         <ScrollView
-          contentContainerStyle={[styles.stepContent, styles.stepContentFill]}
+          contentContainerStyle={[styles.stepContent, styles.stepContentFill, footerPadding]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -1373,7 +1391,10 @@ export default function AddWizardScreen() {
   if (state.step === "code") {
     return (
       <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
-        <ScrollView contentContainerStyle={styles.stepContent} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[styles.stepContent, footerPadding]}
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={[styles.stepTitle, { color: colors.text }]}>J'ai reçu un code</Text>
           <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
             Un·e collègue a déjà scanné le planning ? Récupère tes horaires sans re-scanner.
@@ -1407,7 +1428,7 @@ export default function AddWizardScreen() {
   return (
     <WizardFrame step={1} totalSteps={2} onClose={closeWizard}>
       <ScrollView
-        contentContainerStyle={[styles.stepContent, styles.stepContentFill]}
+        contentContainerStyle={[styles.stepContent, styles.stepContentFill, footerPadding]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={[styles.stepTitle, { color: colors.text }]}>
