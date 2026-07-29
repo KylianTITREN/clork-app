@@ -240,15 +240,17 @@ export default function HomeScreen() {
           open: data?.store_open_time?.slice(0, 5) ?? null,
           close: data?.store_close_time?.slice(0, 5) ?? null,
         });
-        // Compte neuf (drapeau posé à l'inscription) : onboarding 4 étapes,
-        // une seule fois. Le prénom vide reste un repli pour les comptes créés
-        // avant ce drapeau.
+        // Onboarding 4 étapes. Le drapeau « compte neuf » PRIME sur « déjà
+        // fait » : les deux vivent dans le stockage de l'appareil, donc un
+        // second compte sur le même téléphone doit quand même le voir.
         if (!isGuest) {
           const [done, pending] = await AsyncStorage.multiGet([
             ONBOARDING_DONE_KEY,
             ONBOARDING_PENDING_KEY,
           ]);
-          if (!done[1] && (pending[1] || name.trim() === "")) {
+          const isNewAccount = !!pending[1];
+          // Prénom vide : repli pour les comptes créés avant ce drapeau.
+          if (isNewAccount || (!done[1] && name.trim() === "")) {
             router.navigate("/(tabs)/onboarding" as never);
           }
         }
