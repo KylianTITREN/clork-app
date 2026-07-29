@@ -41,3 +41,27 @@ export function addMinutesToTime(time: string, minutes: number): string {
 export function toShortTime(time: string | null): string | null {
   return time ? time.slice(0, 5) : null;
 }
+
+/**
+ * "HH:MM" → Date d'aujourd'hui à cette heure, pour alimenter le picker natif.
+ * Le parse est EXPLICITE : les copies locales faisaient `setHours(h || 9)`,
+ * ce qui transformait silencieusement 00:xx en 09:xx (minuit est falsy).
+ */
+export function timeToDate(value: string | null | undefined, fallbackHour = 9): Date {
+  const date = new Date();
+  const [rawH, rawM] = (value ?? "").split(":");
+  const h = Number(rawH);
+  const m = Number(rawM);
+  date.setHours(
+    Number.isFinite(h) && h >= 0 && h <= 23 ? h : fallbackHour,
+    Number.isFinite(m) && m >= 0 && m <= 59 ? m : 0,
+    0,
+    0,
+  );
+  return date;
+}
+
+/** Date du picker natif → "HH:MM". */
+export function dateToTime(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
