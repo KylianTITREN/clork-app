@@ -16,10 +16,10 @@ import type { DraftShift } from "@/lib/scan-service";
 
 // Étape 2 du wizard — récap « Tout est bon ? » (maquette 4b, écran 2) :
 // barre sombre TOTAL LU, 7 lignes jour COCHABLES (cocher = à revoir ; le jour
-// non lu est coché d'office), pied contextuel :
+// non lu est coché d'office), pied contextuel — UN SEUL bouton pleine largeur :
 //   0 coché  → « Tout valider » en 1 tap
-//   m cochés → « Corriger (m) » + « Valider (n) » (n = jours sûrs, les cochés
-//              ne sont pas importés — on peut les corriger plus tard).
+//   m cochés → « Corriger (m) » seul (retour Kylian : tant qu'un jour est à
+//              revoir, on ne propose pas de valider à côté).
 
 export type WizardDay = {
   date: string; // YYYY-MM-DD
@@ -59,9 +59,6 @@ export function RecapStep({
   const insets = useSafeAreaInsets();
   const unreadCount = days.filter((d) => d.status === "todo").length;
   const checkedCount = checked.size;
-  const validCount = days.filter(
-    (d) => !checked.has(d.date) && d.draftIndexes.some((i) => drafts[i]?.include),
-  ).length;
 
   return (
     <View style={styles.flex}>
@@ -86,11 +83,13 @@ export function RecapStep({
         {days.map((day) => {
           const isChecked = checked.has(day.date);
           const isTodo = day.status === "todo";
-          const slots = day.draftIndexes
-            .map((i) => drafts[i])
-            .filter((d): d is DraftShift => !!d && d.start != null && d.end != null);
+          // Un créneau retiré à la correction (include:false) ne s'affiche plus.
+          const included = day.draftIndexes.map((i) => drafts[i]).filter((d) => !!d && d.include);
+          const slots = included.filter(
+            (d): d is DraftShift => d.start != null && d.end != null,
+          );
           const isOff = day.status === "off" && slots.length === 0;
-          const isRh = drafts[day.draftIndexes[0] ?? -1]?.type === "rh";
+          const isRh = included[0]?.type === "rh";
           return (
             <Pressable
               key={day.date}
@@ -173,7 +172,7 @@ export function RecapStep({
         <Text style={[styles.footNote, { color: colors.textMuted }]}>
           {checkedCount === 0
             ? "Tout est bon ? Valide d'un geste."
-            : `${checkedCount} sélectionné${checkedCount > 1 ? "s" : ""}${unreadCount > 0 ? " · le jour non lu est coché d'office" : ""}`}
+            : `${checkedCount} jour${checkedCount > 1 ? "s" : ""} à revoir${unreadCount > 0 ? " · le jour non lu est coché d'office" : ""}`}
         </Text>
       </ScrollView>
 
@@ -182,19 +181,7 @@ export function RecapStep({
         {checkedCount === 0 ? (
           <Button label="Tout valider" onPress={onValidate} isLoading={isSaving} />
         ) : (
-          <View style={styles.actionRow}>
-            <View style={styles.actionCorrect}>
-              <Button label={`Corriger (${checkedCount})`} variant="dark" onPress={onCorrect} />
-            </View>
-            <View style={styles.actionValidate}>
-              <Button
-                label={`Valider (${validCount})`}
-                onPress={onValidate}
-                isLoading={isSaving}
-                disabled={validCount === 0}
-              />
-            </View>
-          </View>
+          <Button label={`Corriger (${checkedCount})`} variant="dark" onPress={onCorrect} />
         )}
       </View>
     </View>
@@ -329,11 +316,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
-  actionRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  // Maquette : « Corriger (n) » un peu plus large que « Valider (n) ».
-  actionCorrect: { flex: 1.2 },
-  actionValidate: { flex: 1 },
 });

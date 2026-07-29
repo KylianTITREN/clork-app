@@ -510,8 +510,8 @@ export default function AddWizardScreen() {
   // est ensuite ajusté à la main — même logique que ShiftEditorModal).
   const [manualPeriod, setManualPeriod] = useState<ShiftPeriod | null>(null);
   const [scansLeft, setScansLeft] = useState<number | null>(null);
-  // Index du brouillon en cours de correction (écran plein « Corriger »).
-  const [correctionIndex, setCorrectionIndex] = useState<number | null>(null);
+  // Jour en cours de correction (écran plein « Corriger » — tous ses créneaux).
+  const [correctionDate, setCorrectionDate] = useState<string | null>(null);
   const [pickWeekChoice, setPickWeekChoice] = useState<string>(mondayOf(new Date()));
 
   // Coussin bas commun aux pieds d'écran du wizard (retour Kylian : les CTA
@@ -976,45 +976,32 @@ export default function AddWizardScreen() {
     );
   }
 
-  // --- Correction d'un créneau (écran plein « Corriger ») --------------------
-  function editDraft(draftIndex: number) {
-    setCorrectionIndex(draftIndex);
-  }
+  // --- Correction d'un jour (écran plein « Corriger ») -----------------------
 
-  function fillTodoDay(ctx: WizardContext, date: string) {
-    // Jour non lu : on crée un brouillon vide et on l'édite.
-    const blank: DraftShift = {
-      date,
-      type: "work",
-      start: "09:00",
-      end: "17:00",
-      durationHours: null,
-      breakStart: null,
-      period: null,
-      note: null,
-      fromHandwriting: false,
-      highlighted: false,
-      include: true,
-    };
-    const drafts = [...ctx.drafts, blank];
-    const days = ctx.days.map((d) =>
-      d.date === date ? { ...d, status: "work" as const, draftIndexes: [...d.draftIndexes, drafts.length - 1] } : d,
-    );
-    const nextCtx = { ...ctx, drafts, days };
-    if (state.step === "review") setState({ ...state, ctx: nextCtx });
-    else if (state.step === "recap") setState({ step: "recap", ctx: nextCtx });
-    setCorrectionIndex(drafts.length - 1);
-  }
-
-  function applyDraftEdit(index: number, next: DraftShift) {
+  /**
+   * Applique le lot renvoyé par l'écran de correction : les brouillons
+   * existants sont remplacés à leur index (l'alignement avec la baseline, donc
+   * le journal des corrections, est préservé), les créneaux ajoutés sont
+   * APPENDUS et rattachés au jour. Les créneaux retirés restent en place avec
+   * include:false — ils ne seront simplement pas enregistrés.
+   */
+  function applyDayEdits(date: string, edits: { index: number | null; draft: DraftShift }[]) {
     setState((current) => {
       if (current.step !== "recap" && current.step !== "review") return current;
-      const drafts = current.ctx.drafts.map((d, i) => (i === index ? next : d));
-      const days = current.ctx.days.map((day) =>
-        day.draftIndexes.includes(index) && next.include && next.start
-          ? { ...day, status: day.status === "todo" ? ("work" as const) : day.status }
-          : day,
+      const updated = current.ctx.drafts.map(
+        (draft, i) => edits.find((edit) => edit.index === i)?.draft ?? draft,
       );
+      const added = edits.filter((edit) => edit.index == null).map((edit) => edit.draft);
+      const drafts = [...updated, ...added];
+      const addedIndexes = added.map((_, position) => updated.length + position);
+      const days = current.ctx.days.map((day) => {
+        if (day.date !== date) return day;
+        const draftIndexes = [...day.draftIndexes, ...addedIndexes];
+        // Un jour est travaillé s'il garde au moins un créneau inclus horodaté ;
+        // sinon il retombe en repos (dernier créneau supprimé, jour vidé).
+        const isWorked = draftIndexes.some((i) => drafts[i]?.include && drafts[i]?.start);
+        return { ...day, draftIndexes, status: isWorked ? ("work" as const) : ("off" as const) };
+      });
       const ctx = { ...current.ctx, drafts, days };
       return current.step === "recap" ? { step: "recap", ctx } : { ...current, ctx };
     });
@@ -1140,10 +1127,19 @@ export default function AddWizardScreen() {
     const readHours = ctx.drafts
       .filter((d) => d.include && (d.type === "work" || d.type === "meeting" || d.type === "training"))
       .reduce((acc, d) => acc + paidOf(d), 0);
-    // Créneau en cours de correction + ce que le SCAN avait lu (badge repère) :
-    // un jour ajouté à la main n'a pas de ligne dans la baseline → pas de badge.
-    const correctedDraft = correctionIndex != null ? ctx.drafts[correctionIndex] : undefined;
-    const readSource = correctionIndex != null ? ctx.baseline[correctionIndex] : undefined;
+    // Jour en cours de correction : TOUS ses créneaux + ce que le SCAN avait lu
+    // (badge repère du 1ᵉʳ créneau lu ; un jour ajouté à la main n'en a pas).
+    const correctionDay = correctionDate
+      ? (ctx.days.find((d) => d.date === correctionDate) ?? null)
+      : null;
+    const correctionSlots = correctionDay
+      ? correctionDay.draftIndexes
+          .map((index) => ({ index, draft: ctx.drafts[index] }))
+          .filter((slot): slot is { index: number; draft: DraftShift } => Boolean(slot.draft))
+      : [];
+    const readSource = correctionDay?.draftIndexes
+      .map((index) => ctx.baseline[index])
+      .find((draft) => draft?.start && draft.end);
     const readTimes =
       readSource?.start && readSource.end
         ? { start: readSource.start, end: readSource.end }
@@ -1190,8 +1186,7 @@ export default function AddWizardScreen() {
             drafts={ctx.drafts}
             queue={state.queue}
             queueIndex={state.queueIndex}
-            onEditSlot={editDraft}
-            onFillDay={(date) => fillTodoDay(ctx, date)}
+            onEditDay={setCorrectionDate}
             onApprove={() => {
               if (state.queueIndex + 1 < state.queue.length) {
                 setState({ ...state, queueIndex: state.queueIndex + 1 });
@@ -1202,17 +1197,17 @@ export default function AddWizardScreen() {
             }}
           />
         )}
-        {/* Correction d'un créneau : plein écran maquette, plus de modale */}
-        {correctionIndex != null && correctedDraft ? (
+        {/* Correction d'un jour : plein écran maquette, plus de modale */}
+        {correctionDate ? (
           <ScanCorrectionScreen
-            key={correctionIndex}
-            draft={correctedDraft}
-            index={correctionIndex}
+            key={correctionDate}
+            date={correctionDate}
+            slots={correctionSlots}
             readTimes={readTimes}
-            onCancel={() => setCorrectionIndex(null)}
-            onSave={(index, next) => {
-              applyDraftEdit(index, next);
-              setCorrectionIndex(null);
+            onCancel={() => setCorrectionDate(null)}
+            onSave={(next) => {
+              applyDayEdits(correctionDate, next);
+              setCorrectionDate(null);
             }}
           />
         ) : null}

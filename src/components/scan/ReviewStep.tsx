@@ -34,9 +34,8 @@ type ReviewStepProps = {
   drafts: DraftShift[];
   queue: string[]; // dates à corriger, dans l'ordre
   queueIndex: number;
-  onEditSlot: (draftIndex: number) => void;
-  /** Jour non lu : ouvre la correction sur un créneau vierge. */
-  onFillDay: (date: string) => void;
+  /** Ouvre l'écran « Corriger » sur le JOUR (tous ses créneaux). */
+  onEditDay: (date: string) => void;
   onApprove: () => void;
 };
 
@@ -92,8 +91,7 @@ export function ReviewStep({
   drafts,
   queue,
   queueIndex,
-  onEditSlot,
-  onFillDay,
+  onEditDay,
   onApprove,
 }: ReviewStepProps) {
   const colors = useThemeColors();
@@ -109,12 +107,14 @@ export function ReviewStep({
         .map((i) => ({ draft: drafts[i], index: i }))
         .filter((slot): slot is Slot => Boolean(slot.draft))
     : [];
-  const timedSlots = slots.filter(({ draft }) => draft.start && draft.end);
-  // Cible du bouton « Corriger » : premier créneau horaire, sinon premier
-  // brouillon du jour, sinon création (jour non lu).
-  const primarySlot = timedSlots[0] ?? slots[0] ?? null;
-  const badgeType = primarySlot?.draft.type ?? null;
-  const hasHandwriting = slots.some(({ draft }) => draft.fromHandwriting);
+  // Un créneau retiré à la correction (include:false) ne s'affiche plus.
+  const includedSlots = slots.filter(({ draft }) => draft.include);
+  const timedSlots = includedSlots.filter(({ draft }) => draft.start && draft.end);
+  // Type mis en badge : celui du créneau retenu, « Repos » si le jour n'en
+  // garde aucun (repos lu, ou dernier créneau supprimé à la correction).
+  const primarySlot = timedSlots[0] ?? includedSlots[0] ?? null;
+  const badgeType = primarySlot?.draft.type ?? (slots.length > 0 ? "off" : null);
+  const hasHandwriting = includedSlots.some(({ draft }) => draft.fromHandwriting);
 
   return (
     <View style={styles.flex}>
@@ -176,9 +176,9 @@ export function ReviewStep({
                 const pause = pauseOf(draft);
                 return (
                   <View key={index} style={styles.slotBlock}>
-                    {/* Bandeau horaire géant — tappable pour corriger CE créneau */}
+                    {/* Bandeau horaire géant — tappable pour corriger le jour */}
                     <Pressable
-                      onPress={() => onEditSlot(index)}
+                      onPress={() => onEditDay(day.date)}
                       accessibilityRole="button"
                       accessibilityLabel={`Corriger le créneau ${draft.start} ${draft.end}`}
                       style={[styles.timeBand, { backgroundColor: colors.background }]}
@@ -205,7 +205,7 @@ export function ReviewStep({
             ) : (
               <View style={[styles.timeBand, { backgroundColor: colors.background }]}>
                 <Text style={[styles.timeBandLabel, { color: colors.textMuted }]}>
-                  {primarySlot ? shiftTypeLabel[primarySlot.draft.type] : "Jour non lu"}
+                  {badgeType ? shiftTypeLabel[badgeType] : "Jour non lu"}
                 </Text>
               </View>
             )}
@@ -213,13 +213,7 @@ export function ReviewStep({
             {/* Deux boutons côte à côte, séparés du contenu par un filet */}
             <View style={[styles.cardActions, { borderTopColor: colors.separator }]}>
               <View style={styles.actionCorrect}>
-                <Button
-                  label="Corriger"
-                  variant="secondary"
-                  onPress={() =>
-                    primarySlot ? onEditSlot(primarySlot.index) : onFillDay(day.date)
-                  }
-                />
+                <Button label="Corriger" variant="secondary" onPress={() => onEditDay(day.date)} />
               </View>
               <View style={styles.actionApprove}>
                 <Button label="C'est bon ✓" onPress={onApprove} />

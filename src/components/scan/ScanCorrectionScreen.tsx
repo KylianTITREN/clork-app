@@ -1,8 +1,9 @@
-// Écran plein « Corriger » (maquette 4b, 3ᵉ téléphone) — édition d'un créneau
-// PENDANT la validation d'un scan. Remplace l'ancienne modale d'édition
-// (retour Kylian : « quand je modifie un créneau ça me refait la popin »).
-// Modèle : DayEditorScreen — Modal plein écran, insets MANUELS (SafeAreaView
-// rend 0 dans un Modal RN), pied avec coussin bas.
+// Écran plein « Corriger » (maquette 4b, 3ᵉ téléphone) — édition de TOUS les
+// créneaux d'un jour PENDANT la validation d'un scan. Remplace l'ancienne
+// modale d'édition (retour Kylian : « quand je modifie un créneau ça me refait
+// la popin »). Modèle : DayEditorScreen — type appliqué à la journée, une carte
+// par créneau, ajout / suppression de créneau, total payé du jour. Insets
+// MANUELS (SafeAreaView rend 0 dans un Modal RN), pied avec coussin bas.
 
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -26,10 +27,12 @@ const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", {
 });
 
 // Types proposés (maquette : Travail / Repos / CP / Formation / Réunion). Un
-// type déjà porté par le créneau mais absent de la liste y est ajouté.
+// type déjà porté par le jour mais absent de la liste y est ajouté.
 const CORRECTION_TYPES: readonly ShiftType[] = ["work", "off", "cp", "training", "meeting"];
 // Types « avec horaires » : masquent horaires, créneaux types, pause et total.
 const TIMED_TYPES: readonly ShiftType[] = ["work", "training", "meeting", "overtime"];
+// Même garde-fou que l'éditeur de jour de la vue semaine.
+const MAX_SLOTS = 3;
 
 // Libellés courts de la maquette (« CP » plutôt que « Congé payé »).
 const TYPE_CHIP_LABEL: Partial<Record<ShiftType, string>> = { cp: "CP" };
@@ -114,7 +117,8 @@ function TimeCard({ label, value, isActive, onFocus, onChange }: TimeCardProps) 
         style={[
           styles.timeCard,
           {
-            backgroundColor: colors.surface,
+            // Fond du jour : la carte de créneau qui l'entoure est en surface.
+            backgroundColor: colors.background,
             borderColor: isActive ? colors.accent : colors.border,
           },
         ]}
@@ -216,7 +220,7 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
                 styles.chip,
                 selected
                   ? { backgroundColor: colors.ink, borderColor: colors.ink }
-                  : { backgroundColor: colors.surface, borderColor: colors.border },
+                  : { backgroundColor: colors.background, borderColor: colors.border },
               ]}
             >
               <Text
@@ -241,7 +245,7 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
             styles.chip,
             isCustomValue
               ? [styles.customChip, { backgroundColor: colors.ink, borderColor: colors.ink }]
-              : { backgroundColor: colors.surface, borderColor: colors.border },
+              : { backgroundColor: colors.background, borderColor: colors.border },
           ]}
         >
           <Text
@@ -270,7 +274,7 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
             onSubmitEditing={commit}
             style={[
               styles.customInput,
-              { backgroundColor: colors.background, borderColor: colors.border, color: colors.text },
+              { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
             ]}
           />
           <Text style={[styles.customUnit, { color: colors.textMuted }]}>min</Text>
@@ -287,36 +291,125 @@ function PauseChips({ value, onChange }: PauseChipsProps) {
   );
 }
 
+// --- Créneaux en cours d'édition ----------------------------------------------
+
+/** Créneau du jour tel qu'il vit dans la liste de brouillons du wizard. */
+export type CorrectionSlot = {
+  /** Index du brouillon dans `ctx.drafts` — renvoyé tel quel à la sauvegarde. */
+  index: number;
+  draft: DraftShift;
+};
+
+type EditSlot = {
+  /** Clé de rendu stable (les positions bougent quand on supprime). */
+  key: string;
+  /** Index du brouillon d'origine, null = créneau ajouté ici. */
+  index: number | null;
+  /** Brouillon d'origine : garde note, rature manuscrite, surlignage. */
+  base: DraftShift | null;
+  start: string | null; // "HH:MM"
+  end: string | null;
+  pauseMinutes: number;
+  pauseStart: string | null;
+  period: ShiftPeriod | null;
+  /** Ajouté via « + Ajouter un créneau » : en-tête accent. */
+  isNew: boolean;
+};
+
+let slotKeyCounter = 0;
+function nextSlotKey(): string {
+  slotKeyCounter += 1;
+  return `correction-slot-${slotKeyCounter}`;
+}
+
+function blankSlot(index: number | null, base: DraftShift | null, isNew: boolean): EditSlot {
+  return {
+    key: nextSlotKey(),
+    index,
+    base,
+    start: null,
+    end: null,
+    pauseMinutes: 0,
+    pauseStart: null,
+    period: null,
+    isNew,
+  };
+}
+
+/** Brouillon vierge d'un créneau ajouté (type posé à l'enregistrement). */
+function blankDraft(date: string): DraftShift {
+  return {
+    date,
+    type: "work",
+    start: null,
+    end: null,
+    durationHours: null,
+    breakStart: null,
+    period: null,
+    note: null,
+    fromHandwriting: false,
+    highlighted: false,
+    include: true,
+  };
+}
+
+/**
+ * Une carte par créneau horodaté retenu. Sans créneau horodaté (repos, jour non
+ * lu, créneaux déjà retirés), une carte vierge greffée sur le PREMIER brouillon
+ * du jour : passer le jour en « Travail » réutilise cette ligne au lieu d'en
+ * créer une seconde (l'alignement du journal de corrections est préservé).
+ */
+function hydrateSlots(slots: CorrectionSlot[]): EditSlot[] {
+  const timed = slots.filter(({ draft }) => draft.include && draft.start && draft.end);
+  if (timed.length > 0) {
+    return timed.map(({ index, draft }) => ({
+      key: nextSlotKey(),
+      index,
+      base: draft,
+      start: draft.start,
+      end: draft.end,
+      pauseMinutes: breakMinutes(draft),
+      pauseStart: draft.breakStart,
+      period: draft.period,
+      isNew: false,
+    }));
+  }
+  const fallback = slots[0] ?? null;
+  return [blankSlot(fallback?.index ?? null, fallback?.draft ?? null, false)];
+}
+
 // --- Écran ---------------------------------------------------------------------
 
 export type ScanCorrectionScreenProps = {
-  /** Créneau en cours de correction (brouillon du scan, jamais écrit en base). */
-  draft: DraftShift;
-  /** Index du brouillon dans la liste du wizard — renvoyé tel quel à la sauvegarde. */
-  index: number;
-  /** Horaires LUS par le scan : badge repère, absent si le scan n'a rien lu. */
-  readTimes: { start: string; end: string } | null;
+  /** Jour corrigé (YYYY-MM-DD) — l'écran édite TOUS ses créneaux. */
+  date: string;
+  /** Créneaux du jour (brouillons du scan, jamais écrits en base). */
+  slots: CorrectionSlot[];
+  /** Horaires LUS par le scan (1ᵉʳ créneau lu) : badge repère, null si rien lu. */
+  readTimes?: { start: string; end: string } | null;
   onCancel: () => void;
-  onSave: (index: number, next: DraftShift) => void;
+  /** Lot à appliquer — index null = créneau AJOUTÉ, include:false = retiré. */
+  onSave: (next: { index: number | null; draft: DraftShift }[]) => void;
 };
 
 export function ScanCorrectionScreen({
-  draft,
-  index,
-  readTimes,
+  date,
+  slots,
+  readTimes = null,
   onCancel,
   onSave,
 }: ScanCorrectionScreenProps) {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
 
-  const [type, setType] = useState<ShiftType>(draft.type);
-  const [start, setStart] = useState<string | null>(draft.start);
-  const [end, setEnd] = useState<string | null>(draft.end);
-  const [pauseMinutes, setPauseMinutes] = useState<number>(() => breakMinutes(draft));
-  const [pauseStart, setPauseStart] = useState<string | null>(draft.breakStart);
-  const [period, setPeriod] = useState<ShiftPeriod | null>(draft.period);
-  const [activeEdge, setActiveEdge] = useState<"start" | "end">("start");
+  // null = types d'origine conservés (un créneau réunion lu dans les notes ne
+  // devient pas « Travail » parce qu'on a corrigé les horaires du jour).
+  const [typeChoice, setTypeChoice] = useState<ShiftType | null>(null);
+  const [editSlots, setEditSlots] = useState<EditSlot[]>(() => hydrateSlots(slots));
+  // Créneaux retirés : marqués include:false à l'enregistrement, jamais
+  // supprimés de la liste du wizard (alignement du journal de corrections).
+  const [removedSlots, setRemovedSlots] = useState<EditSlot[]>([]);
+  const [activeEdge, setActiveEdge] = useState<{ key: string; edge: "start" | "end" } | null>(null);
   const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
 
   // Créneaux types de l'utilisateur — un tap remplit début, fin, pause et type.
@@ -330,63 +423,159 @@ export function ScanCorrectionScreen({
     };
   }, []);
 
-  const isTimed = TIMED_TYPES.includes(type);
+  // Type du jour : celui du créneau retenu le plus représentatif, sauf choix
+  // explicite dans les chips (qui s'applique alors à toute la journée).
+  const primaryType = useMemo<ShiftType>(() => {
+    const included = slots.filter(({ draft }) => draft.include);
+    const timed = included.find(({ draft }) => draft.start && draft.end);
+    if (timed) return timed.draft.type;
+    if (included.length > 0) return included[0].draft.type;
+    // Aucun créneau retenu : jour de repos (lu comme tel, ou vidé ici même).
+    // Jour totalement absent du planning : on part sur Travail à remplir.
+    return slots.length > 0 ? "off" : "work";
+  }, [slots]);
+  const dayType = typeChoice ?? primaryType;
+  const isTimed = TIMED_TYPES.includes(dayType);
 
   // Un type hors liste (porté par le scan ou par un créneau type) reste
   // représentable : il est ajouté à la suite des chips standards.
   const typeOptions = useMemo(() => {
-    const extras = [draft.type, type].filter(
+    const extras = [primaryType, dayType].filter(
       (candidate, position, all) =>
         !CORRECTION_TYPES.includes(candidate) && all.indexOf(candidate) === position,
     );
     return extras.length > 0 ? [...CORRECTION_TYPES, ...extras] : CORRECTION_TYPES;
-  }, [draft.type, type]);
+  }, [primaryType, dayType]);
 
   const timedPresets = useMemo(
     () => presets.filter((preset) => presetHasTimes(preset)).slice(0, MAX_PRESET_CHIPS),
     [presets],
   );
 
+  // Total payé du jour : somme des créneaux valides, pauses déduites.
   const paidHours = useMemo(() => {
-    if (!isTimed || !start || !end || end <= start) return 0;
-    return Math.max(0, hoursBetween(start, end) - pauseMinutes / 60);
-  }, [isTimed, start, end, pauseMinutes]);
+    if (!isTimed) return 0;
+    return editSlots.reduce((total, slot) => {
+      if (!slot.start || !slot.end || slot.end <= slot.start) return total;
+      return total + Math.max(0, hoursBetween(slot.start, slot.end) - slot.pauseMinutes / 60);
+    }, 0);
+  }, [isTimed, editSlots]);
 
-  const rawTitle = DAY_FORMATTER.format(new Date(`${draft.date}T12:00:00`));
+  const rawTitle = DAY_FORMATTER.format(new Date(`${date}T12:00:00`));
 
-  function applyPreset(preset: ShiftPreset) {
-    setType(preset.type);
-    setStart(preset.start);
-    setEnd(preset.end);
-    setPauseMinutes(preset.breakMinutes);
-    setPeriod(preset.period ?? null);
+  function updateSlot(key: string, patch: Partial<EditSlot>) {
+    setEditSlots((current) => current.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  }
+
+  function applyPreset(key: string, preset: ShiftPreset) {
+    setTypeChoice(preset.type);
+    updateSlot(key, {
+      start: preset.start,
+      end: preset.end,
+      pauseMinutes: preset.breakMinutes,
+      period: preset.period ?? null,
+    });
+  }
+
+  function addSlot() {
+    setEditSlots((current) =>
+      current.length >= MAX_SLOTS ? current : [...current, blankSlot(null, null, true)],
+    );
+  }
+
+  function removeSlot(slot: EditSlot) {
+    setEditSlots((current) => current.filter((s) => s.key !== slot.key));
+    // Un créneau ajouté puis retiré n'a jamais existé : rien à marquer.
+    if (slot.index != null && slot.base) {
+      setRemovedSlots((current) => [...current, slot]);
+    }
+  }
+
+  function confirmRemoveSlot(slot: EditSlot, position: number) {
+    const isLast = editSlots.length === 1;
+    Alert.alert(
+      "Supprimer ce créneau ?",
+      isLast
+        ? "Ce jour ne sera pas enregistré comme travaillé — il passera en jour de repos."
+        : `Le créneau ${position + 1} ne sera pas enregistré.`,
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Supprimer", style: "destructive", onPress: () => removeSlot(slot) },
+      ],
+    );
+  }
+
+  /** Type appliqué à un créneau : choix explicite, sinon type d'origine. */
+  function slotType(base: DraftShift | null): ShiftType {
+    return typeChoice ?? base?.type ?? "work";
   }
 
   function handleSave() {
+    const next: { index: number | null; draft: DraftShift }[] = [];
+    // Créneaux retirés : conservés dans la liste, simplement non enregistrés.
+    for (const removed of removedSlots) {
+      if (removed.index == null || !removed.base) continue;
+      next.push({ index: removed.index, draft: { ...removed.base, include: false } });
+    }
+
     if (isTimed) {
-      if (!start || !end) {
-        Alert.alert("Horaires manquants", "Choisis l'heure de début et de fin.");
-        return;
+      for (let i = 0; i < editSlots.length; i++) {
+        const slot = editSlots[i];
+        if (!slot.start || !slot.end) {
+          Alert.alert("Horaires manquants", `Choisis le début et la fin du créneau ${i + 1}.`);
+          return;
+        }
+        if (slot.end <= slot.start) {
+          Alert.alert("Horaire invalide", `La fin du créneau ${i + 1} doit être après son début.`);
+          return;
+        }
       }
-      if (end <= start) {
-        Alert.alert("Horaire invalide", "La fin doit être après le début.");
-        return;
+      for (const slot of editSlots) {
+        const base = slot.base ?? blankDraft(date);
+        const start = slot.start as string;
+        const end = slot.end as string;
+        // Le brouillon encode la pause via durationHours (amplitude − pause) :
+        // même convention que le reste du pipeline de validation du scan.
+        next.push({
+          index: slot.index,
+          draft: {
+            ...base,
+            date,
+            type: slotType(slot.base),
+            start,
+            end,
+            durationHours: Math.max(0, hoursBetween(start, end) - slot.pauseMinutes / 60),
+            breakStart: slot.pauseMinutes > 0 ? slot.pauseStart : null,
+            period: slot.period,
+            include: true, // corriger un créneau = vouloir le garder
+          },
+        });
+      }
+    } else if (editSlots.length > 0) {
+      // Journée sans horaires (Repos, CP…) : une seule ligne, le reste sort.
+      const [first, ...rest] = editSlots;
+      const base = first.base ?? blankDraft(date);
+      next.push({
+        index: first.index,
+        draft: {
+          ...base,
+          date,
+          type: dayType,
+          start: null,
+          end: null,
+          durationHours: null,
+          breakStart: null,
+          period: null,
+          include: true,
+        },
+      });
+      for (const slot of rest) {
+        if (slot.index == null || !slot.base) continue;
+        next.push({ index: slot.index, draft: { ...slot.base, include: false } });
       }
     }
-    // Le brouillon encode la pause via durationHours (amplitude − pause) :
-    // même convention que le reste du pipeline de validation du scan.
-    const next: DraftShift = {
-      ...draft,
-      type,
-      start: isTimed ? start : null,
-      end: isTimed ? end : null,
-      durationHours:
-        isTimed && start && end ? Math.max(0, hoursBetween(start, end) - pauseMinutes / 60) : null,
-      breakStart: isTimed && pauseMinutes > 0 ? pauseStart : null,
-      period: isTimed ? period : null,
-      include: true, // corriger un jour = vouloir le garder
-    };
-    onSave(index, next);
+
+    onSave(next);
   }
 
   return (
@@ -443,13 +632,13 @@ export function ScanCorrectionScreen({
               </Text>
               <View style={styles.chipsRow}>
                 {typeOptions.map((option) => {
-                  const selected = option === type;
+                  const selected = option === dayType;
                   return (
                     <Pressable
                       key={option}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
-                      onPress={() => setType(option)}
+                      onPress={() => setTypeChoice(option)}
                       style={[
                         styles.chip,
                         selected
@@ -476,77 +665,123 @@ export function ScanCorrectionScreen({
 
             {isTimed ? (
               <>
-                {/* Horaires : cartes DÉBUT → FIN + créneaux types en un tap */}
-                <View>
-                  <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Horaires</Text>
-                  <View style={styles.timeRow}>
-                    <TimeCard
-                      label="Début"
-                      value={start}
-                      isActive={activeEdge === "start"}
-                      onFocus={() => setActiveEdge("start")}
-                      onChange={setStart}
-                    />
-                    <Text style={[styles.timeArrow, { color: colors.textDisabled }]}>→</Text>
-                    <TimeCard
-                      label="Fin"
-                      value={end}
-                      isActive={activeEdge === "end"}
-                      onFocus={() => setActiveEdge("end")}
-                      onChange={setEnd}
-                    />
-                  </View>
-
-                  {timedPresets.length > 0 ? (
-                    <>
-                      <View style={styles.presetRow}>
-                        {timedPresets.map((preset) => (
-                          <Pressable
-                            key={preset.id}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Créneau type ${preset.start} à ${preset.end}`}
-                            onPress={() => applyPreset(preset)}
-                            style={[
-                              styles.presetChip,
-                              { backgroundColor: colors.surface, borderColor: colors.border },
-                            ]}
-                          >
-                            <Text
-                              numberOfLines={1}
-                              style={[styles.presetChipLabel, { color: colors.text }]}
-                            >
-                              {preset.start}–{preset.end}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <Text style={[styles.presetCaption, { color: colors.textMuted }]}>
-                        tes créneaux types — un tap pour remplir
+                {/* Une carte par créneau : horaires, créneaux types, pause */}
+                {editSlots.map((slot, position) => (
+                  <View
+                    key={slot.key}
+                    style={[
+                      styles.slotCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: slot.isNew ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.slotHeader}>
+                      <Text style={[styles.cardLabel, { color: colors.textMuted }]}>
+                        {editSlots.length > 1 ? `Créneau ${position + 1}` : "Horaires"}
+                        {slot.isNew ? (
+                          <Text style={{ color: colors.accent }}> — nouveau</Text>
+                        ) : null}
                       </Text>
-                    </>
-                  ) : null}
-                </View>
+                      {/* Suppression discrète : le créneau ne sera pas enregistré */}
+                      <Pressable
+                        onPress={() => confirmRemoveSlot(slot, position)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Supprimer le créneau ${position + 1}`}
+                        hitSlop={10}
+                        style={styles.slotDelete}
+                      >
+                        <Ionicons name="trash-outline" size={13} color={colors.danger} />
+                        <Text style={[styles.slotDeleteLabel, { color: colors.danger }]}>
+                          Supprimer
+                        </Text>
+                      </Pressable>
+                    </View>
 
-                {/* Durée de pause + heure de prise */}
-                <View>
-                  <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-                    Durée de pause
-                  </Text>
-                  <PauseChips value={pauseMinutes} onChange={setPauseMinutes} />
-                  {pauseMinutes > 0 ? (
-                    <View style={styles.pauseStartRow}>
+                    <View style={styles.timeRow}>
+                      <TimeCard
+                        label="Début"
+                        value={slot.start}
+                        isActive={activeEdge?.key === slot.key && activeEdge.edge === "start"}
+                        onFocus={() => setActiveEdge({ key: slot.key, edge: "start" })}
+                        onChange={(value) => updateSlot(slot.key, { start: value })}
+                      />
+                      <Text style={[styles.timeArrow, { color: colors.textDisabled }]}>→</Text>
+                      <TimeCard
+                        label="Fin"
+                        value={slot.end}
+                        isActive={activeEdge?.key === slot.key && activeEdge.edge === "end"}
+                        onFocus={() => setActiveEdge({ key: slot.key, edge: "end" })}
+                        onChange={(value) => updateSlot(slot.key, { end: value })}
+                      />
+                    </View>
+
+                    {timedPresets.length > 0 ? (
+                      <View>
+                        <View style={styles.presetRow}>
+                          {timedPresets.map((preset) => (
+                            <Pressable
+                              key={preset.id}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Créneau type ${preset.start} à ${preset.end}`}
+                              onPress={() => applyPreset(slot.key, preset)}
+                              style={[
+                                styles.presetChip,
+                                { backgroundColor: colors.background, borderColor: colors.border },
+                              ]}
+                            >
+                              <Text
+                                numberOfLines={1}
+                                style={[styles.presetChipLabel, { color: colors.text }]}
+                              >
+                                {preset.start}–{preset.end}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        {position === 0 ? (
+                          <Text style={[styles.presetCaption, { color: colors.textMuted }]}>
+                            tes créneaux types — un tap pour remplir
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+
+                    {/* Durée de pause + heure de prise */}
+                    <Text style={[styles.cardLabel, { color: colors.textMuted }]}>
+                      Durée de pause
+                    </Text>
+                    <PauseChips
+                      value={slot.pauseMinutes}
+                      onChange={(minutes) => updateSlot(slot.key, { pauseMinutes: minutes })}
+                    />
+                    {slot.pauseMinutes > 0 ? (
                       <TimePickerField
-                        value={pauseStart}
-                        onChange={setPauseStart}
+                        value={slot.pauseStart}
+                        onChange={(value) => updateSlot(slot.key, { pauseStart: value })}
                         placeholder="12:30"
                         label="Débute à"
                         variant="row"
                       />
-                    </View>
-                  ) : null}
-                </View>
+                    ) : null}
+                  </View>
+                ))}
 
-                {/* Total payé live : amplitude − pause */}
+                {/* Deuxième créneau du jour : réunion, coupure, renfort… */}
+                {editSlots.length < MAX_SLOTS ? (
+                  <Pressable
+                    onPress={addSlot}
+                    accessibilityRole="button"
+                    style={[styles.addRow, { borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.addRowLabel, { color: colors.textMuted }]}>
+                      + Ajouter un créneau
+                    </Text>
+                  </Pressable>
+                ) : null}
+
+                {/* Total payé live du jour : amplitudes − pauses */}
                 <View style={[styles.totalBar, { backgroundColor: colors.accentMuted }]}>
                   <Text style={[styles.totalLabel, { color: colors.textSoft }]}>Total payé</Text>
                   <Text style={[styles.totalValue, { color: colors.accent }]}>
@@ -560,11 +795,7 @@ export function ScanCorrectionScreen({
           {/* Pied : coussin bas = insets.bottom + spacing.lg */}
           <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
             <Button label="Enregistrer ✓" onPress={handleSave} />
-            <Pressable
-              onPress={onCancel}
-              accessibilityRole="button"
-              style={styles.cancelButton}
-            >
+            <Pressable onPress={onCancel} accessibilityRole="button" style={styles.cancelButton}>
               <Text style={[styles.cancelLabel, { color: colors.textMuted }]}>Annuler</Text>
             </Pressable>
           </View>
@@ -624,6 +855,34 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: spacing.sm,
   },
+  // Libellé de section À L'INTÉRIEUR d'une carte (l'espacement vient du gap).
+  cardLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.bold,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  slotCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 12,
+  },
+  slotHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  slotDelete: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  slotDeleteLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
   chipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -681,7 +940,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    marginTop: spacing.sm,
   },
   presetChip: {
     flexGrow: 1,
@@ -704,11 +962,19 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 6,
   },
+  addRow: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  addRowLabel: {
+    fontSize: typeScale.bodySm,
+    fontFamily: fonts.semiBold,
+  },
   pauseBlock: {
     gap: spacing.sm,
-  },
-  pauseStartRow: {
-    marginTop: spacing.sm,
   },
   customRow: {
     flexDirection: "row",
