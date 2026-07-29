@@ -54,6 +54,7 @@ import {
   applyWeekStart,
   createScan,
   diffDrafts,
+  discardScan,
   fetchScanRowIds,
   findPendingValidation,
   findTargetEmployee,
@@ -657,6 +658,34 @@ export default function AddWizardScreen() {
     } catch (error) {
       Alert.alert("Reprise impossible", error instanceof Error ? error.message : "Erreur inconnue");
     }
+  }
+
+  /** Jeter un scan raté (illisible, mauvaise semaine) sans le valider. */
+  function discardPendingScan(pending: PendingScan) {
+    Alert.alert(
+      "Supprimer ce scan ?",
+      "L'extraction sera jetée. Ton planning n'est pas touché — tu pourras rescanner.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: async () => {
+            const previous = pending;
+            setPendingScan(null);
+            try {
+              await discardScan(pending.id);
+            } catch (error) {
+              setPendingScan(previous);
+              Alert.alert(
+                "Suppression impossible",
+                error instanceof Error ? error.message : "Erreur inconnue",
+              );
+            }
+          },
+        },
+      ],
+    );
   }
 
   // --- Capture / import ------------------------------------------------------
@@ -1403,6 +1432,20 @@ export default function AddWizardScreen() {
                 reprends la validation.
               </Text>
             </View>
+            {/* Extraction ratée : la jeter sans la valider (rien n'est encore
+                écrit dans le planning à ce stade). */}
+            <Pressable
+              onPress={() => discardPendingScan(pendingScan)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Supprimer ce scan"
+              style={({ pressed }) => [
+                styles.pendingDiscard,
+                { borderColor: colors.accentDeep, opacity: pressed ? 0.55 : 0.75 },
+              ]}
+            >
+              <Ionicons name="trash-outline" size={15} color={colors.accentDeep} />
+            </Pressable>
             <Ionicons name="chevron-forward" size={18} color={colors.accentDeep} />
           </Pressable>
         ) : null}
@@ -1502,6 +1545,14 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   pendingText: { flex: 1, gap: 1 },
+  pendingDiscard: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pendingTitle: {
     fontSize: typeScale.bodySm,
     fontFamily: fonts.bold,

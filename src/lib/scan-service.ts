@@ -218,6 +218,18 @@ export async function findPendingValidation(userId: string): Promise<PendingScan
   return data?.raw_extraction ? data : null;
 }
 
+/**
+ * Jette un scan en attente de validation (extraction ratée : illisible, mauvaise
+ * semaine…). La ligne scans est supprimée — ses scan_rows suivent en cascade.
+ * Rien n'a encore été écrit dans le planning à ce stade.
+ */
+export async function discardScan(scanId: string): Promise<void> {
+  const { error } = await supabase.from("scans").delete().eq("id", scanId);
+  if (error) {
+    throw new Error("Suppression impossible : " + error.message);
+  }
+}
+
 // --- Plannings sans en-tête : résolution des dates ----------------------------
 
 import { addDays } from "@/lib/dates";
