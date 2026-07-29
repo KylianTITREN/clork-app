@@ -22,6 +22,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PullSplashTeaser, triggerUpdateSplash } from "@/components/brand/UpdateSplash";
+import { AvatarFace } from "@/components/ui/AvatarFace";
 import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
 import { FloatingCTA } from "@/components/ui/FloatingCTA";
@@ -51,6 +52,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { ONBOARDING_DONE_KEY, ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 
 const DAY_LABELS = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"] as const;
+const AVATAR_BUTTON_SIZE = 38;
 // Easter egg splash v2 (façon fantôme Snapchat) : seuil du tirage élastique
 // en haut de l'accueil, et seuil de réarmement du verrou en fin de geste.
 const SPLASH_PULL_TRIGGER = -110;
@@ -112,6 +114,8 @@ export default function HomeScreen() {
   const [isExporting, setIsExporting] = useState(false);
   const plan = usePlan();
   const [displayName, setDisplayName] = useState("");
+  // Avatar choisi (collection Premium) affiché dans la barre du haut.
+  const [avatar, setAvatar] = useState("letter");
   // Équipe de la semaine (scan validé) : qui ouvre/ferme avec moi.
   const [team, setTeam] = useState<{ employees: ExtractionEmployee[]; myRow: number | null } | null>(null);
   // Plannings suivis en lecture seule (ex : celui de sa compagne).
@@ -226,16 +230,18 @@ export default function HomeScreen() {
     if (!userId) return;
     supabase
       .from("profiles")
-      .select("display_name, store_open_time, store_close_time")
+      .select("display_name, avatar, store_open_time, store_close_time")
       .eq("id", userId)
       .single<{
         display_name: string;
+        avatar: string | null;
         store_open_time: string | null;
         store_close_time: string | null;
       }>()
       .then(async ({ data }) => {
         const name = data?.display_name ?? "";
         setDisplayName(name);
+        setAvatar(data?.avatar ?? "letter");
         setStoreHours({
           open: data?.store_open_time?.slice(0, 5) ?? null,
           close: data?.store_close_time?.slice(0, 5) ?? null,
@@ -427,12 +433,19 @@ export default function HomeScreen() {
       <Pressable
         accessibilityLabel="Profil"
         onPress={() => router.navigate("/(tabs)/profile")}
-        style={[styles.avatar, { backgroundColor: colors.accent }]}
+        style={isGuest ? [styles.avatar, { backgroundColor: colors.accent }] : null}
       >
         {isGuest ? (
           <Ionicons name="person-outline" size={18} color={colors.onAccent} />
         ) : (
-          <Text style={[styles.avatarLetter, { color: colors.onAccent }]}>{initial}</Text>
+          // Avatar CHOISI (collection Premium) — jamais celui d'un planning suivi.
+          <AvatarFace
+            avatar={avatar}
+            name={displayName}
+            size={AVATAR_BUTTON_SIZE}
+            background={avatar === "letter" ? colors.accent : colors.accentMuted}
+            color={colors.onAccent}
+          />
         )}
       </Pressable>
     </View>
@@ -680,10 +693,13 @@ export default function HomeScreen() {
                         ? { borderColor: colors.accent }
                         : undefined
                     }
+                    // Le dépliage n'a de contenu QUE s'il existe un créneau
+                    // horodaté : sans lui (jour vide, repos, CP…), on ouvre
+                    // l'éditeur — sinon le tap semblait mort.
                     onPress={() =>
-                      dayShifts.length === 0
-                        ? openDayEditor(date, dayShifts)
-                        : setExpandedDay(isExpanded ? null : date)
+                      first
+                        ? setExpandedDay(isExpanded ? null : date)
+                        : openDayEditor(date, dayShifts)
                     }
                   />
                 );

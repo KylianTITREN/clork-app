@@ -76,6 +76,9 @@ export default function AccountSettingsScreen() {
 
   const [displayName, setDisplayName] = useState("");
   const [avatar, setAvatar] = useState<string>(DEFAULT_AVATAR);
+  // Choix visé tant qu'il n'est pas enregistré (bouton de validation).
+  const [draftAvatar, setDraftAvatar] = useState<string>(DEFAULT_AVATAR);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
 
   const [newPassword, setNewPassword] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -106,25 +109,30 @@ export default function AccountSettingsScreen() {
         if (!isMounted || !data) return;
         setDisplayName(data.display_name ?? "");
         setAvatar(data.avatar ?? DEFAULT_AVATAR);
+        setDraftAvatar(data.avatar ?? DEFAULT_AVATAR);
       });
     return () => {
       isMounted = false;
     };
   }, [userId]);
 
-  /** Sélection optimiste : rollback + alerte si l'écriture échoue. */
-  async function handleSelectAvatar(slug: string) {
-    if (!userId || slug === avatar) return;
-    const previous = avatar;
-    setAvatar(slug);
-    const { error } = await supabase.from("profiles").update({ avatar: slug }).eq("id", userId);
+  /** Enregistre le choix affiché — le tap sur un avatar ne fait que le viser. */
+  async function handleSaveAvatar() {
+    if (!userId || draftAvatar === avatar) return;
+    setIsSavingAvatar(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ avatar: draftAvatar })
+      .eq("id", userId);
+    setIsSavingAvatar(false);
     if (error) {
-      setAvatar(previous);
       Alert.alert(
         "Avatar non enregistré",
         "Ton avatar n'a pas pu être enregistré. Réessaie dans un instant.",
       );
+      return;
     }
+    setAvatar(draftAvatar);
   }
 
   async function handleRedeemCode() {
@@ -279,7 +287,7 @@ export default function AccountSettingsScreen() {
                 <View style={styles.avatarGrid}>
                   {[DEFAULT_AVATAR, ...AVATAR_COLLECTION].map((slug) => {
                     const isLetter = slug === DEFAULT_AVATAR;
-                    const isSelected = slug === avatar;
+                    const isSelected = slug === draftAvatar;
                     // Sans Premium, les animaux sont inertes : la porte passe
                     // par la rangée « Collection verrouillée » en bas de carte.
                     const isLocked = !isPremium && !isLetter;
@@ -287,7 +295,7 @@ export default function AccountSettingsScreen() {
                       <Pressable
                         key={slug}
                         disabled={isLocked || isSelected}
-                        onPress={() => handleSelectAvatar(slug)}
+                        onPress={() => setDraftAvatar(slug)}
                         accessibilityRole="radio"
                         accessibilityState={{ selected: isSelected, disabled: isLocked }}
                         accessibilityLabel={
@@ -323,14 +331,12 @@ export default function AccountSettingsScreen() {
                             </View>
                           ) : null}
                         </View>
-                        {isSelected ? (
-                          <Text
-                            style={[styles.avatarLabel, { color: colors.accent }]}
-                            numberOfLines={1}
-                          >
-                            {isLetter ? "Par défaut" : "Choisi"}
-                          </Text>
-                        ) : null}
+                        <Text
+                          style={[styles.avatarLabel, { color: colors.accent }]}
+                          numberOfLines={1}
+                        >
+                          {isSelected ? (isLetter ? "Par défaut" : "Choisi") : ""}
+                        </Text>
                       </Pressable>
                     );
                   })}
@@ -354,6 +360,13 @@ export default function AccountSettingsScreen() {
                       </Text>
                     </View>
                   </Pressable>
+                ) : draftAvatar !== avatar ? (
+                  // Le choix ne s'applique qu'une fois validé (demande Kylian).
+                  <Button
+                    label="Enregistrer mon avatar"
+                    onPress={handleSaveAvatar}
+                    isLoading={isSavingAvatar}
+                  />
                 ) : null}
               </View>
 
@@ -608,13 +621,13 @@ const styles = StyleSheet.create({
   avatarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
     rowGap: 12,
   },
   avatarItem: {
-    // Largeur de l'anneau (52 + offset 2 + bordure 2.5, des deux côtés).
-    width: AVATAR_SIZE + 9,
+    // 4 colonnes de largeur ÉGALE, contenu centré (maquette : repeat(4,1fr)
+    // + justify-items:center). Une largeur fixe désalignait les rangées dès
+    // qu'une cellule portait un libellé.
+    width: "25%",
     alignItems: "center",
     gap: 4,
   },
@@ -641,6 +654,8 @@ const styles = StyleSheet.create({
   avatarLabel: {
     fontSize: 9.5,
     fontFamily: fonts.bold,
+    // Hauteur réservée même sans libellé : les deux rangées restent alignées.
+    height: 12,
   },
   lockedRow: {
     flexDirection: "row",
