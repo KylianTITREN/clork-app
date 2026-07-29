@@ -5,6 +5,7 @@
 //   Étape 3 sur 3 = code à 6 chiffres (écran verify-otp).
 // Header maquette : retour carré + barre de progression + « Étape N sur 3 ».
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
@@ -33,6 +34,7 @@ import {
 } from "@/constants/tokens";
 import { authErrorMessage } from "@/lib/auth-errors";
 import { supabase } from "@/lib/supabase";
+import { ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 
 const TOTAL_STEPS = 3;
 const MIN_PASSWORD_LENGTH = 8;
@@ -109,6 +111,9 @@ export default function SignUpScreen() {
       Alert.alert("Inscription impossible", authErrorMessage(signUpError));
       return;
     }
+    // Compte neuf → l'accueil doit ouvrir « BIENVENUE 1/4 ». Drapeau posé ICI
+    // (et pas déduit d'un prénom vide : l'inscription le renseigne désormais).
+    await AsyncStorage.setItem(ONBOARDING_PENDING_KEY, "1");
     // Confirmation e-mail activée : pas de session tant que le code n'est pas
     // validé → Étape 3 sur 3 (code à 6 chiffres).
     if (!data.session) {

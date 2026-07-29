@@ -40,8 +40,7 @@ import {
 } from "@/lib/reminder-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
-
-export const ONBOARDING_DONE_KEY = "clork.onboarding-done";
+import { ONBOARDING_DONE_KEY, ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 
 const TOTAL_STEPS = 4;
 // Seuil maquette : la pause s'applique dès que la journée dépasse 6h.
@@ -74,6 +73,7 @@ export default function OnboardingScreen() {
 
   useEffect(() => {
     void AsyncStorage.setItem(ONBOARDING_DONE_KEY, "1");
+    void AsyncStorage.removeItem(ONBOARDING_PENDING_KEY);
   }, []);
 
   // Pré-remplit le prénom (renseigné à l'inscription) et les écritures planning.

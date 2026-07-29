@@ -4,6 +4,7 @@
 // CTA flottant « + Ajouter mes horaires ». La logique de données (chargement,
 // équipe, suivis, export, widgets, rappels) est reprise de la v1.
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router, useFocusEffect } from "expo-router";
@@ -47,6 +48,7 @@ import { refreshWidgetSnapshot } from "@/lib/widget-data";
 import type { ExtractionEmployee, PlanningExtraction } from "@/lib/extraction-types";
 import type { Shift } from "@/lib/types";
 import { useAuth } from "@/providers/auth-provider";
+import { ONBOARDING_DONE_KEY, ONBOARDING_PENDING_KEY } from "@/constants/onboarding-keys";
 
 const DAY_LABELS = ["LUN", "MAR", "MER", "JEU", "VEN", "SAM", "DIM"] as const;
 // Easter egg splash v2 (façon fantôme Snapchat) : seuil du tirage élastique
@@ -238,14 +240,17 @@ export default function HomeScreen() {
           open: data?.store_open_time?.slice(0, 5) ?? null,
           close: data?.store_close_time?.slice(0, 5) ?? null,
         });
-        // Compte fraîchement vérifié (prénom vide, pas invité) : onboarding
-        // 4 étapes, une seule fois (drapeau local).
-        if (!isGuest && name.trim() === "") {
-          const AsyncStorage = (
-            require("@react-native-async-storage/async-storage") as typeof import("@react-native-async-storage/async-storage")
-          ).default;
-          const done = await AsyncStorage.getItem("clork.onboarding-done");
-          if (!done) router.navigate("/(tabs)/onboarding" as never);
+        // Compte neuf (drapeau posé à l'inscription) : onboarding 4 étapes,
+        // une seule fois. Le prénom vide reste un repli pour les comptes créés
+        // avant ce drapeau.
+        if (!isGuest) {
+          const [done, pending] = await AsyncStorage.multiGet([
+            ONBOARDING_DONE_KEY,
+            ONBOARDING_PENDING_KEY,
+          ]);
+          if (!done[1] && (pending[1] || name.trim() === "")) {
+            router.navigate("/(tabs)/onboarding" as never);
+          }
         }
       });
   }, [userId, isGuest]);
