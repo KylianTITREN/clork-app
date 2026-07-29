@@ -17,7 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AvatarFace } from "@/components/ui/AvatarFace";
 import { Button } from "@/components/ui/Button";
@@ -38,6 +38,7 @@ const APP_VERSION = "2.0.0";
 
 export default function ProfileHubScreen() {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { session } = useAuth();
 
   const [displayName, setDisplayName] = useState("");
@@ -234,6 +235,10 @@ export default function ProfileHubScreen() {
             />
           ) : null}
 
+        </ScrollView>
+
+        {/* Pied FERRÉ EN BAS (demande Kylian) : déconnexion + signature. */}
+        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
           {isGuest ? (
             <View
               style={[
@@ -268,10 +273,10 @@ export default function ProfileHubScreen() {
             </Pressable>
           )}
 
-          <Text style={[styles.poweredBy, { color: colors.textMuted }]}>
+          <Text style={[styles.poweredBy, { color: colors.textDisabled }]}>
             Propulsé par KYKS · v{APP_VERSION}
           </Text>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -334,7 +339,12 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
     fontFamily: fonts.semiBold,
   },
-  content: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm + 2 },
+  content: {
+    padding: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+    gap: 10,
+  },
   upgradeCard: {
     borderRadius: radius.lg,
     borderWidth: 1.5,
@@ -383,12 +393,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: spacing.sm,
   },
-  signOutLabel: { fontSize: typeScale.bodySm, fontFamily: fonts.semiBold },
+  signOutLabel: { fontSize: 13, fontFamily: fonts.semiBold },
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: 4,
+  },
   poweredBy: {
-    fontSize: typeScale.caption,
+    fontSize: 11.5,
     fontFamily: fonts.medium,
     textAlign: "center",
-    opacity: 0.7,
-    marginTop: spacing.sm,
   },
 });
