@@ -100,6 +100,38 @@ export default function NotificationsSettingsScreen() {
     );
   }
 
+  // Préférence de notification employeur : stockée dans profiles (le serveur
+  // doit pouvoir la lire au moment de publier). Optimiste, avec retour arrière
+  // si l'écriture échoue — sinon l'interrupteur mentirait.
+  const [employerNotify, setEmployerNotify] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    void supabase
+      .from("profiles")
+      .select("notify_employer_planning")
+      .eq("id", userId)
+      .maybeSingle<{ notify_employer_planning: boolean | null }>()
+      .then(({ data }) => {
+        if (alive && data) setEmployerNotify(data.notify_employer_planning !== false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+
+  async function setEmployerNotifyPref(next: boolean) {
+    if (!userId) return;
+    const previous = employerNotify;
+    setEmployerNotify(next);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ notify_employer_planning: next })
+      .eq("id", userId);
+    if (error) setEmployerNotify(previous);
+  }
+
   function renderToggleRow(title: string, subtitle: string, toggle: React.ReactNode) {
     return (
       <View style={styles.toggleRow}>
@@ -211,6 +243,17 @@ export default function NotificationsSettingsScreen() {
               </Text>
             </View>
           ) : null}
+        </View>
+
+        {/* Publication par l'employeur : la seule notification décidée par le
+            SERVEUR (les autres sont des rappels programmés par le téléphone),
+            donc la préférence vit dans le profil et non en local. */}
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {renderToggleRow(
+            "Planning de mon magasin",
+            "Quand mon employeur publie ou modifie mes horaires",
+            renderSwitch(employerNotify, setEmployerNotifyPref),
+          )}
         </View>
 
         <Text style={[styles.footnote, { color: colors.textMuted }]}>
