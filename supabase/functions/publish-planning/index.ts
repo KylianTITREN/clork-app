@@ -656,11 +656,15 @@ Deno.serve(async (req) => {
     return errorResponse(400, "Code d'accès manquant.");
   }
 
-  const validation = validatePlanning(body.planning);
-  if ("error" in validation) {
+  // Verification d acces seule (ecran du code, avant tout depot) : sans ce
+  // mode, le site devait envoyer un planning bidon juste pour tester le code
+  // et l utilisatrice recevait une erreur de validation parlant du planning.
+  const verifyOnly = body.verify_only === true;
+
+  const validation = verifyOnly ? null : validatePlanning(body.planning);
+  if (validation && "error" in validation) {
     return errorResponse(400, validation.error);
   }
-  const planning = validation.planning;
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -677,6 +681,14 @@ Deno.serve(async (req) => {
     await sleep(AUTH_FAILURE_DELAY_MS);
     return errorResponse(401, AUTH_ERROR);
   }
+
+  if (verifyOnly) {
+    return jsonResponse(200, {
+      success: true,
+      store: { label: store.label },
+    });
+  }
+  const planning = (validation as { planning: ParsedPlanning }).planning;
 
   let profiles: ProfileRow[];
   try {
