@@ -54,6 +54,9 @@ export type Shift = {
   note: string | null;
   source: "scan" | "manual";
   is_edited: boolean;
+  // Calque Clork Pro : le créneau vient d'une correction de la responsable
+  // (une « rature » sur son exemplaire), pas du fichier d'origine.
+  is_store_edit: boolean;
   created_at: string;
   updated_at: string;
 };

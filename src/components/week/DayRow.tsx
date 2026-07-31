@@ -16,6 +16,8 @@ import {
 // horaire + libellé, durée payée à droite, chevron. Multi-créneaux : barres
 // empilées dans la même carte. Repos : carte estompée (opacity .65).
 // Jour non lu par le scan : « À compléter » en pointillé.
+// Jour corrigé par la responsable (Clork Pro) : pastille accent + « modifié »
+// sous les horaires — l'employée voit que ce n'est plus le planning publié.
 
 export type DayRowSlot = {
   start: string; // "HH:MM"
@@ -32,6 +34,11 @@ type DayRowProps = {
   slots: DayRowSlot[];
   /** off = repos estompé ; todo = « À compléter » pointillé. */
   status?: "work" | "off" | "todo";
+  /**
+   * Au moins un créneau du jour vient du calque Clork Pro (la responsable a
+   * raturé son exemplaire après publication) → repère « modifié » discret.
+   */
+  storeEdited?: boolean;
   onPress?: () => void;
   /** Masque le chevron (listes en lecture seule — mode conjoint). */
   readOnly?: boolean;
@@ -45,6 +52,7 @@ export function DayRow({
   dayNumber,
   slots,
   status = "work",
+  storeEdited = false,
   onPress,
   readOnly = false,
   style,
@@ -105,6 +113,16 @@ export function DayRow({
               </Text>
             </View>
           ))
+        )}
+
+        {/* Calque Clork Pro : la responsable a corrigé ce jour après coup.
+            Ce n'est pas une erreur — pastille accent + « modifié » en tiny,
+            aligné sur les horaires (barre 3 + gap 8 = pastille 5 + gap 6). */}
+        {storeEdited && (
+          <View style={styles.editedRow}>
+            <View style={[styles.editedDot, { backgroundColor: colors.accent }]} />
+            <Text style={[styles.editedLabel, { color: colors.accent }]}>modifié</Text>
+          </View>
         )}
       </View>
 
@@ -170,6 +188,21 @@ const styles = StyleSheet.create({
   },
   slotMeta: {
     fontSize: 11.5,
+    fontFamily: fonts.medium,
+  },
+  editedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 1,
+  },
+  editedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  editedLabel: {
+    fontSize: typeScale.tiny,
     fontFamily: fonts.medium,
   },
   restLabel: {

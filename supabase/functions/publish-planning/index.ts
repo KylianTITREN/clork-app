@@ -28,12 +28,27 @@
 //   confirmé (première semaine) garde l'ancien comportement, sinon personne ne
 //   recevrait rien avant la première confirmation.
 //
+// LE CALQUE (store_planning_edits) :
+//   La responsable imprime son Excel et le rature au stylo. La vérité n'est
+//   donc pas le fichier mais son exemplaire annoté. On garde les deux couches
+//   séparées : le SOCLE (dernier fichier déposé, store_imports.payload) et le
+//   CALQUE (ses corrections). Une réimportation remplace le socle sans effacer
+//   le calque. Ce qui est écrit dans `shifts`, c'est toujours socle + calque,
+//   et les créneaux venus du calque portent `is_store_edit = true` (badge
+//   « modifié » côté app).
+//
 // Actions supportées (champ `action`, absent = publication) :
-//   · verify_only   : le couple (lien, code) est-il valide ?
-//   · dry_run       : aperçu de l'appariement, aucune écriture.
+//   · verify_only     : le couple (lien, code) est-il valide ?
+//   · dry_run         : aperçu de l'appariement, aucune écriture.
 //   · confirm_members : la responsable attribue une ligne du fichier à chaque
 //                       adhésion en attente.
-//   · (défaut)      : publication réelle + infos de la semaine + push.
+//   · reassign_member : corrige l'attribution d'un membre déjà confirmé.
+//   · list_weeks      : les semaines déjà publiées pour ce magasin.
+//   · get_week        : l'état EFFECTIF d'une semaine (socle + calque).
+//   · save_edit       : crée ou remplace une entrée du calque.
+//   · delete_edit     : retire une entrée du calque.
+//   · apply_week      : réécrit + notifie sans nouveau dépôt de fichier.
+//   · (défaut)        : publication réelle + infos de la semaine + push.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
@@ -49,6 +64,9 @@ const MAX_EMPLOYEES = 60;
 const DAYS_IN_WEEK = 7;
 /** Contrainte SQL : shifts.break_minutes between 0 and 480. */
 const MAX_BREAK_MINUTES = 480;
+
+/** Repli quand le fichier ne precise pas la pause (decision Kylian). */
+const DEFAULT_BREAK_RULE = { deduct_minutes: 60, above_hours: 6 } as const;
 /** Pagination de la lecture des profils (appariement des noms). */
 const PROFILE_PAGE_SIZE = 1000;
 const PROFILE_MAX_PAGES = 20;
@@ -60,8 +78,17 @@ const MAX_NOTICE_TITLE = 120;
 const MAX_NOTICE_DETAIL = 500;
 /** Nom de ligne attribué à une adhésion : une ligne de planning, pas un roman. */
 const MAX_EMPLOYEE_NAME = 120;
+/** Calque : garde-fous de volume. Une semaine raturée, pas un second planning. */
+const MAX_EDITS_PER_WEEK = 200;
+const MAX_EDIT_SHIFTS = 4;
+/** list_weeks : la responsable regarde ses dernières semaines, pas son histoire. */
+const MAX_LISTED_IMPORTS = 200;
+const MAX_LISTED_WEEKS = 26;
+const MAX_EDIT_ROWS_SCANNED = 1000;
 /** Expo accepte 100 messages par requête. */
 const PUSH_CHUNK_SIZE = 100;
+/** Notification de changement : au-delà, on résume (« et N autres jours »). */
+const MAX_CHANGES_IN_BODY = 2;
 /** Temporisation sur échec d'authentification (frein à la force brute). */
 const AUTH_FAILURE_DELAY_MS = 600;
 
@@ -131,6 +158,35 @@ type StoreMemberRow = {
   created_at: string;
 };
 
+// --- Contrat du calque --------------------------------------------------------
+
+/** Les seuls types de créneau qu'une rature peut produire. */
+type EditShiftType = "work" | "meeting" | "training";
+
+type EditShift = { start: string; end: string; type: EditShiftType };
+
+type EditScope = "employee" | "team";
+type TeamScope = "all" | "working" | "selection";
+type EditAction = "set_day" | "add_shift";
+
+/** Une entrée du calque, telle que stockée dans store_planning_edits. */
+type PlanningEdit = {
+  id: string;
+  week_start: string;
+  date: string;
+  scope: EditScope;
+  employee_name: string | null;
+  team_scope: TeamScope | null;
+  team_names: string[] | null;
+  action: EditAction;
+  shifts: EditShift[];
+  created_at: string;
+  updated_at: string;
+};
+
+/** Une entrée du calque telle qu'elle arrive du site (sans id ni horodatage). */
+type EditInput = Omit<PlanningEdit, "id" | "created_at" | "updated_at">;
+
 // --- Réponses -----------------------------------------------------------------
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -165,6 +221,10 @@ function addDaysISO(iso: string, days: number): string {
 
 function isMonday(iso: string): boolean {
   return new Date(`${iso}T00:00:00Z`).getUTCDay() === 1;
+}
+
+function weekDatesOf(weekStart: string): string[] {
+  return Array.from({ length: DAYS_IN_WEEK }, (_, offset) => addDaysISO(weekStart, offset));
 }
 
 function minutesOf(time: string): number {
@@ -223,6 +283,18 @@ function toParisTimestamp(dateISO: string, time: string): string {
   return `${dateISO}T${time}:00${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
 }
 
+const PARIS_HOUR = new Intl.DateTimeFormat("fr-FR", {
+  timeZone: "Europe/Paris",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** Horodatage stocké → heure de pendule française ("2026-07-31T17:00:00Z" → "19:00"). */
+function parisTime(instant: number): string {
+  return PARIS_HOUR.format(new Date(instant));
+}
+
 const FR_DATE = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
@@ -231,6 +303,18 @@ const FR_DATE = new Intl.DateTimeFormat("fr-FR", {
 
 function frenchDate(iso: string): string {
   return FR_DATE.format(new Date(`${iso}T00:00:00Z`));
+}
+
+const FR_WEEKDAY = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+/** "2026-07-29" → "Mercredi 29". C'est ainsi qu'on parle d'un jour à quelqu'un. */
+function frenchWeekday(iso: string): string {
+  const label = FR_WEEKDAY.format(new Date(`${iso}T00:00:00Z`));
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 // --- Validation du corps de requête -------------------------------------------
@@ -420,6 +504,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 type AssignmentsResult = { assignments: Assignment[] } | { error: string };
 
+/** Nom de ligne propre : espaces normalisés, longueur bornée, lettres présentes. */
+function cleanEmployeeName(value: unknown): { name: string } | { error: string } {
+  if (typeof value !== "string") return { error: "Nom de ligne manquant." };
+  const name = value.trim().replace(/\s+/g, " ");
+  if (name.length === 0) return { error: "Le nom de la ligne ne peut pas être vide." };
+  if (name.length > MAX_EMPLOYEE_NAME) {
+    return { error: `Un nom de ligne dépasse ${MAX_EMPLOYEE_NAME} caractères.` };
+  }
+  if (normalizeName(name).length === 0) return { error: `« ${name} » ne ressemble pas à un nom.` };
+  return { name };
+}
+
 /**
  * On ne vérifie PAS que le nom figure dans un planning déjà déposé : la
  * responsable peut très bien confirmer son équipe avant son premier dépôt.
@@ -446,15 +542,10 @@ function validateAssignments(input: unknown): AssignmentsResult {
     if (typeof userId !== "string" || !UUID_RE.test(userId)) {
       return { error: "Une confirmation ne désigne aucun compte valide." };
     }
-    if (typeof rawName !== "string") return { error: "Une confirmation est sans nom de ligne." };
-
-    const name = rawName.trim().replace(/\s+/g, " ");
-    if (name.length === 0) return { error: "Le nom de la ligne ne peut pas être vide." };
-    if (name.length > MAX_EMPLOYEE_NAME) {
-      return { error: `Un nom de ligne dépasse ${MAX_EMPLOYEE_NAME} caractères.` };
-    }
+    const cleaned = cleanEmployeeName(rawName);
+    if ("error" in cleaned) return { error: cleaned.error };
+    const name = cleaned.name;
     const key = normalizeName(name);
-    if (key.length === 0) return { error: `« ${name} » ne ressemble pas à un nom.` };
 
     if (seenUsers.has(userId)) return { error: "Un même compte apparaît deux fois." };
     if (seenNames.has(key)) return { error: `La ligne « ${name} » est attribuée deux fois.` };
@@ -464,6 +555,146 @@ function validateAssignments(input: unknown): AssignmentsResult {
     assignments.push({ user_id: userId, employee_name: name });
   }
   return { assignments };
+}
+
+// --- Validation d'une entrée du calque ----------------------------------------
+
+type EditResult = { edit: EditInput } | { error: string };
+
+const EDIT_TYPES: readonly EditShiftType[] = ["work", "meeting", "training"];
+
+/**
+ * Une rature est une donnée saisie à la main sur un site public : elle est
+ * validée aussi strictement que le fichier lui-même. Un horaire à l'envers, un
+ * jour hors semaine ou un périmètre incohérent ne doit jamais atteindre la base
+ * — la contrainte SQL le refuserait de toute façon, mais avec un message
+ * incompréhensible pour la responsable.
+ */
+function validateEditShifts(input: unknown, action: EditAction): { shifts: EditShift[] } | { error: string } {
+  if (input === undefined || input === null) {
+    if (action === "add_shift") return { error: "Cet ajout ne contient aucun créneau." };
+    return { shifts: [] };
+  }
+  if (!Array.isArray(input)) return { error: "Les créneaux de la correction sont illisibles." };
+  if (input.length === 0 && action === "add_shift") {
+    return { error: "Cet ajout ne contient aucun créneau." };
+  }
+  if (input.length > MAX_EDIT_SHIFTS) {
+    return { error: `Pas plus de ${MAX_EDIT_SHIFTS} créneaux pour une même journée.` };
+  }
+
+  const starts = new Set<string>();
+  const shifts: EditShift[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) return { error: "Un créneau de la correction est illisible." };
+    const { start, end, type } = entry;
+    if (typeof start !== "string" || !TIME_RE.test(start)) {
+      return { error: "Heure d'arrivée invalide (format attendu : 09:00)." };
+    }
+    if (typeof end !== "string" || !TIME_RE.test(end)) {
+      return { error: "Heure de départ invalide (format attendu : 18:00)." };
+    }
+    if (minutesOf(end) <= minutesOf(start)) {
+      return { error: "Le départ doit être après l'arrivée." };
+    }
+    // Absent = travail : c'est le cas de très loin le plus fréquent, et le site
+    // n'a pas à envoyer le champ pour un simple changement d'horaire.
+    const cleanType = type === undefined || type === null ? "work" : type;
+    if (typeof cleanType !== "string" || !EDIT_TYPES.includes(cleanType as EditShiftType)) {
+      return { error: "Type de créneau inconnu (travail, réunion ou formation)." };
+    }
+    if (starts.has(start)) return { error: "Deux créneaux commencent à la même heure." };
+    starts.add(start);
+    shifts.push({ start, end, type: cleanType as EditShiftType });
+  }
+  return { shifts: sortShifts(shifts) };
+}
+
+function validateEdit(input: unknown): EditResult {
+  if (!isRecord(input)) return { error: "Correction absente ou illisible." };
+
+  const weekStart = input.week_start;
+  if (!isValidDate(weekStart)) return { error: "La semaine de la correction est invalide." };
+  if (!isMonday(weekStart)) return { error: "La semaine doit commencer un lundi." };
+
+  const date = input.date;
+  if (!isValidDate(date) || !weekDatesOf(weekStart).includes(date)) {
+    return { error: "La correction porte une date hors de la semaine." };
+  }
+
+  const scope = input.scope;
+  if (scope !== "employee" && scope !== "team") {
+    return { error: "Périmètre de correction inconnu." };
+  }
+  const action = input.action;
+  if (action !== "set_day" && action !== "add_shift") {
+    return { error: "Type de correction inconnu." };
+  }
+  // Remplacer la journée de toute une équipe n'a pas de sens défini : on ne
+  // laisse pas la responsable créer une correction qu'on ne saurait pas rejouer.
+  if (scope === "team" && action === "set_day") {
+    return { error: "Une correction pour toute l'équipe ne peut qu'ajouter un créneau." };
+  }
+
+  const parsedShifts = validateEditShifts(input.shifts, action);
+  if ("error" in parsedShifts) return { error: parsedShifts.error };
+
+  if (scope === "employee") {
+    const cleaned = cleanEmployeeName(input.employee_name);
+    if ("error" in cleaned) return { error: cleaned.error };
+    return {
+      edit: {
+        week_start: weekStart,
+        date,
+        scope,
+        employee_name: cleaned.name,
+        team_scope: null,
+        team_names: null,
+        action,
+        shifts: parsedShifts.shifts,
+      },
+    };
+  }
+
+  const teamScope = input.team_scope;
+  if (teamScope !== "all" && teamScope !== "working" && teamScope !== "selection") {
+    return { error: "Périmètre d'équipe inconnu." };
+  }
+
+  let teamNames: string[] | null = null;
+  if (teamScope === "selection") {
+    const raw = input.team_names;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return { error: "Aucune personne sélectionnée pour cette correction." };
+    }
+    if (raw.length > MAX_EMPLOYEES) {
+      return { error: `Pas plus de ${MAX_EMPLOYEES} personnes pour une correction.` };
+    }
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const value of raw) {
+      const cleaned = cleanEmployeeName(value);
+      if ("error" in cleaned) return { error: cleaned.error };
+      const key = normalizeName(cleaned.name);
+      if (seen.has(key)) continue; // doublon inoffensif : on le retire en silence
+      seen.add(key);
+      names.push(cleaned.name);
+    }
+    teamNames = names;
+  }
+
+  return {
+    edit: {
+      week_start: weekStart,
+      date,
+      scope,
+      employee_name: null,
+      team_scope: teamScope,
+      team_names: teamNames,
+      action,
+      shifts: parsedShifts.shifts,
+    },
+  };
 }
 
 // --- Appariement des noms -----------------------------------------------------
@@ -629,6 +860,32 @@ async function loadProfilesByIds(
   return rows;
 }
 
+type StoreContext = {
+  members: StoreMemberRow[];
+  confirmedMembers: StoreMemberRow[];
+  pendingMembers: PendingMember[];
+  profileById: Map<string, ProfileRow>;
+};
+
+/** L'équipe du magasin, telle qu'elle est connue au moment de l'appel. */
+async function loadStoreContext(service: SupabaseClient, storeId: string): Promise<StoreContext> {
+  const members = await loadStoreMembers(service, storeId);
+  const profiles = await loadProfilesByIds(service, members.map((member) => member.user_id));
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  return {
+    members,
+    confirmedMembers: members.filter((member) => member.status === "confirmed"),
+    pendingMembers: members
+      .filter((member) => member.status === "pending")
+      .map((member) => ({
+        user_id: member.user_id,
+        display_name: profileById.get(member.user_id)?.display_name ?? "",
+        joined_at: member.created_at,
+      })),
+    profileById,
+  };
+}
+
 /**
  * Appariement d'autorité : la responsable a désigné elle-même la ligne du
  * fichier qui correspond à ce compte. On exige quand même une correspondance
@@ -663,6 +920,395 @@ function matchByMemberName(
   return pairs;
 }
 
+type Pairing = {
+  pairs: Map<number, ProfileRow>;
+  sources: Map<number, MatchSource>;
+  scopedToStore: boolean;
+};
+
+/** Appariement complet des lignes du fichier : adhésions d'abord, noms ensuite. */
+async function pairFileRows(
+  service: SupabaseClient,
+  planning: ParsedPlanning,
+  context: StoreContext,
+): Promise<Pairing> {
+  const pairs = new Map<number, ProfileRow>();
+  const sources = new Map<number, MatchSource>();
+
+  for (const [index, userId] of matchByMemberName(planning.employees, context.confirmedMembers)) {
+    const profile = context.profileById.get(userId);
+    // Profil supprimé entre-temps : l'adhésion est orpheline, on l'ignore.
+    if (!profile) continue;
+    pairs.set(index, profile);
+    sources.set(index, "member");
+  }
+
+  // CLOISONNEMENT : dès que le magasin compte un membre confirmé, le repli par
+  // nom ne regarde plus que ses membres — une homonyme d'un autre magasin ne
+  // peut plus être appariée. Un magasin encore sans membre confirmé garde
+  // l'ancien comportement, sinon sa première publication n'atteindrait personne.
+  const scopedToStore = context.confirmedMembers.length > 0;
+  const fallbackPool = scopedToStore
+    ? context.confirmedMembers
+      .map((member) => context.profileById.get(member.user_id))
+      .filter((profile): profile is ProfileRow => profile !== undefined)
+    : await loadProfiles(service);
+
+  const takenProfileIds = new Set([...pairs.values()].map((profile) => profile.id));
+  const fallbackProfiles = fallbackPool.filter((profile) => !takenProfileIds.has(profile.id));
+  for (
+    const [index, profile] of matchEmployees(
+      planning.employees,
+      fallbackProfiles,
+      new Set(pairs.keys()),
+    )
+  ) {
+    pairs.set(index, profile);
+    sources.set(index, "name");
+  }
+
+  return { pairs, sources, scopedToStore };
+}
+
+// --- Lecture du calque --------------------------------------------------------
+
+type PlanningEditRow = {
+  id: string;
+  week_start: string;
+  date: string;
+  scope: string;
+  employee_name: string | null;
+  team_scope: string | null;
+  team_names: string[] | null;
+  action: string;
+  shifts: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Défiance envers ce qui vient de la base : une ligne bancale est ignorée, pas fatale. */
+function readEditShifts(value: unknown): EditShift[] {
+  if (!Array.isArray(value)) return [];
+  const shifts: EditShift[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const { start, end, type } = entry;
+    if (typeof start !== "string" || !TIME_RE.test(start)) continue;
+    if (typeof end !== "string" || !TIME_RE.test(end)) continue;
+    if (minutesOf(end) <= minutesOf(start)) continue;
+    const cleanType = EDIT_TYPES.includes(type as EditShiftType) ? (type as EditShiftType) : "work";
+    shifts.push({ start, end, type: cleanType });
+  }
+  return sortShifts(shifts);
+}
+
+function toPlanningEdit(row: PlanningEditRow): PlanningEdit | null {
+  if (row.scope !== "employee" && row.scope !== "team") return null;
+  if (row.action !== "set_day" && row.action !== "add_shift") return null;
+  const teamScope = row.team_scope;
+  if (
+    row.scope === "team" &&
+    teamScope !== "all" && teamScope !== "working" && teamScope !== "selection"
+  ) {
+    return null;
+  }
+  return {
+    id: row.id,
+    week_start: row.week_start,
+    date: row.date,
+    scope: row.scope,
+    employee_name: row.employee_name,
+    team_scope: row.scope === "team" ? (teamScope as TeamScope) : null,
+    team_names: row.team_names,
+    action: row.action,
+    shifts: readEditShifts(row.shifts),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+const EDIT_COLUMNS =
+  "id, week_start, date, scope, employee_name, team_scope, team_names, action, shifts, created_at, updated_at";
+
+async function loadPlanningEdits(
+  service: SupabaseClient,
+  storeId: string,
+  weekStart: string,
+): Promise<PlanningEdit[]> {
+  const { data, error } = await service
+    .from("store_planning_edits")
+    .select(EDIT_COLUMNS)
+    .eq("store_id", storeId)
+    .eq("week_start", weekStart)
+    .order("created_at", { ascending: true })
+    .limit(MAX_EDITS_PER_WEEK);
+  if (error) throw new Error("store_planning_edits read failed: " + error.message);
+  return ((data ?? []) as PlanningEditRow[])
+    .map(toPlanningEdit)
+    .filter((edit): edit is PlanningEdit => edit !== null);
+}
+
+/**
+ * Unicité logique d'une rature : périmètre + personne + jour + forme. Enregistrer
+ * deux fois la même correction doit REMPLACER, jamais empiler. Le nom passe par
+ * normalizeName, donc « COPIN Typhanie » et « typhanie copin » sont la même
+ * personne — la contrainte SQL, elle, est plus grossière et sert de filet.
+ */
+function editKey(edit: { scope: EditScope; employee_name: string | null; date: string; action: EditAction }): string {
+  return `${edit.scope}|${normalizeName(edit.employee_name ?? "")}|${edit.date}|${edit.action}`;
+}
+
+// --- Application du calque ----------------------------------------------------
+
+type EffectiveShift = { start: string; end: string; type: EditShiftType; is_edit: boolean };
+
+type EffectiveDay = {
+  day_index: number;
+  date: string;
+  status: "work" | "off";
+  shifts: EffectiveShift[];
+  duration_hours: number | null;
+  /** Le jour porte une correction : c'est lui qui allume le badge « modifié ». */
+  edited: boolean;
+  /** Les heures payées imprimées valent-elles encore ? Non dès qu'on touche au travail. */
+  keeps_file_hours: boolean;
+};
+
+type EffectiveEmployee = {
+  name: string;
+  /** Index de la ligne dans le fichier, null pour une entrée née d'une correction. */
+  row_index: number | null;
+  /** Renseigné uniquement pour une entrée hors fichier (membre confirmé ciblé). */
+  user_id: string | null;
+  days: EffectiveDay[];
+};
+
+type EffectiveWeek = {
+  employees: EffectiveEmployee[];
+  /** Corrections qui ne visent personne de connu : à signaler à la responsable. */
+  orphanEditIds: string[];
+};
+
+function sortShifts<T extends { start: string }>(shifts: readonly T[]): T[] {
+  return [...shifts].sort((a, b) => minutesOf(a.start) - minutesOf(b.start));
+}
+
+function emptyDays(weekDates: readonly string[]): EffectiveDay[] {
+  return weekDates.map((date, dayIndex) => ({
+    day_index: dayIndex,
+    date,
+    status: "off" as const,
+    shifts: [],
+    duration_hours: null,
+    edited: false,
+    keeps_file_hours: true,
+  }));
+}
+
+function daysFromFile(employee: ParsedEmployee, weekDates: readonly string[]): EffectiveDay[] {
+  const byIndex = new Map(employee.days.map((day) => [day.day_index, day]));
+  return weekDates.map((date, dayIndex) => {
+    const source = byIndex.get(dayIndex);
+    const shifts: EffectiveShift[] = source && source.status === "work"
+      ? sortShifts(
+        source.shifts.map((shift) => ({
+          start: shift.start,
+          end: shift.end,
+          type: "work" as const,
+          is_edit: false,
+        })),
+      )
+      : [];
+    return {
+      day_index: dayIndex,
+      date,
+      status: shifts.length > 0 ? ("work" as const) : ("off" as const),
+      shifts,
+      duration_hours: source?.duration_hours ?? null,
+      edited: false,
+      keeps_file_hours: true,
+    };
+  });
+}
+
+/**
+ * CŒUR DU MODÈLE : on part du socle (le fichier), on applique les `set_day`
+ * (qui remplacent intégralement la journée d'une personne — liste vide = repos),
+ * puis les `add_shift` (qui ajoutent sans rien retirer).
+ *
+ * Une correction peut viser quelqu'un qui n'est PAS dans le fichier (un membre
+ * confirmé oublié de l'Excel, ou une réunion pour toute l'équipe) : on crée
+ * alors une entrée hors fichier, et on ne la conserve que si elle finit par
+ * porter au moins un créneau — sinon la publication irait effacer la semaine
+ * d'une personne à qui elle n'a rien à écrire.
+ *
+ * Rien n'est deviné : un nom ambigu (deux lignes homonymes) ou inconnu rend la
+ * correction orpheline, elle est signalée plutôt qu'appliquée au hasard.
+ */
+function buildEffectiveWeek(
+  planning: ParsedPlanning,
+  weekDates: readonly string[],
+  edits: readonly PlanningEdit[],
+  confirmedMembers: readonly StoreMemberRow[],
+): EffectiveWeek {
+  const entries: EffectiveEmployee[] = [];
+  const byKey = new Map<string, EffectiveEmployee>();
+  const ambiguousKeys = new Set<string>();
+
+  planning.employees.forEach((employee, index) => {
+    const entry: EffectiveEmployee = {
+      name: employee.name,
+      row_index: index,
+      user_id: null,
+      days: daysFromFile(employee, weekDates),
+    };
+    entries.push(entry);
+    const key = normalizeName(employee.name);
+    if (key.length === 0) return;
+    if (byKey.has(key)) {
+      ambiguousKeys.add(key);
+      return;
+    }
+    byKey.set(key, entry);
+  });
+
+  // Membres confirmés indexés par nom de ligne, homonymes exclus.
+  const memberByKey = new Map<string, StoreMemberRow>();
+  const ambiguousMembers = new Set<string>();
+  for (const member of confirmedMembers) {
+    const key = normalizeName(member.employee_name ?? "");
+    if (key.length === 0) continue;
+    if (memberByKey.has(key)) {
+      ambiguousMembers.add(key);
+      continue;
+    }
+    memberByKey.set(key, member);
+  }
+  for (const key of ambiguousMembers) memberByKey.delete(key);
+
+  const ensureEntry = (key: string): EffectiveEmployee | null => {
+    if (key.length === 0 || ambiguousKeys.has(key)) return null;
+    const existing = byKey.get(key);
+    if (existing) return existing;
+    const member = memberByKey.get(key);
+    if (!member || !member.employee_name) return null;
+    const entry: EffectiveEmployee = {
+      name: member.employee_name,
+      row_index: null,
+      user_id: member.user_id,
+      days: emptyDays(weekDates),
+    };
+    entries.push(entry);
+    byKey.set(key, entry);
+    return entry;
+  };
+
+  const orphanEditIds: string[] = [];
+
+  // 1. set_day — remplacement intégral de la journée.
+  for (const edit of edits.filter((entry) => entry.action === "set_day")) {
+    const dayIndex = weekDates.indexOf(edit.date);
+    const entry = dayIndex < 0 ? null : ensureEntry(normalizeName(edit.employee_name ?? ""));
+    if (!entry || dayIndex < 0) {
+      orphanEditIds.push(edit.id);
+      continue;
+    }
+    const shifts: EffectiveShift[] = sortShifts(
+      edit.shifts.map((shift) => ({ ...shift, is_edit: true })),
+    );
+    entry.days[dayIndex] = {
+      ...entry.days[dayIndex],
+      status: shifts.length > 0 ? "work" : "off",
+      shifts,
+      edited: true,
+      keeps_file_hours: false,
+    };
+  }
+
+  // 2. add_shift — ajout par-dessus le résultat précédent.
+  for (const edit of edits.filter((entry) => entry.action === "add_shift")) {
+    const dayIndex = weekDates.indexOf(edit.date);
+    if (dayIndex < 0) {
+      orphanEditIds.push(edit.id);
+      continue;
+    }
+    const targets = resolveEditTargets(edit, dayIndex, entries, ensureEntry, confirmedMembers);
+    if (targets.length === 0) {
+      orphanEditIds.push(edit.id);
+      continue;
+    }
+    for (const entry of targets) {
+      const day = entry.days[dayIndex];
+      const taken = new Set(day.shifts.map((shift) => shift.start));
+      const added: EffectiveShift[] = edit.shifts
+        .filter((shift) => !taken.has(shift.start))
+        .map((shift) => ({ ...shift, is_edit: true }));
+      if (added.length === 0) continue;
+      const shifts = sortShifts([...day.shifts, ...added]);
+      entry.days[dayIndex] = {
+        ...day,
+        status: shifts.length > 0 ? "work" : "off",
+        shifts,
+        edited: true,
+        // Une réunion ajoutée ne fausse pas les heures payées imprimées ;
+        // un créneau de travail ajouté, si.
+        keeps_file_hours: day.keeps_file_hours && !added.some((shift) => shift.type === "work"),
+      };
+    }
+  }
+
+  // Une entrée née d'une correction et restée vide n'a rien à faire ici : la
+  // publier reviendrait à effacer la semaine de quelqu'un pour rien.
+  const employees = entries.filter(
+    (entry) => entry.row_index !== null || entry.days.some((day) => day.shifts.length > 0),
+  );
+  return { employees, orphanEditIds };
+}
+
+function resolveEditTargets(
+  edit: PlanningEdit,
+  dayIndex: number,
+  entries: readonly EffectiveEmployee[],
+  ensureEntry: (key: string) => EffectiveEmployee | null,
+  confirmedMembers: readonly StoreMemberRow[],
+): EffectiveEmployee[] {
+  if (edit.scope === "employee") {
+    const entry = ensureEntry(normalizeName(edit.employee_name ?? ""));
+    return entry ? [entry] : [];
+  }
+
+  if (edit.team_scope === "all") {
+    // Tous les membres confirmés : les seules personnes dont on sait avec
+    // certitude qu'elles appartiennent à cette équipe.
+    const targets = confirmedMembers
+      .map((member) => ensureEntry(normalizeName(member.employee_name ?? "")))
+      .filter((entry): entry is EffectiveEmployee => entry !== null);
+    return dedupeEntries(targets);
+  }
+
+  if (edit.team_scope === "working") {
+    // Le socle a déjà été appliqué : « qui travaille ce jour-là » se lit
+    // directement sur l'état courant.
+    return [...entries].filter((entry) =>
+      entry.days[dayIndex].shifts.some((shift) => shift.type === "work")
+    );
+  }
+
+  const targets = (edit.team_names ?? [])
+    .map((name) => ensureEntry(normalizeName(name)))
+    .filter((entry): entry is EffectiveEmployee => entry !== null);
+  return dedupeEntries(targets);
+}
+
+function dedupeEntries(entries: readonly EffectiveEmployee[]): EffectiveEmployee[] {
+  const seen = new Set<EffectiveEmployee>();
+  return entries.filter((entry) => {
+    if (seen.has(entry)) return false;
+    seen.add(entry);
+    return true;
+  });
+}
+
 // --- Construction des créneaux ------------------------------------------------
 
 type ShiftRow = {
@@ -670,70 +1316,211 @@ type ShiftRow = {
   date: string;
   start_at: string;
   end_at: string;
-  type: "work";
+  type: EditShiftType;
   break_minutes: number;
   source: "import";
   is_edited: false;
+  is_store_edit: boolean;
 };
 
 /**
  * Pause = amplitude (premier départ → dernier retour) moins les heures PAYÉES
- * imprimées sur le planning. Sans durée imprimée, on retombe sur la règle de
- * pause du magasin ; sans règle, aucune pause n'est supposée.
+ * imprimées sur le planning. Dès que le calque a touché au TRAVAIL de la
+ * journée, cette durée imprimée ne veut plus rien dire : on retombe sur la
+ * règle de pause du magasin. Sans règle, aucune pause n'est supposée.
+ *
+ * Seuls les créneaux de travail entrent dans le calcul : une réunion de 19h à
+ * 20h n'ajoute pas une pause fictive de fin de journée.
  */
-function breakMinutesForDay(day: ParsedDay, planning: ParsedPlanning): number {
-  const starts = day.shifts.map((shift) => minutesOf(shift.start));
-  const ends = day.shifts.map((shift) => minutesOf(shift.end));
-  const span = Math.max(...ends) - Math.min(...starts);
+function breakMinutesForDay(day: EffectiveDay, planning: ParsedPlanning): number {
+  const work = day.shifts.filter((shift) => shift.type === "work");
+  if (work.length === 0) return 0;
+  const span = Math.max(...work.map((shift) => minutesOf(shift.end))) -
+    Math.min(...work.map((shift) => minutesOf(shift.start)));
 
-  if (day.duration_hours === null) {
-    const rule = planning.break_rule;
-    if (!rule) return 0;
-    return span > rule.above_hours * 60 ? Math.min(rule.deduct_minutes, MAX_BREAK_MINUTES) : 0;
+  if (day.keeps_file_hours && day.duration_hours !== null) {
+    const paid = Math.round(day.duration_hours * 60);
+    return Math.min(Math.max(span - paid, 0), MAX_BREAK_MINUTES);
   }
-  const paid = Math.round(day.duration_hours * 60);
-  return Math.min(Math.max(span - paid, 0), MAX_BREAK_MINUTES);
+  // Regle par defaut quand le fichier est muet. Leurs exports sont
+  // incoherents : certains impriment les heures PAYEES dans la colonne Duree,
+  // d autres l amplitude brute sans dire un mot de la pause. Sans repli, une
+  // journee de 8 h etait publiee comme 8 h payees (vecu le 2026-07-31 : 5 h de
+  // trop sur une semaine). L aperçu du site annonce la regle appliquee.
+  const rule = planning.break_rule ?? DEFAULT_BREAK_RULE;
+  return span > rule.above_hours * 60 ? Math.min(rule.deduct_minutes, MAX_BREAK_MINUTES) : 0;
 }
 
 function buildShiftRows(
   userId: string,
-  employee: ParsedEmployee,
+  employee: EffectiveEmployee,
   planning: ParsedPlanning,
 ): ShiftRow[] {
-  return employee.days
-    .filter((day) => day.status === "work" && day.shifts.length > 0)
-    .flatMap((day) => {
-      const breakMinutes = breakMinutesForDay(day, planning);
-      // La pause déduite est portée par le premier créneau de la journée :
-      // le total payé du jour reste juste quel que soit le découpage.
-      return day.shifts.map((shift, index) => ({
+  return employee.days.flatMap((day) => {
+    if (day.shifts.length === 0) return [];
+    const breakMinutes = breakMinutesForDay(day, planning);
+    // La pause déduite est portée par le premier créneau de TRAVAIL de la
+    // journée : le total payé du jour reste juste quel que soit le découpage.
+    let breakPlaced = false;
+    return day.shifts.map((shift) => {
+      const carries = !breakPlaced && shift.type === "work";
+      if (carries) breakPlaced = true;
+      return {
         user_id: userId,
         date: day.date,
         start_at: toParisTimestamp(day.date, shift.start),
         end_at: toParisTimestamp(day.date, shift.end),
-        type: "work" as const,
-        break_minutes: index === 0 ? breakMinutes : 0,
+        type: shift.type,
+        break_minutes: carries ? breakMinutes : 0,
         source: "import" as const,
         is_edited: false as const,
-      }));
+        is_store_edit: shift.is_edit,
+      };
     });
+  });
+}
+
+function daysWrittenOf(rows: readonly ShiftRow[]): number {
+  return new Set(rows.map((row) => row.date)).size;
+}
+
+// --- Comparaison avant / après ------------------------------------------------
+
+/** Un créneau réduit à ce qui se voit : jour, bornes, nature. */
+type Slot = { date: string; start: number | null; end: number | null; type: string; label: string };
+
+type ExistingShift = {
+  date: string;
+  start_at: string | null;
+  end_at: string | null;
+  type: string;
+  source: string;
+};
+
+const TYPE_NOUNS: Record<string, string> = {
+  meeting: "réunion",
+  training: "formation",
+  off: "repos",
+  leave: "congé",
+  cp: "congé",
+  rh: "repos",
+  rtt: "RTT",
+  sick: "arrêt",
+  absent: "absence",
+  unpaid: "congé sans solde",
+  overtime: "heures supp",
+  opening: "ouverture",
+  closing: "fermeture",
+};
+
+function slotLabel(start: number | null, end: number | null, type: string): string {
+  if (start === null) return TYPE_NOUNS[type] ?? "créneau";
+  if (end === null) return parisTime(start);
+  return `${parisTime(start)}-${parisTime(end)}`;
+}
+
+function slotOfExisting(row: ExistingShift): Slot {
+  const start = row.start_at ? new Date(row.start_at).getTime() : null;
+  const end = row.end_at ? new Date(row.end_at).getTime() : null;
+  return { date: row.date, start, end, type: row.type, label: slotLabel(start, end, row.type) };
+}
+
+function slotOfRow(row: ShiftRow): Slot {
+  const start = new Date(row.start_at).getTime();
+  const end = new Date(row.end_at).getTime();
+  return { date: row.date, start, end, type: row.type, label: slotLabel(start, end, row.type) };
+}
+
+function slotKey(slot: Slot): string {
+  return `${slot.date}|${slot.start ?? "-"}|${slot.end ?? "-"}|${slot.type}`;
+}
+
+function listLabels(slots: readonly Slot[]): string {
+  return slots.slice(0, 2).map((slot) => slot.label).join(" et ");
+}
+
+/** « réunion ajoutée 19:00-20:00 », « créneau ajouté 09:00-12:00 ». */
+function describeAdded(added: readonly Slot[]): string {
+  const types = new Set(added.map((slot) => slot.type));
+  if (types.size === 1 && !types.has("work")) {
+    const noun = TYPE_NOUNS[added[0].type] ?? "créneau";
+    return `${noun} ajoutée ${listLabels(added)}`;
+  }
+  return `${listLabels(added)} ajouté${added.length > 1 ? "s" : ""}`;
+}
+
+type DayChange = { date: string; text: string };
+
+/**
+ * Ce qui a bougé, jour par jour, dit comme on le dirait à voix haute. Les
+ * créneaux inchangés (dont ceux saisis à la main, présents des deux côtés) se
+ * neutralisent : on ne parle que de ce qui change vraiment.
+ */
+function describeChanges(
+  before: readonly Slot[],
+  after: readonly Slot[],
+  weekDates: readonly string[],
+): DayChange[] {
+  const changes: DayChange[] = [];
+  for (const date of weekDates) {
+    const dayBefore = before.filter((slot) => slot.date === date);
+    const dayAfter = after.filter((slot) => slot.date === date);
+    const beforeKeys = new Set(dayBefore.map(slotKey));
+    const afterKeys = new Set(dayAfter.map(slotKey));
+    const removed = dayBefore.filter((slot) => !afterKeys.has(slotKey(slot)));
+    const added = dayAfter.filter((slot) => !beforeKeys.has(slotKey(slot)));
+    if (removed.length === 0 && added.length === 0) continue;
+
+    let text: string;
+    if (dayAfter.length === 0) {
+      text = `repos au lieu de ${listLabels(dayBefore)}`;
+    } else if (removed.length === 0) {
+      text = describeAdded(added);
+    } else if (added.length === 0) {
+      text = `${listLabels(removed)} supprimé${removed.length > 1 ? "s" : ""}`;
+    } else {
+      text = `${listLabels(dayAfter)} au lieu de ${listLabels(dayBefore)}`;
+    }
+    changes.push({ date, text });
+  }
+  return changes;
 }
 
 // --- Écriture -----------------------------------------------------------------
 
-type WriteOutcome = { daysWritten: number; skippedManual: number };
+type WriteOutcome = {
+  daysWritten: number;
+  skippedManual: number;
+  changes: DayChange[];
+  /** Aucun créneau publié n'existait : c'est une arrivée, pas un changement. */
+  isFirstWeek: boolean;
+};
 
 /**
  * Remplace la semaine d'une employée. Les créneaux 'manual' survivent : ils ne
  * sont ni supprimés, ni écrasés — si l'un occupe déjà (date, heure de début),
  * la ligne du fichier est abandonnée pour ce créneau précis.
+ *
+ * L'état AVANT est lu en premier : c'est lui qui permet de dire à l'employée ce
+ * qui a changé, et de se taire quand rien n'a bougé.
  */
 async function writeWeek(
   service: SupabaseClient,
   userId: string,
-  rows: ShiftRow[],
+  rows: readonly ShiftRow[],
   weekDates: readonly string[],
 ): Promise<WriteOutcome> {
+  const { data: current, error: readError } = await service
+    .from("shifts")
+    .select("date, start_at, end_at, type, source")
+    .eq("user_id", userId)
+    .in("date", weekDates);
+  if (readError) throw new Error("shifts read failed: " + readError.message);
+
+  const existing = (current ?? []) as ExistingShift[];
+  const replaced = existing.filter((row) => row.source === "import" || row.source === "scan");
+  const kept = existing.filter((row) => row.source !== "import" && row.source !== "scan");
+
   const { error: deleteError } = await service
     .from("shifts")
     .delete()
@@ -742,15 +1529,8 @@ async function writeWeek(
     .in("source", ["import", "scan"]);
   if (deleteError) throw new Error("shifts delete failed: " + deleteError.message);
 
-  const { data: manual, error: manualError } = await service
-    .from("shifts")
-    .select("date, start_at")
-    .eq("user_id", userId)
-    .in("date", weekDates);
-  if (manualError) throw new Error("shifts read failed: " + manualError.message);
-
   const busy = new Set(
-    ((manual ?? []) as { date: string; start_at: string | null }[])
+    kept
       .filter((row) => row.start_at !== null)
       .map((row) => new Date(row.start_at as string).getTime()),
   );
@@ -770,9 +1550,15 @@ async function writeWeek(
     const { error: insertError } = await service.from("shifts").insert(insertable);
     if (insertError) throw new Error("shifts insert failed: " + insertError.message);
   }
+
+  const before = existing.map(slotOfExisting);
+  const after = [...kept.map(slotOfExisting), ...insertable.map(slotOfRow)];
+
   return {
-    daysWritten: new Set(insertable.map((row) => row.date)).size,
+    daysWritten: daysWrittenOf(insertable),
     skippedManual,
+    changes: describeChanges(before, after, weekDates),
+    isFirstWeek: replaced.length === 0,
   };
 }
 
@@ -780,7 +1566,7 @@ async function writeWeek(
 
 type PushMessage = { to: string; title: string; body: string; sound: "default" };
 
-function isExpoToken(token: string | null): token is string {
+function isExpoToken(token: string | null | undefined): token is string {
   return typeof token === "string" && /^Expo(nent)?PushToken\[.+\]$/.test(token.trim());
 }
 
@@ -812,7 +1598,7 @@ async function sendPushNotifications(messages: readonly PushMessage[]): Promise<
   return delivered;
 }
 
-function pushMessage(token: string, weekStart: string, daysWritten: number): PushMessage {
+function arrivalMessage(token: string, weekStart: string, daysWritten: number): PushMessage {
   const days = daysWritten <= 1 ? `${daysWritten} jour travaillé` : `${daysWritten} jours travaillés`;
   return {
     to: token.trim(),
@@ -820,6 +1606,220 @@ function pushMessage(token: string, weekStart: string, daysWritten: number): Pus
     body: `Semaine du ${frenchDate(weekStart)} — ${days}`,
     sound: "default",
   };
+}
+
+/**
+ * « Mercredi 29 : repos au lieu de 10:00-18:00 · Vendredi 31 : réunion ajoutée
+ * 19:00-20:00 ». Une notification qui ne dit pas CE QUI a changé oblige à
+ * ouvrir l'app pour comparer de tête : autant ne rien envoyer.
+ */
+function changeMessage(token: string, changes: readonly DayChange[]): PushMessage | null {
+  if (changes.length === 0) return null;
+  const shown = changes
+    .slice(0, MAX_CHANGES_IN_BODY)
+    .map((change) => `${frenchWeekday(change.date)} : ${change.text}`);
+  const rest = changes.length - shown.length;
+  const tail = rest === 0 ? "" : rest === 1 ? " et 1 autre jour" : ` et ${rest} autres jours`;
+  return {
+    to: token.trim(),
+    title: "Tes horaires ont changé",
+    body: `${shown.join(" · ")}${tail}`,
+    sound: "default",
+  };
+}
+
+function pushForOutcome(
+  profile: ProfileRow | null,
+  outcome: WriteOutcome,
+  weekStart: string,
+): PushMessage | null {
+  // Préférence serveur : une employée peut couper cette notification depuis
+  // Notifications. Absente (ancien profil) = on notifie.
+  if (!profile || profile.notify_employer_planning === false) return null;
+  if (!isExpoToken(profile.expo_push_token)) return null;
+  if (outcome.isFirstWeek) {
+    return outcome.daysWritten > 0
+      ? arrivalMessage(profile.expo_push_token, weekStart, outcome.daysWritten)
+      : null;
+  }
+  return changeMessage(profile.expo_push_token, outcome.changes);
+}
+
+// --- Semaine effective : préparation partagée ---------------------------------
+
+type WriteTarget = {
+  user_id: string;
+  name: string;
+  source: MatchSource;
+  profile: ProfileRow | null;
+  rows: ShiftRow[];
+};
+
+type PreparedWeek = {
+  planning: ParsedPlanning;
+  weekDates: string[];
+  effective: EffectiveWeek;
+  pairing: Pairing;
+  unmatched: string[];
+  targets: WriteTarget[];
+};
+
+/**
+ * Socle + calque + appariement : tout ce qu'il faut pour prévisualiser OU pour
+ * écrire. Les deux chemins partagent ce calcul, sans quoi l'aperçu finirait par
+ * mentir sur ce qui sera publié.
+ */
+async function prepareWeek(
+  service: SupabaseClient,
+  planning: ParsedPlanning,
+  edits: readonly PlanningEdit[],
+  context: StoreContext,
+): Promise<PreparedWeek> {
+  const weekDates = weekDatesOf(planning.week_start);
+  const pairing = await pairFileRows(service, planning, context);
+  const effective = buildEffectiveWeek(planning, weekDates, edits, context.confirmedMembers);
+
+  const unmatched = planning.employees
+    .map((employee, index) => (pairing.pairs.has(index) ? null : employee.name))
+    .filter((name): name is string => name !== null);
+
+  // Regroupement par compte AVANT écriture : si une ligne du fichier et une
+  // entrée née d'une correction désignaient le même compte, deux écritures
+  // successives effaceraient la première. On fusionne les créneaux.
+  const byUser = new Map<string, WriteTarget>();
+  for (const entry of effective.employees) {
+    let userId: string | null = null;
+    let source: MatchSource = "member";
+    let profile: ProfileRow | null = null;
+
+    if (entry.row_index !== null) {
+      const paired = pairing.pairs.get(entry.row_index);
+      if (!paired) continue;
+      userId = paired.id;
+      profile = paired;
+      source = pairing.sources.get(entry.row_index) ?? "name";
+    } else if (entry.user_id) {
+      userId = entry.user_id;
+      profile = context.profileById.get(entry.user_id) ?? null;
+    }
+    if (!userId) continue;
+
+    const rows = buildShiftRows(userId, entry, planning);
+    const existing = byUser.get(userId);
+    byUser.set(
+      userId,
+      existing
+        ? { ...existing, rows: [...existing.rows, ...rows] }
+        : { user_id: userId, name: entry.name, source, profile, rows },
+    );
+  }
+
+  return { planning, weekDates, effective, pairing, unmatched, targets: [...byUser.values()] };
+}
+
+type PublishOutcome = {
+  matched: MatchedEmployee[];
+  notified: number;
+  failures: number;
+  skippedManual: number;
+};
+
+/** Écriture réelle de la semaine préparée, puis notifications ciblées. */
+async function publishPreparedWeek(
+  service: SupabaseClient,
+  storeId: string,
+  prepared: PreparedWeek,
+): Promise<PublishOutcome> {
+  const matched: MatchedEmployee[] = [];
+  const messages: PushMessage[] = [];
+  let failures = 0;
+  let skippedManual = 0;
+
+  for (const target of prepared.targets) {
+    try {
+      const outcome = await writeWeek(service, target.user_id, target.rows, prepared.weekDates);
+      skippedManual += outcome.skippedManual;
+      matched.push({
+        name: target.name,
+        user_id: target.user_id,
+        display_name: target.profile?.display_name ?? "",
+        days_written: outcome.daysWritten,
+        source: target.source,
+      });
+      const message = pushForOutcome(target.profile, outcome, prepared.planning.week_start);
+      if (message) messages.push(message);
+    } catch (error) {
+      // Jamais de nom dans les logs : la ligne du fichier suffit à retrouver
+      // la personne dans le payload conservé par store_imports.
+      failures += 1;
+      console.error(`store ${storeId}: user write failed:`, error);
+    }
+  }
+
+  const notified = await sendPushNotifications(messages);
+  return { matched, notified, failures, skippedManual };
+}
+
+// --- Vue « semaine effective » pour le site -----------------------------------
+
+function serializeWeek(prepared: PreparedWeek, edits: readonly PlanningEdit[]) {
+  const userByRow = new Map<number, string>(
+    [...prepared.pairing.pairs].map(([index, profile]) => [index, profile.id]),
+  );
+  return prepared.effective.employees.map((entry) => ({
+    name: entry.name,
+    row_index: entry.row_index,
+    in_file: entry.row_index !== null,
+    user_id: entry.row_index !== null
+      ? userByRow.get(entry.row_index) ?? null
+      : entry.user_id,
+    days: entry.days.map((day) => ({
+      day_index: day.day_index,
+      date: day.date,
+      status: day.status,
+      edited: day.edited,
+      duration_hours: day.duration_hours,
+      shifts: day.shifts.map((shift) => ({
+        start: shift.start,
+        end: shift.end,
+        type: shift.type,
+        is_edit: shift.is_edit,
+      })),
+    })),
+    edits: edits.filter(
+      (edit) =>
+        edit.scope === "employee" &&
+        normalizeName(edit.employee_name ?? "") === normalizeName(entry.name),
+    ).map((edit) => edit.id),
+  }));
+}
+
+// --- Journal des dépôts -------------------------------------------------------
+
+type ImportRow = {
+  id: string;
+  week_start: string;
+  source_file_name: string | null;
+  payload: unknown;
+  published_at: string | null;
+  created_at: string;
+};
+
+async function loadLatestImport(
+  service: SupabaseClient,
+  storeId: string,
+  weekStart: string,
+): Promise<ImportRow | null> {
+  const { data, error } = await service
+    .from("store_imports")
+    .select("id, week_start, source_file_name, payload, published_at, created_at")
+    .eq("store_id", storeId)
+    .eq("week_start", weekStart)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error("store_imports read failed: " + error.message);
+  const rows = (data ?? []) as ImportRow[];
+  return rows.length > 0 ? rows[0] : null;
 }
 
 // --- Confirmation des adhésions -----------------------------------------------
@@ -869,7 +1869,8 @@ async function confirmMembers(
         continue;
       }
       return {
-        error: `Ce compte est déjà confirmé sur « ${existing.employee_name} ».`,
+        error: `Ce compte est déjà confirmé sur « ${existing.employee_name} ». ` +
+          "Utilise la correction d'attribution pour le changer.",
       };
     }
     const owner = takenNames.get(normalizeName(assignment.employee_name));
@@ -901,6 +1902,58 @@ async function confirmMembers(
   return { confirmed };
 }
 
+/**
+ * Correction d'attribution : « en fait ce compte, c'est Sofia, pas Typhanie ».
+ * confirm_members refuse par construction de toucher un compte déjà confirmé —
+ * c'est ce qui rendait une erreur d'attribution impossible à réparer depuis le
+ * site. Les garanties restent les mêmes : la ligne visée ne doit pas être tenue
+ * par un AUTRE membre confirmé, sinon deux comptes recevraient les mêmes
+ * horaires.
+ *
+ * Ne réécrit AUCUN créneau : la responsable renvoie la semaine (apply_week)
+ * quand elle a fini de corriger l'équipe.
+ */
+async function reassignMember(
+  service: SupabaseClient,
+  storeId: string,
+  userId: string,
+  employeeName: string,
+): Promise<{ changed: boolean } | { error: string }> {
+  const members = await loadStoreMembers(service, storeId);
+  const target = members.find((member) => member.user_id === userId);
+  if (!target) {
+    return { error: "Cette personne ne fait pas partie de ce magasin." };
+  }
+
+  const key = normalizeName(employeeName);
+  const owner = members.find(
+    (member) =>
+      member.user_id !== userId &&
+      member.status === "confirmed" &&
+      normalizeName(member.employee_name ?? "") === key,
+  );
+  if (owner) {
+    return { error: `La ligne « ${employeeName} » est déjà attribuée à quelqu'un d'autre.` };
+  }
+
+  // Rejeu à l'identique : rien à faire, et surtout pas une erreur.
+  if (target.status === "confirmed" && normalizeName(target.employee_name ?? "") === key) {
+    return { changed: false };
+  }
+
+  const { error } = await service
+    .from("store_members")
+    .update({
+      employee_name: employeeName,
+      status: "confirmed",
+      confirmed_at: new Date().toISOString(),
+    })
+    .eq("store_id", storeId)
+    .eq("user_id", userId);
+  if (error) throw new Error("store_members update failed: " + error.message);
+  return { changed: true };
+}
+
 // --- Point d'entrée -----------------------------------------------------------
 
 type StoreRow = { id: string; label: string; access_code: string; join_code: string };
@@ -928,6 +1981,272 @@ async function authenticateStore(
   }
   return store;
 }
+
+const ACTIONS = [
+  "confirm_members",
+  "reassign_member",
+  "list_weeks",
+  "get_week",
+  "save_edit",
+  "delete_edit",
+  "apply_week",
+] as const;
+
+type Action = typeof ACTIONS[number];
+
+async function loadNotices(
+  service: SupabaseClient,
+  storeId: string,
+  weekStart: string,
+): Promise<Notice[]> {
+  const { data, error } = await service
+    .from("store_notices")
+    .select("date, title, detail")
+    .eq("store_id", storeId)
+    .eq("week_start", weekStart)
+    .order("date", { ascending: true, nullsFirst: true })
+    .limit(MAX_NOTICES);
+  if (error) throw new Error("store_notices read failed: " + error.message);
+  return (data ?? []) as Notice[];
+}
+
+// --- Actions de lecture -------------------------------------------------------
+
+/** Les semaines déjà publiées, la plus récente d'abord. */
+async function handleListWeeks(service: SupabaseClient, storeId: string): Promise<Response> {
+  const { data, error } = await service
+    .from("store_imports")
+    .select("week_start, published_at, created_at, matched")
+    .eq("store_id", storeId)
+    .order("week_start", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(MAX_LISTED_IMPORTS);
+  if (error) throw new Error("store_imports read failed: " + error.message);
+
+  // Les semaines les plus récentes d'abord : si le magasin a des années de
+  // ratures derrière lui, c'est le haut de la liste qui doit rester juste.
+  const { data: editData, error: editError } = await service
+    .from("store_planning_edits")
+    .select("week_start")
+    .eq("store_id", storeId)
+    .order("week_start", { ascending: false })
+    .limit(MAX_EDIT_ROWS_SCANNED);
+  if (editError) throw new Error("store_planning_edits read failed: " + editError.message);
+
+  const editCount = new Map<string, number>();
+  for (const row of (editData ?? []) as { week_start: string }[]) {
+    editCount.set(row.week_start, (editCount.get(row.week_start) ?? 0) + 1);
+  }
+
+  // Une semaine peut avoir été déposée plusieurs fois : seule la dernière
+  // compte, et l'ordre de la requête la place en tête de son groupe.
+  const seen = new Set<string>();
+  const weeks: Record<string, unknown>[] = [];
+  for (const row of (data ?? []) as { week_start: string; published_at: string | null; matched: unknown }[]) {
+    if (seen.has(row.week_start)) continue;
+    seen.add(row.week_start);
+    weeks.push({
+      week_start: row.week_start,
+      published_at: row.published_at,
+      employee_count: Array.isArray(row.matched) ? row.matched.length : 0,
+      edit_count: editCount.get(row.week_start) ?? 0,
+    });
+    if (weeks.length >= MAX_LISTED_WEEKS) break;
+  }
+
+  return jsonResponse(200, { success: true, weeks });
+}
+
+/** L'état EFFECTIF d'une semaine : le fichier tel que le calque le corrige. */
+async function handleGetWeek(
+  service: SupabaseClient,
+  store: StoreRow,
+  weekStart: string,
+): Promise<Response> {
+  const latest = await loadLatestImport(service, store.id, weekStart);
+  if (!latest) {
+    return errorResponse(404, "Aucun planning n'a encore été déposé pour cette semaine.");
+  }
+  const validation = validatePlanning(latest.payload);
+  if ("error" in validation) {
+    console.error(`store ${store.id}: stored payload rejected for ${weekStart}: ${validation.error}`);
+    return errorResponse(422, "Le planning enregistré pour cette semaine est illisible.");
+  }
+
+  const [context, edits, notices] = await Promise.all([
+    loadStoreContext(service, store.id),
+    loadPlanningEdits(service, store.id, weekStart),
+    loadNotices(service, store.id, weekStart),
+  ]);
+  const prepared = await prepareWeek(service, validation.planning, edits, context);
+
+  const matched: MatchedEmployee[] = prepared.targets.map((target) => ({
+    name: target.name,
+    user_id: target.user_id,
+    display_name: target.profile?.display_name ?? "",
+    days_written: daysWrittenOf(target.rows),
+    source: target.source,
+  }));
+
+  return jsonResponse(200, {
+    success: true,
+    week_start: weekStart,
+    week_number: validation.planning.week_number,
+    break_rule: validation.planning.break_rule,
+    source_file_name: latest.source_file_name,
+    published_at: latest.published_at,
+    imported_at: latest.created_at,
+    employees: serializeWeek(prepared, edits),
+    edits,
+    orphan_edit_ids: prepared.effective.orphanEditIds,
+    edit_count: edits.length,
+    matched,
+    unmatched: prepared.unmatched,
+    pending_members: context.pendingMembers,
+    notices,
+  });
+}
+
+// --- Actions d'écriture du calque ---------------------------------------------
+
+async function handleSaveEdit(
+  service: SupabaseClient,
+  storeId: string,
+  edit: EditInput,
+): Promise<Response> {
+  const existing = await loadPlanningEdits(service, storeId, edit.week_start);
+  const key = editKey(edit);
+  const duplicates = existing.filter((entry) => editKey(entry) === key).map((entry) => entry.id);
+
+  if (existing.length - duplicates.length >= MAX_EDITS_PER_WEEK) {
+    return errorResponse(409, `Pas plus de ${MAX_EDITS_PER_WEEK} corrections pour une semaine.`);
+  }
+
+  if (duplicates.length > 0) {
+    const { error } = await service
+      .from("store_planning_edits")
+      .delete()
+      .eq("store_id", storeId)
+      .in("id", duplicates);
+    if (error) throw new Error("store_planning_edits delete failed: " + error.message);
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await service
+    .from("store_planning_edits")
+    .insert({
+      store_id: storeId,
+      week_start: edit.week_start,
+      date: edit.date,
+      scope: edit.scope,
+      employee_name: edit.employee_name,
+      team_scope: edit.team_scope,
+      team_names: edit.team_names,
+      action: edit.action,
+      shifts: edit.shifts,
+      // created_at conservé à la première saisie n'apporterait rien : une
+      // correction remplacée est une nouvelle correction.
+      created_at: now,
+      updated_at: now,
+    })
+    .select(EDIT_COLUMNS)
+    .single();
+  if (error) throw new Error("store_planning_edits insert failed: " + error.message);
+
+  const saved = toPlanningEdit(data as PlanningEditRow);
+  return jsonResponse(200, {
+    success: true,
+    edit: saved,
+    replaced: duplicates.length,
+    edit_count: existing.length - duplicates.length + 1,
+  });
+}
+
+async function handleDeleteEdit(
+  service: SupabaseClient,
+  storeId: string,
+  editId: string,
+): Promise<Response> {
+  // Le filtre store_id est indispensable : un identifiant deviné ne doit pas
+  // permettre de supprimer la correction d'un autre magasin.
+  const { data, error } = await service
+    .from("store_planning_edits")
+    .delete()
+    .eq("store_id", storeId)
+    .eq("id", editId)
+    .select("id, week_start");
+  if (error) throw new Error("store_planning_edits delete failed: " + error.message);
+
+  const deleted = (data ?? []) as { id: string; week_start: string }[];
+  if (deleted.length === 0) {
+    return errorResponse(404, "Cette correction n'existe plus.");
+  }
+  return jsonResponse(200, { success: true, deleted: deleted.length });
+}
+
+/**
+ * « Envoyer les modifications » : on réécrit la semaine à partir du dernier
+ * fichier déposé et du calque, sans redemander le fichier. C'est le geste qui
+ * suit une rature.
+ */
+async function handleApplyWeek(
+  service: SupabaseClient,
+  store: StoreRow,
+  weekStart: string,
+): Promise<Response> {
+  const latest = await loadLatestImport(service, store.id, weekStart);
+  if (!latest) {
+    return errorResponse(404, "Aucun planning n'a encore été déposé pour cette semaine.");
+  }
+  const validation = validatePlanning(latest.payload);
+  if ("error" in validation) {
+    console.error(`store ${store.id}: stored payload rejected for ${weekStart}: ${validation.error}`);
+    return errorResponse(422, "Le planning enregistré pour cette semaine est illisible.");
+  }
+
+  const context = await loadStoreContext(service, store.id);
+  const edits = await loadPlanningEdits(service, store.id, weekStart);
+  const prepared = await prepareWeek(service, validation.planning, edits, context);
+  const outcome = await publishPreparedWeek(service, store.id, prepared);
+
+  // Pas de nouvelle ligne de journal : il n'y a pas eu de dépôt. On date la
+  // dernière publication pour que la liste des semaines reste honnête.
+  if (outcome.matched.length > 0) {
+    const { error } = await service
+      .from("store_imports")
+      .update({ published_at: new Date().toISOString(), matched: outcome.matched })
+      .eq("id", latest.id);
+    if (error) console.error(`store ${store.id}: store_imports update failed:`, error.message);
+  }
+
+  console.log(
+    `store ${store.id} apply week ${weekStart}: ` +
+      `${outcome.matched.length} matched, ${prepared.unmatched.length} unmatched, ` +
+      `${outcome.failures} failed, ${outcome.skippedManual} shift(s) kept manual, ` +
+      `${outcome.notified} notified, ${edits.length} edit(s)`,
+  );
+
+  const body = {
+    week_start: weekStart,
+    matched: outcome.matched,
+    unmatched: prepared.unmatched,
+    pending_members: context.pendingMembers,
+    notified: outcome.notified,
+    edit_count: edits.length,
+  };
+
+  if (outcome.failures > 0) {
+    return jsonResponse(207, {
+      success: false,
+      error: `${outcome.matched.length} planning(s) mis à jour, ${outcome.failures} en échec. ` +
+        "Réessaie : l'envoi est sans risque, il remplace la semaine.",
+      ...body,
+    });
+  }
+  return jsonResponse(200, { success: true, ...body });
+}
+
+// --- Serveur ------------------------------------------------------------------
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -967,34 +2286,72 @@ Deno.serve(async (req) => {
   // et l utilisatrice recevait une erreur de validation parlant du planning.
   const verifyOnly = body.verify_only === true;
 
-  const action = body.action;
-  if (action !== undefined && action !== null && action !== "confirm_members") {
+  const rawAction = body.action;
+  if (
+    rawAction !== undefined && rawAction !== null &&
+    !(typeof rawAction === "string" && (ACTIONS as readonly string[]).includes(rawAction))
+  ) {
     return errorResponse(400, "Action inconnue.");
   }
-  const isConfirmAction = action === "confirm_members";
+  const action = (rawAction ?? null) as Action | null;
 
-  // Les deux modes hors publication ne portent pas de planning : les valider
-  // contre le contrat du planning renverrait une erreur incompréhensible.
-  const skipPlanning = verifyOnly || isConfirmAction;
-  const validation = skipPlanning ? null : validatePlanning(body.planning);
-  if (validation && "error" in validation) {
-    return errorResponse(400, validation.error);
-  }
-
+  // --- Validation propre à chaque action, AVANT toute lecture en base --------
   let assignments: readonly Assignment[] = [];
-  if (isConfirmAction) {
+  if (action === "confirm_members") {
     const parsed = validateAssignments(body.assignments);
     if ("error" in parsed) return errorResponse(400, parsed.error);
     assignments = parsed.assignments;
   }
 
+  let reassignUserId = "";
+  let reassignName = "";
+  if (action === "reassign_member") {
+    const rawUserId = body.user_id;
+    if (typeof rawUserId !== "string" || !UUID_RE.test(rawUserId)) {
+      return errorResponse(400, "Aucun compte valide à corriger.");
+    }
+    const cleaned = cleanEmployeeName(body.employee_name);
+    if ("error" in cleaned) return errorResponse(400, cleaned.error);
+    reassignUserId = rawUserId;
+    reassignName = cleaned.name;
+  }
+
+  let weekStartParam = "";
+  if (action === "get_week" || action === "apply_week") {
+    const rawWeekStart = body.week_start;
+    if (!isValidDate(rawWeekStart) || !isMonday(rawWeekStart)) {
+      return errorResponse(400, "Semaine invalide (elle doit commencer un lundi).");
+    }
+    weekStartParam = rawWeekStart;
+  }
+
+  let editInput: EditInput | null = null;
+  if (action === "save_edit") {
+    const parsed = validateEdit(body.edit);
+    if ("error" in parsed) return errorResponse(400, parsed.error);
+    editInput = parsed.edit;
+  }
+
+  let editId = "";
+  if (action === "delete_edit") {
+    const rawEditId = body.edit_id;
+    if (typeof rawEditId !== "string" || !UUID_RE.test(rawEditId)) {
+      return errorResponse(400, "Aucune correction valide à retirer.");
+    }
+    editId = rawEditId;
+  }
+
+  // Seule la publication (et son aperçu) porte un planning : valider les autres
+  // modes contre le contrat du planning renverrait une erreur incompréhensible.
+  const skipPlanning = verifyOnly || action !== null;
+  const validation = skipPlanning ? null : validatePlanning(body.planning);
+  if (validation && "error" in validation) {
+    return errorResponse(400, validation.error);
+  }
+
   // Les infos de la semaine sont validées AVANT toute écriture : une date hors
   // semaine ne doit pas être découverte après que les créneaux sont posés.
-  const weekDates = validation
-    ? Array.from({ length: DAYS_IN_WEEK }, (_, offset) =>
-      addDaysISO(validation.planning.week_start, offset)
-    )
-    : [];
+  const weekDates = validation ? weekDatesOf(validation.planning.week_start) : [];
   let notices: Notice[] = [];
   if (validation) {
     const parsedNotices = validateNotices(body.notices, weekDates);
@@ -1025,7 +2382,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (isConfirmAction) {
+  if (action === "confirm_members") {
     let outcome: ConfirmOutcome;
     try {
       outcome = await confirmMembers(service, store.id, assignments);
@@ -1040,98 +2397,106 @@ Deno.serve(async (req) => {
     return jsonResponse(200, { success: true, confirmed: outcome.confirmed });
   }
 
+  if (action === "reassign_member") {
+    try {
+      const outcome = await reassignMember(service, store.id, reassignUserId, reassignName);
+      if ("error" in outcome) return errorResponse(409, outcome.error);
+      console.log(`store ${store.id} reassign_member: changed=${outcome.changed}`);
+      return jsonResponse(200, { success: true, changed: outcome.changed });
+    } catch (error) {
+      console.error(`store ${store.id}: reassign_member failed:`, error);
+      return errorResponse(500, "Impossible de corriger cette attribution.");
+    }
+  }
+
+  if (action === "list_weeks") {
+    try {
+      return await handleListWeeks(service, store.id);
+    } catch (error) {
+      console.error(`store ${store.id}: list_weeks failed:`, error);
+      return errorResponse(500, "Impossible de lire les semaines publiées.");
+    }
+  }
+
+  if (action === "get_week") {
+    try {
+      return await handleGetWeek(service, store, weekStartParam);
+    } catch (error) {
+      console.error(`store ${store.id}: get_week failed:`, error);
+      return errorResponse(500, "Impossible de lire cette semaine.");
+    }
+  }
+
+  if (action === "save_edit") {
+    try {
+      return await handleSaveEdit(service, store.id, editInput as EditInput);
+    } catch (error) {
+      console.error(`store ${store.id}: save_edit failed:`, error);
+      return errorResponse(500, "Impossible d'enregistrer cette correction.");
+    }
+  }
+
+  if (action === "delete_edit") {
+    try {
+      return await handleDeleteEdit(service, store.id, editId);
+    } catch (error) {
+      console.error(`store ${store.id}: delete_edit failed:`, error);
+      return errorResponse(500, "Impossible de retirer cette correction.");
+    }
+  }
+
+  if (action === "apply_week") {
+    try {
+      return await handleApplyWeek(service, store, weekStartParam);
+    } catch (error) {
+      console.error(`store ${store.id}: apply_week failed:`, error);
+      return errorResponse(500, "Impossible d'envoyer les modifications.");
+    }
+  }
+
+  // --- Publication (dépôt de fichier) ----------------------------------------
   const planning = (validation as { planning: ParsedPlanning }).planning;
 
-  // --- Adhésions du magasin ---------------------------------------------------
-  let members: StoreMemberRow[];
-  let memberProfiles: ProfileRow[];
+  let context: StoreContext;
+  let edits: PlanningEdit[];
+  let prepared: PreparedWeek;
   try {
-    members = await loadStoreMembers(service, store.id);
-    memberProfiles = await loadProfilesByIds(service, members.map((member) => member.user_id));
+    context = await loadStoreContext(service, store.id);
+    // Le calque SURVIT au nouveau dépôt : c'est tout le principe. On le lit
+    // avant d'écrire quoi que ce soit pour pouvoir l'annoncer dans l'aperçu.
+    edits = await loadPlanningEdits(service, store.id, planning.week_start);
+    prepared = await prepareWeek(service, planning, edits, context);
   } catch (error) {
-    console.error(`store ${store.id}: member load failed:`, error);
-    return errorResponse(500, "Impossible de lire l'équipe du magasin.");
+    console.error(`store ${store.id}: week preparation failed:`, error);
+    return errorResponse(500, "Impossible de préparer la publication de cette semaine.");
   }
-  const profileById = new Map(memberProfiles.map((profile) => [profile.id, profile]));
-  const confirmedMembers = members.filter((member) => member.status === "confirmed");
-  const pendingMembers: PendingMember[] = members
-    .filter((member) => member.status === "pending")
-    .map((member) => ({
-      user_id: member.user_id,
-      display_name: profileById.get(member.user_id)?.display_name ?? "",
-      joined_at: member.created_at,
-    }));
-
-  // --- Appariement ------------------------------------------------------------
-  // 1. Les adhésions confirmées : la responsable a désigné la ligne elle-même.
-  const pairs = new Map<number, ProfileRow>();
-  const sources = new Map<number, MatchSource>();
-  for (const [index, userId] of matchByMemberName(planning.employees, confirmedMembers)) {
-    const profile = profileById.get(userId);
-    // Profil supprimé entre-temps : l'adhésion est orpheline, on l'ignore.
-    if (!profile) continue;
-    pairs.set(index, profile);
-    sources.set(index, "member");
-  }
-
-  // 2. Repli par rapprochement de noms. CLOISONNEMENT : dès que le magasin
-  //    compte un membre confirmé, ce repli ne regarde plus que ses membres —
-  //    une homonyme d'un autre magasin ne peut plus être appariée. Un magasin
-  //    encore sans membre confirmé garde l'ancien comportement, sinon sa
-  //    première publication n'atteindrait personne.
-  const scopedToStore = confirmedMembers.length > 0;
-  let fallbackPool: ProfileRow[];
-  try {
-    fallbackPool = scopedToStore
-      ? confirmedMembers
-        .map((member) => profileById.get(member.user_id))
-        .filter((profile): profile is ProfileRow => profile !== undefined)
-      : await loadProfiles(service);
-  } catch (error) {
-    console.error(`store ${store.id}: profile load failed:`, error);
-    return errorResponse(500, "Impossible de rechercher les comptes des employées.");
-  }
-  const takenProfileIds = new Set([...pairs.values()].map((profile) => profile.id));
-  const fallbackProfiles = fallbackPool.filter((profile) => !takenProfileIds.has(profile.id));
-  for (
-    const [index, profile] of matchEmployees(
-      planning.employees,
-      fallbackProfiles,
-      new Set(pairs.keys()),
-    )
-  ) {
-    pairs.set(index, profile);
-    sources.set(index, "name");
-  }
-
-  const unmatched = planning.employees
-    .map((employee, index) => (pairs.has(index) ? null : employee.name))
-    .filter((name): name is string => name !== null);
 
   // Aperçu : on montre l'appariement et ce qui SERAIT écrit, sans rien écrire.
   if (dryRun) {
-    const preview: MatchedEmployee[] = [...pairs].map(([index, profile]) => ({
-      name: planning.employees[index].name,
-      user_id: profile.id,
-      display_name: profile.display_name ?? "",
-      days_written: buildShiftRows(profile.id, planning.employees[index], planning).reduce(
-        (dates, row) => dates.add(row.date),
-        new Set<string>(),
-      ).size,
-      source: sources.get(index) ?? "name",
+    const preview: MatchedEmployee[] = prepared.targets.map((target) => ({
+      name: target.name,
+      user_id: target.user_id,
+      display_name: target.profile?.display_name ?? "",
+      days_written: daysWrittenOf(target.rows),
+      source: target.source,
     }));
     console.log(
       `store ${store.id} dry-run week ${planning.week_start}: ` +
-        `${planning.employees.length} rows, ${preview.length} matched, ${unmatched.length} unmatched, ` +
-        `${pendingMembers.length} pending, scoped=${scopedToStore}`,
+        `${planning.employees.length} rows, ${preview.length} matched, ` +
+        `${prepared.unmatched.length} unmatched, ${context.pendingMembers.length} pending, ` +
+        `${edits.length} edit(s) kept, scoped=${prepared.pairing.scopedToStore}`,
     );
     return jsonResponse(200, {
       success: true,
       week_start: planning.week_start,
       matched: preview,
-      unmatched,
-      pending_members: pendingMembers,
+      unmatched: prepared.unmatched,
+      pending_members: context.pendingMembers,
       notified: 0,
+      // « N modifications manuelles conservées » : la responsable doit savoir
+      // que ses ratures ne sont pas emportées par le nouveau fichier.
+      edit_count: edits.length,
+      orphan_edit_ids: prepared.effective.orphanEditIds,
     });
   }
 
@@ -1149,47 +2514,15 @@ Deno.serve(async (req) => {
     return errorResponse(500, "Impossible d'enregistrer les infos de la semaine.");
   }
 
-  const matched: MatchedEmployee[] = [];
-  const messages: PushMessage[] = [];
-  let failures = 0;
-  let skippedManual = 0;
-
-  for (const [index, profile] of pairs) {
-    const employee = planning.employees[index];
-    try {
-      const rows = buildShiftRows(profile.id, employee, planning);
-      const outcome = await writeWeek(service, profile.id, rows, weekDates);
-      skippedManual += outcome.skippedManual;
-      matched.push({
-        name: employee.name,
-        user_id: profile.id,
-        display_name: profile.display_name ?? "",
-        days_written: outcome.daysWritten,
-        source: sources.get(index) ?? "name",
-      });
-      // Preference serveur : une employee peut couper cette notification
-      // depuis Notifications. Absente (ancien profil) = on notifie.
-      const wantsPush = profile.notify_employer_planning !== false;
-      if (wantsPush && isExpoToken(profile.expo_push_token)) {
-        messages.push(pushMessage(profile.expo_push_token, planning.week_start, outcome.daysWritten));
-      }
-    } catch (error) {
-      // Jamais de nom dans les logs : la ligne du fichier suffit à retrouver
-      // la personne dans le payload conservé par store_imports.
-      failures += 1;
-      console.error(`store ${store.id}: row ${employee.row_index} write failed:`, error);
-    }
-  }
-
-  const notified = await sendPushNotifications(messages);
+  const outcome = await publishPreparedWeek(service, store.id, prepared);
 
   const { error: importError } = await service.from("store_imports").insert({
     store_id: store.id,
     week_start: planning.week_start,
     source_file_name: planning.source_file_name,
     payload: planning,
-    matched,
-    published_at: matched.length > 0 ? new Date().toISOString() : null,
+    matched: outcome.matched,
+    published_at: outcome.matched.length > 0 ? new Date().toISOString() : null,
   });
   if (importError) {
     // La publication a eu lieu : on ne la déclare pas en échec pour un défaut
@@ -1199,31 +2532,31 @@ Deno.serve(async (req) => {
 
   console.log(
     `store ${store.id} publish week ${planning.week_start}: ` +
-      `${planning.employees.length} rows, ${matched.length} matched, ${unmatched.length} unmatched, ` +
-      `${failures} failed, ${skippedManual} shift(s) kept manual, ${notified} notified, ` +
-      `${notices.length} notice(s), ${pendingMembers.length} pending, scoped=${scopedToStore}`,
+      `${planning.employees.length} rows, ${outcome.matched.length} matched, ` +
+      `${prepared.unmatched.length} unmatched, ${outcome.failures} failed, ` +
+      `${outcome.skippedManual} shift(s) kept manual, ${outcome.notified} notified, ` +
+      `${notices.length} notice(s), ${edits.length} edit(s) kept, ` +
+      `${context.pendingMembers.length} pending, scoped=${prepared.pairing.scopedToStore}`,
   );
 
-  if (failures > 0) {
+  const responseBody = {
+    week_start: planning.week_start,
+    matched: outcome.matched,
+    unmatched: prepared.unmatched,
+    pending_members: context.pendingMembers,
+    notified: outcome.notified,
+    edit_count: edits.length,
+    orphan_edit_ids: prepared.effective.orphanEditIds,
+  };
+
+  if (outcome.failures > 0) {
     return jsonResponse(207, {
       success: false,
-      error:
-        `${matched.length} planning(s) publié(s), ${failures} en échec. ` +
+      error: `${outcome.matched.length} planning(s) publié(s), ${outcome.failures} en échec. ` +
         "Réessaie la publication : elle est sans risque, elle remplace la semaine.",
-      week_start: planning.week_start,
-      matched,
-      unmatched,
-      pending_members: pendingMembers,
-      notified,
+      ...responseBody,
     });
   }
 
-  return jsonResponse(200, {
-    success: true,
-    week_start: planning.week_start,
-    matched,
-    unmatched,
-    pending_members: pendingMembers,
-    notified,
-  });
+  return jsonResponse(200, { success: true, ...responseBody });
 });

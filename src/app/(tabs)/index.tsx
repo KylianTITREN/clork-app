@@ -112,6 +112,28 @@ function toDayRowSlots(dayShifts: Shift[]): DayRowSlot[] {
     }));
 }
 
+/** Un créneau du jour vient-il du calque Clork Pro (rature de la responsable) ? */
+function hasStoreEdit(dayShifts: Shift[]): boolean {
+  return dayShifts.some((s) => s.is_store_edit);
+}
+
+/**
+ * Mention sobre « Modifié par le magasin » (hero du jour, jour déplié) :
+ * l'horaire n'est plus celui du planning publié. Information, pas alerte —
+ * donc pastille accent et texte discret, jamais de rouge ni d'icône criarde.
+ */
+function StoreEditNote() {
+  const colors = useThemeColors();
+  return (
+    <View style={styles.editedNote}>
+      <View style={[styles.editedDot, { backgroundColor: colors.accent }]} />
+      <Text style={[styles.editedNoteText, { color: colors.textSoft }]}>
+        Modifié par le magasin
+      </Text>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
@@ -399,6 +421,8 @@ export default function HomeScreen() {
   const mainToday = todayShifts.find((s) => s.type === "work" && s.start_at && s.end_at);
   const heroShift = mainToday ?? todayShifts.find((s) => s.start_at && s.end_at);
   const heroStatus = todayShifts.find((s) => !s.start_at);
+  // La responsable a raturé ce jour après publication (calque Clork Pro).
+  const todayEdited = hasStoreEdit(todayShifts);
 
   // « Départ dans 1h10 — rappel à 8:15 » : prochain début à venir aujourd'hui.
   const departure = useMemo(() => {
@@ -673,6 +697,7 @@ export default function HomeScreen() {
                         </View>
                       ) : null}
                     </View>
+                    {todayEdited ? <StoreEditNote /> : null}
                     {todayShifts.filter((s) => s.id !== heroShift.id && s.start_at && s.end_at)
                       .map((s) => (
                         <Text key={s.id} style={[styles.heroExtra, { color: colors.textSoft }]}>
@@ -691,6 +716,7 @@ export default function HomeScreen() {
                         ? "Journée sans horaires précis."
                         : "Rien de prévu aujourd'hui — profite."}
                     </Text>
+                    {todayEdited ? <StoreEditNote /> : null}
                   </>
                 )}
               </View>
@@ -729,6 +755,7 @@ export default function HomeScreen() {
                     dayNumber={date.slice(8)}
                     slots={toDayRowSlots(dayShifts)}
                     status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
+                    storeEdited={hasStoreEdit(dayShifts)}
                     readOnly={!!viewing}
                     onPress={() => openDayEditor(date, dayShifts)}
                   />
@@ -810,6 +837,7 @@ export default function HomeScreen() {
                     dayNumber={date.slice(8)}
                     slots={toDayRowSlots(dayShifts)}
                     status={dayShifts.some((s) => s.start_at) ? "work" : "off"}
+                    storeEdited={hasStoreEdit(dayShifts)}
                     readOnly={!!viewing}
                     // Rien de déplié → le jour J garde son contour accent.
                     style={
@@ -878,6 +906,7 @@ export default function HomeScreen() {
                         {formatHours(dayShifts.reduce((acc, s) => acc + paidHoursOf(s), 0))} payées
                       </Text>
                     </View>
+                    {hasStoreEdit(dayShifts) ? <StoreEditNote /> : null}
                     {mates.openers.length > 0 ? (
                       <View style={styles.matesRow}>
                         <Text style={[styles.expandedDetail, { color: colors.textSoft }]}>
@@ -1128,6 +1157,23 @@ const styles = StyleSheet.create({
     fontSize: typeScale.bodySm,
     fontFamily: fonts.medium,
     marginTop: 2,
+  },
+  // Mention « modifié par le magasin » : une ligne, pastille accent + texte
+  // discret. Même vocabulaire que le repère de DayRow, en plus explicite.
+  editedNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
+  editedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  editedNoteText: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.medium,
   },
   // Squelette : rectangles muets calés sur les hauteurs réelles (hero 44,
   // carte rappel 46, ligne jour 70 = 48 + 10 de padding + bordures).
