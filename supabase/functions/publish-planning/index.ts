@@ -37,6 +37,18 @@
 //   et les créneaux venus du calque portent `is_store_edit = true` (badge
 //   « modifié » côté app).
 //
+// CORRIGER AVANT D'ENVOYER (`pre_publication`) :
+//   Au tout premier dépôt, la responsable voit dans l'aperçu qu'une ligne est
+//   fausse. Sa correction n'est alors PAS une rature : personne n'a encore vu
+//   ce planning. Une correction enregistrée AVANT la première publication de
+//   la semaine rejoint donc le SOCLE — `is_store_edit = false`, pas de badge,
+//   pas de « tes horaires ont changé » (la première publication envoie de
+//   toute façon le message d'arrivée). Après la première publication, c'est
+//   une rature, comportement inchangé.
+//   Le statut se fige à l'ENREGISTREMENT (`handleSaveEdit`) et n'est jamais
+//   recalculé ensuite. Réenregistrer la même correction plus tard est un
+//   nouveau geste, donc une nouvelle évaluation.
+//
 // Actions supportées (champ `action`, absent = publication) :
 //   · verify_only     : le couple (lien, code) est-il valide ?
 //   · dry_run         : aperçu de l'appariement, aucune écriture.
@@ -45,7 +57,8 @@
 //   · reassign_member : corrige l'attribution d'un membre déjà confirmé.
 //   · list_weeks      : les semaines déjà publiées pour ce magasin.
 //   · get_week        : l'état EFFECTIF d'une semaine (socle + calque).
-//   · save_edit       : crée ou remplace une entrée du calque.
+//   · save_edit       : crée ou remplace une entrée du calque, et fige son
+//                       statut (correction du socle ou rature).
 //   · delete_edit     : retire une entrée du calque.
 //   · apply_week      : réécrit + notifie sans nouveau dépôt de fichier.
 //   · (défaut)        : publication réelle + infos de la semaine + push.
@@ -180,12 +193,38 @@ type PlanningEdit = {
   team_names: string[] | null;
   action: EditAction;
   shifts: EditShift[];
+  /**
+   * Correction enregistrée AVANT la première publication de la semaine : elle
+   * fait partie du SOCLE et non des ratures. Ses créneaux sont écrits avec
+   * `is_store_edit = false` (aucun badge « modifié », aucune notification de
+   * changement). Figé à l'enregistrement, jamais recalculé.
+   */
+  pre_publication: boolean;
   created_at: string;
   updated_at: string;
 };
 
-/** Une entrée du calque telle qu'elle arrive du site (sans id ni horodatage). */
-type EditInput = Omit<PlanningEdit, "id" | "created_at" | "updated_at">;
+/**
+ * Une entrée du calque telle qu'elle arrive du site : ni id, ni horodatage, ni
+ * `pre_publication`. Ce dernier est une CONSTATATION du serveur (la semaine
+ * était-elle déjà publiée ?), jamais une déclaration du site — sinon un appel
+ * mal formé pourrait faire passer une rature pour une correction du socle et
+ * priver une employée de son badge et de sa notification.
+ */
+type EditInput = Omit<PlanningEdit, "id" | "created_at" | "updated_at" | "pre_publication">;
+
+/**
+ * Les deux compteurs de l'aperçu. Un seul chiffre mentirait : « 3 modifications
+ * conservées » pour des corrections que personne n'a jamais vues n'a aucun sens
+ * pour la responsable.
+ */
+type EditCounts = { edit_count: number; pre_publication_count: number };
+
+/** `edit_count` = les ratures. `pre_publication_count` = les corrections du socle. */
+function countEdits(edits: readonly { pre_publication: boolean }[]): EditCounts {
+  const preCount = edits.filter((edit) => edit.pre_publication).length;
+  return { edit_count: edits.length - preCount, pre_publication_count: preCount };
+}
 
 // --- Réponses -----------------------------------------------------------------
 
@@ -982,6 +1021,7 @@ type PlanningEditRow = {
   team_names: string[] | null;
   action: string;
   shifts: unknown;
+  pre_publication: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -1022,13 +1062,19 @@ function toPlanningEdit(row: PlanningEditRow): PlanningEdit | null {
     team_names: row.team_names,
     action: row.action,
     shifts: readEditShifts(row.shifts),
+    // Défaut prudent : ce qui n'est pas explicitement une correction du socle
+    // est une rature. Se tromper dans ce sens laisse un badge et une
+    // notification de trop ; l'inverse effacerait un changement d'horaire sous
+    // les yeux de l'employée.
+    pre_publication: row.pre_publication === true,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
 const EDIT_COLUMNS =
-  "id, week_start, date, scope, employee_name, team_scope, team_names, action, shifts, created_at, updated_at";
+  "id, week_start, date, scope, employee_name, team_scope, team_names, action, shifts, " +
+  "pre_publication, created_at, updated_at";
 
 async function loadPlanningEdits(
   service: SupabaseClient,
@@ -1060,7 +1106,15 @@ function editKey(edit: { scope: EditScope; employee_name: string | null; date: s
 
 // --- Application du calque ----------------------------------------------------
 
-type EffectiveShift = { start: string; end: string; type: EditShiftType; is_edit: boolean };
+type EffectiveShift = {
+  start: string;
+  end: string;
+  type: EditShiftType;
+  /** Ce créneau vient du calque et non du fichier. */
+  is_edit: boolean;
+  /** ... et il a été saisi avant la première publication : il fait partie du socle. */
+  pre_publication: boolean;
+};
 
 type EffectiveDay = {
   day_index: number;
@@ -1068,8 +1122,15 @@ type EffectiveDay = {
   status: "work" | "off";
   shifts: EffectiveShift[];
   duration_hours: number | null;
-  /** Le jour porte une correction : c'est lui qui allume le badge « modifié ». */
+  /** Le jour porte une correction, quelle qu'elle soit (aperçu du site). */
   edited: boolean;
+  /**
+   * ... et au moins une de ces corrections est antérieure à la première
+   * publication. Indispensable pour le cas sans créneau : une journée barrée
+   * avant envoi (`set_day` vide) n'a rien d'autre pour se distinguer d'une
+   * journée barrée après.
+   */
+  pre_publication_edited: boolean;
   /** Les heures payées imprimées valent-elles encore ? Non dès qu'on touche au travail. */
   keeps_file_hours: boolean;
 };
@@ -1101,6 +1162,7 @@ function emptyDays(weekDates: readonly string[]): EffectiveDay[] {
     shifts: [],
     duration_hours: null,
     edited: false,
+    pre_publication_edited: false,
     keeps_file_hours: true,
   }));
 }
@@ -1116,6 +1178,7 @@ function daysFromFile(employee: ParsedEmployee, weekDates: readonly string[]): E
           end: shift.end,
           type: "work" as const,
           is_edit: false,
+          pre_publication: false,
         })),
       )
       : [];
@@ -1126,6 +1189,7 @@ function daysFromFile(employee: ParsedEmployee, weekDates: readonly string[]): E
       shifts,
       duration_hours: source?.duration_hours ?? null,
       edited: false,
+      pre_publication_edited: false,
       keeps_file_hours: true,
     };
   });
@@ -1214,13 +1278,19 @@ function buildEffectiveWeek(
       continue;
     }
     const shifts: EffectiveShift[] = sortShifts(
-      edit.shifts.map((shift) => ({ ...shift, is_edit: true })),
+      edit.shifts.map((shift) => ({
+        ...shift,
+        is_edit: true,
+        pre_publication: edit.pre_publication,
+      })),
     );
+    const day = entry.days[dayIndex];
     entry.days[dayIndex] = {
-      ...entry.days[dayIndex],
+      ...day,
       status: shifts.length > 0 ? "work" : "off",
       shifts,
       edited: true,
+      pre_publication_edited: day.pre_publication_edited || edit.pre_publication,
       keeps_file_hours: false,
     };
   }
@@ -1242,7 +1312,7 @@ function buildEffectiveWeek(
       const taken = new Set(day.shifts.map((shift) => shift.start));
       const added: EffectiveShift[] = edit.shifts
         .filter((shift) => !taken.has(shift.start))
-        .map((shift) => ({ ...shift, is_edit: true }));
+        .map((shift) => ({ ...shift, is_edit: true, pre_publication: edit.pre_publication }));
       if (added.length === 0) continue;
       const shifts = sortShifts([...day.shifts, ...added]);
       entry.days[dayIndex] = {
@@ -1250,6 +1320,7 @@ function buildEffectiveWeek(
         status: shifts.length > 0 ? "work" : "off",
         shifts,
         edited: true,
+        pre_publication_edited: day.pre_publication_edited || edit.pre_publication,
         // Une réunion ajoutée ne fausse pas les heures payées imprimées ;
         // un créneau de travail ajouté, si.
         keeps_file_hours: day.keeps_file_hours && !added.some((shift) => shift.type === "work"),
@@ -1374,7 +1445,10 @@ function buildShiftRows(
         break_minutes: carries ? breakMinutes : 0,
         source: "import" as const,
         is_edited: false as const,
-        is_store_edit: shift.is_edit,
+        // Un créneau né d'une correction PRÉ-PUBLICATION fait partie du socle :
+        // l'employée n'a jamais vu la version d'avant, il n'y a donc rien à
+        // signaler. Seule une rature allume le badge « modifié ».
+        is_store_edit: shift.is_edit && !shift.pre_publication,
       };
     });
   });
@@ -1778,12 +1852,14 @@ function serializeWeek(prepared: PreparedWeek, edits: readonly PlanningEdit[]) {
       date: day.date,
       status: day.status,
       edited: day.edited,
+      pre_publication_edited: day.pre_publication_edited,
       duration_hours: day.duration_hours,
       shifts: day.shifts.map((shift) => ({
         start: shift.start,
         end: shift.end,
         type: shift.type,
         is_edit: shift.is_edit,
+        pre_publication: shift.pre_publication,
       })),
     })),
     edits: edits.filter(
@@ -1820,6 +1896,36 @@ async function loadLatestImport(
   if (error) throw new Error("store_imports read failed: " + error.message);
   const rows = (data ?? []) as ImportRow[];
   return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Cette semaine est-elle DÉJÀ partie chez les employées ? C'est la seule
+ * question qui décide du statut d'une correction (socle ou rature).
+ *
+ * On cherche N'IMPORTE QUEL dépôt daté, surtout pas le dernier. Deux pièges le
+ * commandent :
+ *   · un nouveau dépôt qui n'apparie personne laisse `published_at` à null,
+ *     alors que le dépôt précédent, lui, a bel et bien été distribué ;
+ *   · une employée appariée seulement au second passage ne change rien au fait
+ *     que ses collègues ont déjà lu la semaine.
+ * Se fier au dernier dépôt ferait passer une rature pour une correction du
+ * socle — donc un badge « modifié » et une notification en moins sur des
+ * horaires que les équipes avaient déjà en poche.
+ */
+async function hasPublishedWeek(
+  service: SupabaseClient,
+  storeId: string,
+  weekStart: string,
+): Promise<boolean> {
+  const { data, error } = await service
+    .from("store_imports")
+    .select("id")
+    .eq("store_id", storeId)
+    .eq("week_start", weekStart)
+    .not("published_at", "is", null)
+    .limit(1);
+  if (error) throw new Error("store_imports read failed: " + error.message);
+  return (data ?? []).length > 0;
 }
 
 // --- Confirmation des adhésions -----------------------------------------------
@@ -2027,15 +2133,20 @@ async function handleListWeeks(service: SupabaseClient, storeId: string): Promis
   // ratures derrière lui, c'est le haut de la liste qui doit rester juste.
   const { data: editData, error: editError } = await service
     .from("store_planning_edits")
-    .select("week_start")
+    .select("week_start, pre_publication")
     .eq("store_id", storeId)
     .order("week_start", { ascending: false })
     .limit(MAX_EDIT_ROWS_SCANNED);
   if (editError) throw new Error("store_planning_edits read failed: " + editError.message);
 
+  // Deux compteurs distincts : les ratures d'un côté, les corrections faites
+  // avant le premier envoi de l'autre. Les mélanger annoncerait « N
+  // modifications » sur une semaine que personne n'a jamais vue autrement.
   const editCount = new Map<string, number>();
-  for (const row of (editData ?? []) as { week_start: string }[]) {
-    editCount.set(row.week_start, (editCount.get(row.week_start) ?? 0) + 1);
+  const preCount = new Map<string, number>();
+  for (const row of (editData ?? []) as { week_start: string; pre_publication: boolean | null }[]) {
+    const target = row.pre_publication === true ? preCount : editCount;
+    target.set(row.week_start, (target.get(row.week_start) ?? 0) + 1);
   }
 
   // Une semaine peut avoir été déposée plusieurs fois : seule la dernière
@@ -2050,6 +2161,7 @@ async function handleListWeeks(service: SupabaseClient, storeId: string): Promis
       published_at: row.published_at,
       employee_count: Array.isArray(row.matched) ? row.matched.length : 0,
       edit_count: editCount.get(row.week_start) ?? 0,
+      pre_publication_count: preCount.get(row.week_start) ?? 0,
     });
     if (weeks.length >= MAX_LISTED_WEEKS) break;
   }
@@ -2097,9 +2209,11 @@ async function handleGetWeek(
     published_at: latest.published_at,
     imported_at: latest.created_at,
     employees: serializeWeek(prepared, edits),
+    // Chaque entrée porte son `pre_publication` : le site distingue « corrigé
+    // avant envoi » de « modifié après ».
     edits,
     orphan_edit_ids: prepared.effective.orphanEditIds,
-    edit_count: edits.length,
+    ...countEdits(edits),
     matched,
     unmatched: prepared.unmatched,
     pending_members: context.pendingMembers,
@@ -2121,6 +2235,16 @@ async function handleSaveEdit(
   if (existing.length - duplicates.length >= MAX_EDITS_PER_WEEK) {
     return errorResponse(409, `Pas plus de ${MAX_EDITS_PER_WEEK} corrections pour une semaine.`);
   }
+
+  // LE STATUT SE DÉCIDE ICI, une fois pour toutes. Tant que la semaine n'est
+  // pas partie, corriger une ligne fausse revient à corriger le fichier :
+  // la correction rejoint le socle. Après, c'est une rature.
+  //
+  // Volontairement calculé maintenant, et non repris de l'entrée remplacée :
+  // réenregistrer une correction est un NOUVEAU geste de la responsable, et il
+  // s'évalue dans le monde tel qu'il est au moment où elle le fait. Les entrées
+  // déjà en base, elles, ne sont jamais réévaluées.
+  const prePublication = !(await hasPublishedWeek(service, storeId, edit.week_start));
 
   if (duplicates.length > 0) {
     const { error } = await service
@@ -2144,6 +2268,7 @@ async function handleSaveEdit(
       team_names: edit.team_names,
       action: edit.action,
       shifts: edit.shifts,
+      pre_publication: prePublication,
       // created_at conservé à la première saisie n'apporterait rien : une
       // correction remplacée est une nouvelle correction.
       created_at: now,
@@ -2154,11 +2279,14 @@ async function handleSaveEdit(
   if (error) throw new Error("store_planning_edits insert failed: " + error.message);
 
   const saved = toPlanningEdit(data as PlanningEditRow);
+  // Compté sur `prePublication` et non sur `saved` : toPlanningEdit peut
+  // refuser une ligne bancale, le compteur doit rester juste quand même.
+  const kept = existing.filter((entry) => !duplicates.includes(entry.id));
   return jsonResponse(200, {
     success: true,
     edit: saved,
     replaced: duplicates.length,
-    edit_count: existing.length - duplicates.length + 1,
+    ...countEdits([...kept, { pre_publication: prePublication }]),
   });
 }
 
@@ -2219,11 +2347,13 @@ async function handleApplyWeek(
     if (error) console.error(`store ${store.id}: store_imports update failed:`, error.message);
   }
 
+  const counts = countEdits(edits);
   console.log(
     `store ${store.id} apply week ${weekStart}: ` +
       `${outcome.matched.length} matched, ${prepared.unmatched.length} unmatched, ` +
       `${outcome.failures} failed, ${outcome.skippedManual} shift(s) kept manual, ` +
-      `${outcome.notified} notified, ${edits.length} edit(s)`,
+      `${outcome.notified} notified, ${counts.edit_count} edit(s), ` +
+      `${counts.pre_publication_count} pre-publication`,
   );
 
   const body = {
@@ -2232,7 +2362,7 @@ async function handleApplyWeek(
     unmatched: prepared.unmatched,
     pending_members: context.pendingMembers,
     notified: outcome.notified,
-    edit_count: edits.length,
+    ...counts,
   };
 
   if (outcome.failures > 0) {
@@ -2480,11 +2610,13 @@ Deno.serve(async (req) => {
       days_written: daysWrittenOf(target.rows),
       source: target.source,
     }));
+    const counts = countEdits(edits);
     console.log(
       `store ${store.id} dry-run week ${planning.week_start}: ` +
         `${planning.employees.length} rows, ${preview.length} matched, ` +
         `${prepared.unmatched.length} unmatched, ${context.pendingMembers.length} pending, ` +
-        `${edits.length} edit(s) kept, scoped=${prepared.pairing.scopedToStore}`,
+        `${counts.edit_count} edit(s) kept, ${counts.pre_publication_count} pre-publication, ` +
+        `scoped=${prepared.pairing.scopedToStore}`,
     );
     return jsonResponse(200, {
       success: true,
@@ -2494,8 +2626,15 @@ Deno.serve(async (req) => {
       pending_members: context.pendingMembers,
       notified: 0,
       // « N modifications manuelles conservées » : la responsable doit savoir
-      // que ses ratures ne sont pas emportées par le nouveau fichier.
-      edit_count: edits.length,
+      // que ses ratures ne sont pas emportées par le nouveau fichier. Compté à
+      // part de `pre_publication_count`, sans quoi l'aperçu d'un premier dépôt
+      // annoncerait des « modifications conservées » pour des corrections que
+      // personne n'a jamais vues.
+      ...counts,
+      // Le détail par entrée : le site sait laquelle est une rature et laquelle
+      // a été corrigée avant envoi, y compris pour une journée mise en repos
+      // (qui ne laisse aucun créneau derrière elle).
+      edits,
       orphan_edit_ids: prepared.effective.orphanEditIds,
     });
   }
@@ -2530,12 +2669,14 @@ Deno.serve(async (req) => {
     console.error(`store ${store.id}: store_imports insert failed:`, importError.message);
   }
 
+  const counts = countEdits(edits);
   console.log(
     `store ${store.id} publish week ${planning.week_start}: ` +
       `${planning.employees.length} rows, ${outcome.matched.length} matched, ` +
       `${prepared.unmatched.length} unmatched, ${outcome.failures} failed, ` +
       `${outcome.skippedManual} shift(s) kept manual, ${outcome.notified} notified, ` +
-      `${notices.length} notice(s), ${edits.length} edit(s) kept, ` +
+      `${notices.length} notice(s), ${counts.edit_count} edit(s) kept, ` +
+      `${counts.pre_publication_count} pre-publication, ` +
       `${context.pendingMembers.length} pending, scoped=${prepared.pairing.scopedToStore}`,
   );
 
@@ -2545,7 +2686,7 @@ Deno.serve(async (req) => {
     unmatched: prepared.unmatched,
     pending_members: context.pendingMembers,
     notified: outcome.notified,
-    edit_count: edits.length,
+    ...counts,
     orphan_edit_ids: prepared.effective.orphanEditIds,
   };
 
