@@ -109,8 +109,9 @@ type TimeSettingPillProps = {
  * Pilule réglage v2 (maquette Scan & horaires) : fond neutre r11, label tiny
  * uppercase à gauche + heure body/bold à droite dans la MÊME pilule — tout le
  * bloc ouvre le sélecteur d'heure natif (roue iOS / horloge Android).
+ * Exportée : « Mon magasin » s'en sert pour les horaires d'ouverture.
  */
-function TimeSettingPill({ label, value, placeholder, onChange, onClear }: TimeSettingPillProps) {
+export function TimeSettingPill({ label, value, placeholder, onChange, onClear }: TimeSettingPillProps) {
   const colors = useThemeColors();
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState<Date>(() => toPickerDate(value));
@@ -314,33 +315,8 @@ export default function PlanningSettingsScreen() {
     }
   }
 
-  // --- Horaires du magasin (v2) : « tu ouvres / tu fermes » sur l'accueil.
-  // Les mentions O/F lues sur le planning priment sur cette déduction.
-  const [storeOpen, setStoreOpen] = useState<string | null>(null);
-  const [storeClose, setStoreClose] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!userId) return;
-    supabase
-      .from("profiles")
-      .select("store_open_time, store_close_time")
-      .eq("id", userId)
-      .single<{ store_open_time: string | null; store_close_time: string | null }>()
-      .then(({ data }) => {
-        setStoreOpen(data?.store_open_time?.slice(0, 5) ?? null);
-        setStoreClose(data?.store_close_time?.slice(0, 5) ?? null);
-      });
-  }, [userId]);
-
-  async function saveStoreHours(open: string | null, close: string | null) {
-    if (!userId) return;
-    setStoreOpen(open);
-    setStoreClose(close);
-    await supabase
-      .from("profiles")
-      .update({ store_open_time: open, store_close_time: close })
-      .eq("id", userId);
-  }
+  // Les horaires du magasin (ouverture / fermeture) ont déménagé sur
+  // /profile/store, avec le rattachement au magasin.
 
   // --- Créneaux types : aperçu inline, édition sur /profile/presets.
   const [presets, setPresets] = useState<ShiftPreset[]>(DEFAULT_PRESETS);
@@ -436,27 +412,6 @@ export default function PlanningSettingsScreen() {
               onChangeText={setEmployeeId}
               style={inputOnCard}
             />
-          </SettingsCard>
-
-          <SettingsCard title="Horaires du magasin" subtitle="Pour savoir quand tu ouvres ou fermes">
-            <View style={styles.pillsRow}>
-              <TimeSettingPill
-                label="Ouvre"
-                value={storeOpen}
-                placeholder="09:00"
-                onChange={(time) => void saveStoreHours(time, storeClose)}
-              />
-              <TimeSettingPill
-                label="Ferme"
-                value={storeClose}
-                placeholder="21:00"
-                onChange={(time) => void saveStoreHours(storeOpen, time)}
-              />
-            </View>
-            <Text style={[styles.storeHint, { color: colors.textDisabled }]}>
-              Créneau qui commence à l'ouverture → tu ouvres ; qui finit à la fermeture → tu
-              fermes. Les mentions O/F du planning priment.
-            </Text>
           </SettingsCard>
 
           <SettingsCard
@@ -699,11 +654,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: spacing.md,
     gap: spacing.sm,
-  },
-  storeHint: {
-    fontSize: typeScale.tiny,
-    fontFamily: fonts.medium,
-    lineHeight: 16,
   },
   // Rangée créneau type : « Matin   06:00 – 13:00 · 30 min   › ».
   presetRow: {

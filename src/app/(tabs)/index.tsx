@@ -22,6 +22,15 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PullSplashTeaser, triggerUpdateSplash } from "@/components/brand/UpdateSplash";
+import {
+  StoreDayNotices,
+  StoreNoticeList,
+  StoreWeekNotices,
+  fetchStoreNotices,
+  noticesForDate,
+  weekWideNotices,
+  type StoreNotice,
+} from "@/components/home/StoreNotices";
 import { AvatarFace } from "@/components/ui/AvatarFace";
 import { DayEditorScreen } from "@/components/week/DayEditorScreen";
 import { DayRow, type DayRowSlot } from "@/components/week/DayRow";
@@ -110,6 +119,9 @@ export default function HomeScreen() {
   const [view, setView] = useState<"today" | "week">("today");
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [shifts, setShifts] = useState<Shift[]>([]);
+  // Infos du magasin (Clork Pro) de la semaine affichée — chargées avec les
+  // créneaux, jamais quand on consulte le planning de quelqu'un d'autre.
+  const [notices, setNotices] = useState<StoreNotice[]>([]);
   // Premier chargement : sans lui l'accueil affiche « Repos — rien de prévu »
   // avant l'arrivée des données (contenu faux à chaque ouverture).
   const [isLoading, setIsLoading] = useState(true);
@@ -146,15 +158,22 @@ export default function HomeScreen() {
       return;
     }
     try {
-      const { data } = await supabase
-        .from("shifts")
-        .select("*")
-        .eq("user_id", targetId)
-        .gte("date", monday)
-        .lte("date", sunday)
-        .order("date")
-        .order("start_at");
+      // Créneaux + infos du magasin en parallèle : une seule passe réseau par
+      // semaine affichée. Les infos sont celles de MON magasin — on ne les
+      // charge donc pas quand on lit le planning d'une personne suivie.
+      const [{ data }, storeNotices] = await Promise.all([
+        supabase
+          .from("shifts")
+          .select("*")
+          .eq("user_id", targetId)
+          .gte("date", monday)
+          .lte("date", sunday)
+          .order("date")
+          .order("start_at"),
+        viewing ? Promise.resolve<StoreNotice[]>([]) : fetchStoreNotices(monday),
+      ]);
       setShifts((data as Shift[]) ?? []);
+      setNotices(storeNotices);
       // Rappels locaux : seulement sur MON planning de la semaine courante.
       if (!viewing && monday === mondayOf(new Date())) {
         void rescheduleFromShifts((data as Shift[]) ?? []);
@@ -374,6 +393,9 @@ export default function HomeScreen() {
     () => shifts.filter((s) => s.date === todayIso),
     [shifts, todayIso],
   );
+  // Infos du magasin datées d'aujourd'hui / valables toute la semaine.
+  const todayNotices = useMemo(() => noticesForDate(notices, todayIso), [notices, todayIso]);
+  const weekNotices = useMemo(() => weekWideNotices(notices), [notices]);
   const mainToday = todayShifts.find((s) => s.type === "work" && s.start_at && s.end_at);
   const heroShift = mainToday ?? todayShifts.find((s) => s.start_at && s.end_at);
   const heroStatus = todayShifts.find((s) => !s.start_at);
@@ -680,6 +702,10 @@ export default function HomeScreen() {
                 </View>
               ) : null}
 
+              {/* Infos du magasin du JOUR : deux lignes grises sous le hero,
+                  rien du tout s'il n'y en a pas. */}
+              <StoreNoticeList notices={todayNotices} />
+
               {shortcuts}
 
               {/* La suite */}
@@ -768,6 +794,9 @@ export default function HomeScreen() {
               {" "}payées cette semaine
             </Text>
           </View>
+
+          {/* Infos valables toute la semaine : un seul encart, en haut. */}
+          <StoreWeekNotices notices={weekNotices} />
 
           <View style={styles.dayList}>
             {days.map(({ date, shifts: dayShifts }, index) => {
@@ -877,6 +906,8 @@ export default function HomeScreen() {
                         ))}
                       </View>
                     ) : null}
+                    {/* Infos du magasin de CE jour, sous les créneaux. */}
+                    <StoreDayNotices notices={noticesForDate(notices, date)} />
                     {!viewing ? (
                       <Pressable
                         onPress={() => openDayEditor(date, dayShifts)}

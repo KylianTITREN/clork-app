@@ -27,6 +27,7 @@ import {
   fonts,
   letterSpacing,
   radius,
+  shiftTypeColor,
   spacing,
   typeScale,
   useThemeColors,
@@ -226,13 +227,23 @@ export default function ProfileHubScreen() {
             subtitle="Thème · icône de l’app · widgets"
             onPress={() => router.push("/profile/theme")}
           />
+          {/* Rattachement Clork Pro : sans compte, aucun magasin ne peut
+              confirmer une adhésion — la ligne est masquée en invité. */}
           {!isGuest ? (
-            <NavRow
-              dot={colors.textSoft}
-              title="Compte"
-              subtitle="Email · mot de passe · code VIP · suppression"
-              onPress={() => router.push("/profile/account")}
-            />
+            <>
+              <NavRow
+                dot={shiftTypeColor.closing}
+                title="Mon magasin"
+                subtitle="Rattachement · horaires d’ouverture"
+                onPress={() => router.push("/profile/store")}
+              />
+              <NavRow
+                dot={colors.textSoft}
+                title="Compte"
+                subtitle="Email · mot de passe · code VIP · suppression"
+                onPress={() => router.push("/profile/account")}
+              />
+            </>
           ) : null}
 
         </ScrollView>
