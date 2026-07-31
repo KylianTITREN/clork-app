@@ -36,6 +36,7 @@ import { ProcessingView, type ProcessingStep } from "@/components/scan/Processin
 import { RecapStep, type WizardDay } from "@/components/scan/RecapStep";
 import { ReviewStep } from "@/components/scan/ReviewStep";
 import { ScanAlertStep } from "@/components/scan/ScanAlertStep";
+import { PageChoiceSheet } from "@/components/scan/PageChoiceSheet";
 import { ScanCorrectionScreen } from "@/components/scan/ScanCorrectionScreen";
 import { SuccessView } from "@/components/scan/SuccessView";
 import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
@@ -502,6 +503,8 @@ export default function AddWizardScreen() {
   const [isDiscarding, setIsDiscarding] = useState(false);
   // Un planning récupéré par code n'a pas de photo à reprendre chez nous.
   const [canRetake, setCanRetake] = useState(true);
+  // Pages multiples rapportées par le scanner iOS : choix de celle à lire.
+  const [pageChoice, setPageChoice] = useState<string[] | null>(null);
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
@@ -762,11 +765,22 @@ export default function AddWizardScreen() {
       }
       // Scanner de documents natif (VisionKit iOS / ML Kit Android) :
       // bords, perspective, contraste — la photo arrive « à plat ».
+      // maxNumDocuments ne vaut que pour Android : sur iOS, VisionKit laisse
+      // toujours enchaîner les pages et Apple n'expose aucune limite. On ne
+      // peut donc pas brider la capture — on traite proprement le résultat.
       const { scannedImages, status } = await DocumentScanner.scanDocument({
         maxNumDocuments: 1,
         croppedImageQuality: 95,
       });
       if (status !== "success" || !scannedImages || scannedImages.length === 0) return;
+      if (scannedImages.length > 1) {
+        // Plusieurs pages : soit elle a recommencé (c'est la DERNIÈRE qui
+        // compte), soit le planning tient sur deux feuilles (c'est celle avec
+        // sa ligne). Dans les deux cas, c'est à elle de trancher — avant, on
+        // gardait la première en silence.
+        setPageChoice(scannedImages);
+        return;
+      }
       await processPhoto(scannedImages[0]);
       return;
     }
@@ -1119,6 +1133,16 @@ export default function AddWizardScreen() {
           onCamera={() => pickImage("camera")}
           onLibrary={() => pickImage("library")}
         />
+        {pageChoice ? (
+          <PageChoiceSheet
+            pages={pageChoice}
+            onPick={(uri) => {
+              setPageChoice(null);
+              void processPhoto(uri);
+            }}
+            onCancel={() => setPageChoice(null)}
+          />
+        ) : null}
       </WizardFrame>
     );
   }
