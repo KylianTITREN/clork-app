@@ -35,6 +35,11 @@ type RecapStepProps = {
   drafts: DraftShift[];
   checked: ReadonlySet<string>;
   readHours: number;
+  /**
+   * Total hebdo imprimé sur le planning, fourni UNIQUEMENT quand il ne colle
+   * pas à ce qui a été lu : l'écart reste alors visible jusqu'à la validation.
+   */
+  printedHours?: number | null;
   onToggle: (date: string) => void;
   onCorrect: () => void;
   onValidate: () => void;
@@ -50,6 +55,7 @@ export function RecapStep({
   drafts,
   checked,
   readHours,
+  printedHours = null,
   onToggle,
   onCorrect,
   onValidate,
@@ -72,6 +78,13 @@ export function RecapStep({
           <Text style={[styles.totalLabel, { color: colors.onInk, opacity: 0.7 }]}>TOTAL LU</Text>
           <Text style={[styles.totalValue, { color: colors.onInk }]}>
             {formatHours(readHours)}
+            {printedHours != null ? (
+              // L'écart avec le total imprimé trahit une ligne décalée : il
+              // reste affiché jusqu'au bout, sans bloquer la validation.
+              <Text style={[styles.totalNote, { color: colors.shiftCp }]}>
+                {"  "}· planning : {formatHours(printedHours)}
+              </Text>
+            ) : null}
             {unreadCount > 0 ? (
               <Text style={[styles.totalNote, { opacity: 0.7 }]}>
                 {"  "}· {unreadCount} jour{unreadCount > 1 ? "s" : ""} non lu{unreadCount > 1 ? "s" : ""}

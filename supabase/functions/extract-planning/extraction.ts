@@ -295,15 +295,40 @@ Règles de lecture, dans l'ordre de priorité :
    coupée ou trop petite pour une extraction fiable — dans ce cas l'application
    demandera à l'utilisateur de reprendre la photo, c'est le comportement attendu,
    ne force pas une lecture.
-9. ALIGNEMENT DES LIGNES — l'erreur la plus grave possible. Traite le tableau
-   ligne par ligne : repère le nom à gauche, puis suis CETTE ligne horizontale
-   jusqu'aux colonnes Total. Certaines lignes sont vides ou quasi vides (employé
-   absent ou en repos toute la semaine) : ne décale JAMAIS les horaires d'une
-   ligne vers une autre. Un employé sans aucun horaire reste avec des jours
-   "off", c'est normal.
-10. AUTO-VÉRIFICATION : pour chaque jour, durée ≈ départ − arrivée ; pour chaque
-   employé, somme des durées ≈ total hebdo imprimé. Si ça ne colle pas, relis la
-   ligne ; si le doute persiste, garde la valeur imprimée et ajoute un warning.
+9. ALIGNEMENT DES LIGNES — l'erreur la plus grave possible, et la plus
+   fréquente. Un décalage d'un cran entre la colonne des noms et le corps du
+   tableau donne à chaque personne les horaires de sa voisine : les noms sont
+   justes, les horaires sont faux, et rien ne le signale. Procède ainsi :
+   a. Lis LIGNE PAR LIGNE, jamais colonne par colonne. Pour une ligne : pose le
+      regard sur le nom à gauche, puis suis la MÊME bande horizontale jusqu'au
+      bout (colonnes Total comprises) sans jamais changer de bande.
+   b. Sers-toi des repères visuels du tableau pour délimiter cette bande :
+      traits de séparation, bordures, alternance de couleurs de fond, hauteur
+      des cellules. Une ligne plus haute que les autres (deux créneaux empilés,
+      texte sur deux lignes) reste UNE seule ligne.
+   c. N'interpole JAMAIS une ligne vide. Une personne sans horaires est en
+      repos : ses jours restent "off". N'emprunte pas le contenu de la ligne du
+      dessus ou du dessous pour « remplir » le vide, et ne remonte pas les
+      lignes suivantes d'un cran.
+   d. Le nombre de lignes d'horaires DOIT être égal au nombre de noms : si tu
+      comptes 15 noms, tu rapportes 15 employés, dans le même ordre, y compris
+      les lignes vides. row_index suit strictement l'ordre du tableau.
+10. CONTRÔLE OBLIGATOIRE PAR LE TOTAL HEBDO — c'est ton filet de sécurité
+   contre le décalage, applique-le à CHAQUE ligne avant de la rapporter :
+   a. additionne les durées quotidiennes que tu viens de lire sur cette ligne ;
+   b. compare cette somme au total hebdomadaire imprimé sur la MÊME ligne
+      (colonne « Hebdo » / « Total ») ;
+   c. si l'écart dépasse 0,25 h, considère d'abord que ta lecture est décalée :
+      reviens sur la ligne et teste explicitement les hypothèses « j'ai lu la
+      ligne du dessus » et « j'ai lu la ligne du dessous » (les horaires que tu
+      as associés à ce nom collent-ils mieux au total d'une voisine ?). Un
+      décalage est presque toujours systématique : s'il est confirmé, corrige
+      TOUT le bloc concerné, pas seulement la ligne qui saute aux yeux ;
+   d. si l'écart persiste après relecture, garde les valeurs réellement lues
+      (n'invente jamais d'heures pour faire tomber le total juste) et ajoute un
+      warning précis : ligne concernée, somme obtenue, total imprimé.
+   Vérifie aussi jour par jour que durée ≈ départ − arrivée moins la pause
+   éventuelle (voir 11ter).
 11. NOMS : une liste propre « Nom du collaborateur » figure souvent sous le
    tableau (zone signatures), en plus gros caractères. Sers-t'en pour
    orthographier exactement les noms des lignes du tableau.
@@ -368,25 +393,33 @@ type AnthropicResponse = {
   stop_reason: string;
 };
 
-export async function extractPlanning(
-  input: ExtractPlanningInput,
-): Promise<ExtractionResult> {
-  const { imageBase64, mediaType, apiKey, model = ANTHROPIC_MODEL, customTypes } = input;
-
-  if (!apiKey) {
+function assertValidInput(input: ExtractPlanningInput): void {
+  if (!input.apiKey) {
     throw new Error("Missing Anthropic API key");
   }
-  if (!SUPPORTED_MEDIA_TYPES.includes(mediaType)) {
-    throw new Error(`Unsupported media type: ${mediaType}`);
+  if (!SUPPORTED_MEDIA_TYPES.includes(input.mediaType)) {
+    throw new Error(`Unsupported media type: ${input.mediaType}`);
   }
-  if (!imageBase64 || imageBase64.length < 100) {
+  if (!input.imageBase64 || input.imageBase64.length < 100) {
     throw new Error("Image payload is empty or too small");
   }
+}
 
-  const prompt =
-    customTypes && customTypes.length > 0
-      ? `${EXTRACTION_PROMPT}\n\n${buildCustomTypesParagraph(customTypes)}`
-      : EXTRACTION_PROMPT;
+function buildPrompt(customTypes?: CustomShiftType[]): string {
+  return customTypes && customTypes.length > 0
+    ? `${EXTRACTION_PROMPT}\n\n${buildCustomTypesParagraph(customTypes)}`
+    : EXTRACTION_PROMPT;
+}
+
+// Un appel vision + tool use. `timeoutMs` n'est utilisé que par la passe de
+// vérification (la première passe garde le comportement historique : pas de
+// timeout côté client, c'est l'Edge Function qui borne).
+async function callAnthropic(
+  input: ExtractPlanningInput,
+  promptText: string,
+  timeoutMs?: number,
+): Promise<ExtractionResult> {
+  const { imageBase64, mediaType, apiKey, model = ANTHROPIC_MODEL } = input;
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -395,6 +428,7 @@ export async function extractPlanning(
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     body: JSON.stringify({
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -415,7 +449,7 @@ export async function extractPlanning(
                 data: imageBase64,
               },
             },
-            { type: "text", text: prompt },
+            { type: "text", text: promptText },
           ],
         },
       ],
@@ -443,5 +477,266 @@ export async function extractPlanning(
     data: toolBlock.input as PlanningExtraction,
     usage: payload.usage,
     model: payload.model,
+  };
+}
+
+export async function extractPlanning(
+  input: ExtractPlanningInput,
+): Promise<ExtractionResult> {
+  assertValidInput(input);
+  return await callAnthropic(input, buildPrompt(input.customTypes));
+}
+
+// ---------------------------------------------------------------------------
+// Contrôle d'alignement : somme des durées lues vs total hebdo imprimé.
+//
+// Cas réel (Nocibé Wasquehal, S31) : les 15 noms lus dans le bon ordre mais le
+// corps du tableau décalé d'un cran — chaque personne héritait des horaires de
+// la ligne suivante. Import silencieux de faux horaires. Le planning imprimant
+// un total hebdo par ligne, l'écart somme/total est un signal objectif.
+// ---------------------------------------------------------------------------
+
+/** Écart toléré entre somme des durées et total imprimé (arrondis d'impression). */
+export const TOTAL_TOLERANCE_HOURS = 0.25;
+/** Au-delà, on ne lance pas de seconde passe : le budget temps de l'app est déjà consommé. */
+const RETRY_FIRST_PASS_BUDGET_MS = 150_000;
+/** Garde-fou dur sur la passe de vérification. */
+const RETRY_TIMEOUT_MS = 120_000;
+
+export type RowConsistencyIssue = {
+  rowIndex: number;
+  name: string;
+  durationSum: number;
+  totalHours: number;
+  delta: number;
+};
+
+function roundHours(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Lignes dont la somme des durées quotidiennes contredit le total hebdomadaire
+ * imprimé sur la même ligne. Sont ignorées (non vérifiables, pas incohérentes) :
+ * les lignes sans total imprimé, celles sans aucun jour travaillé, et celles
+ * dont au moins une durée quotidienne est manquante (somme volontairement
+ * incomplète — une cellule illisible relève des warnings, pas de l'alignement).
+ */
+export function findRowConsistencyIssues(
+  extraction: PlanningExtraction,
+  tolerance: number = TOTAL_TOLERANCE_HOURS,
+): RowConsistencyIssue[] {
+  const issues: RowConsistencyIssue[] = [];
+  const employees = extraction?.employees ?? [];
+
+  employees.forEach((employee, index) => {
+    const total = employee?.total_hours;
+    if (typeof total !== "number" || !Number.isFinite(total)) return;
+
+    const countedDays = (employee.days ?? []).filter(
+      (day) =>
+        day?.status === "work" ||
+        (typeof day?.duration_hours === "number" && day.duration_hours > 0),
+    );
+    if (countedDays.length === 0) return;
+    if (countedDays.some((day) => typeof day.duration_hours !== "number")) return;
+
+    const sum = countedDays.reduce((acc, day) => acc + (day.duration_hours ?? 0), 0);
+    const delta = sum - total;
+    if (Math.abs(delta) <= tolerance) return;
+
+    issues.push({
+      rowIndex: typeof employee.row_index === "number" ? employee.row_index : index,
+      name: employee.name,
+      durationSum: roundHours(sum),
+      totalHours: total,
+      delta: roundHours(delta),
+    });
+  });
+
+  return issues;
+}
+
+// Trace lisible pour les logs serveur : positions de lignes uniquement,
+// jamais de nom ni d'horaire (données de tiers).
+function issueRowLabels(issues: RowConsistencyIssue[]): string {
+  return issues.map((issue) => issue.rowIndex).join(",");
+}
+
+function withAlignmentWarnings(
+  extraction: PlanningExtraction,
+  issues: RowConsistencyIssue[],
+): PlanningExtraction {
+  if (issues.length === 0) return extraction;
+  const added = issues.map(
+    (issue) =>
+      `Ligne ${issue.rowIndex + 1} (${issue.name}) : la somme des durées lues ` +
+      `(${issue.durationSum} h) ne correspond pas au total hebdo imprimé ` +
+      `(${issue.totalHours} h) — vérifie l'alignement de cette ligne avant de valider.`,
+  );
+  return { ...extraction, warnings: [...(extraction.warnings ?? []), ...added] };
+}
+
+function buildAlignmentRetryPrompt(
+  extraction: PlanningExtraction,
+  issues: RowConsistencyIssue[],
+): string {
+  const names = extraction.employees
+    .map((employee, index) => `${index + 1}. ${employee.name}`)
+    .join("\n");
+  const suspects = issues
+    .map(
+      (issue) =>
+        `- ligne ${issue.rowIndex + 1} (${issue.name}) : durées lues = ${issue.durationSum} h, ` +
+        `total hebdo imprimé sur cette ligne = ${issue.totalHours} h ` +
+        `(écart ${roundHours(Math.abs(issue.delta))} h)`,
+    )
+    .join("\n");
+
+  return `DEUXIÈME LECTURE — CONTRÔLE D'ALIGNEMENT.
+
+Une première lecture de CETTE photo a déjà été faite. Les noms relevés, dans
+l'ordre du tableau, sont :
+${names}
+
+Sur les lignes suivantes, la somme des durées quotidiennes lues ne correspond
+PAS au total hebdomadaire imprimé sur la même ligne :
+${suspects}
+
+C'est la signature typique d'un décalage d'un cran entre la colonne des noms et
+le corps du tableau : chaque personne reçoit alors les horaires de la ligne du
+dessus ou du dessous. Reprends la photo à zéro et, pour ces lignes :
+- retrouve la bande horizontale du nom concerné en t'appuyant sur les traits du
+  tableau (bordures, alternance de fond, hauteur des cellules) ;
+- teste explicitement les hypothèses « j'ai lu la ligne du dessus » et « j'ai lu
+  la ligne du dessous » : les horaires attribués à ce nom collent-ils mieux au
+  total d'une voisine ?
+- un décalage est presque toujours systématique : s'il est confirmé, corrige
+  TOUT le bloc concerné, pas seulement la ligne signalée ;
+- une ligne sans horaires reste sans horaires (repos) : ne la remplis jamais
+  avec le contenu d'une voisine.
+
+Renvoie l'extraction COMPLÈTE et corrigée via l'outil report_planning : toutes
+les lignes employé, dans le même ordre et avec les mêmes noms, pas seulement les
+lignes suspectes. Si après vérification une ligne reste incohérente, garde les
+valeurs réellement lues (n'invente rien) et explique l'écart dans warnings.`;
+}
+
+export type AlignmentCheck = {
+  /** Lignes incohérentes après la première passe. */
+  issuesBefore: number;
+  /** Lignes incohérentes de la passe retenue. */
+  issuesAfter: number;
+  /** Une seconde passe vision a abouti (false si non lancée ou en erreur). */
+  retried: boolean;
+  /** Passe retenue (1 = première lecture, 2 = lecture de vérification). */
+  keptPass: 1 | 2;
+};
+
+export type VerifiedExtractionResult = ExtractionResult & {
+  alignment: AlignmentCheck;
+};
+
+/**
+ * Extraction + contrôle d'alignement. Si au moins une ligne est incohérente,
+ * une SEULE seconde passe vision ciblée est lancée ; on garde la passe qui a le
+ * moins de lignes incohérentes (à égalité, la seconde). Toute erreur de la
+ * seconde passe est absorbée : on retombe sur la première extraction.
+ */
+export async function extractPlanningVerified(
+  input: ExtractPlanningInput,
+): Promise<VerifiedExtractionResult> {
+  assertValidInput(input);
+
+  const startedAt = Date.now();
+  const basePrompt = buildPrompt(input.customTypes);
+  const first = await callAnthropic(input, basePrompt);
+  const firstIssues = findRowConsistencyIssues(first.data);
+
+  const firstPassMs = Date.now() - startedAt;
+  const budgetLeft = firstPassMs < RETRY_FIRST_PASS_BUDGET_MS;
+  const worthRetrying =
+    firstIssues.length > 0 &&
+    first.data.photo_quality !== "unusable" &&
+    (first.data.employees?.length ?? 0) > 0;
+
+  if (!worthRetrying || !budgetLeft) {
+    if (firstIssues.length > 0) {
+      console.log(
+        `alignment check: ${firstIssues.length} inconsistent row(s) [${issueRowLabels(firstIssues)}], ` +
+          `no second pass (${budgetLeft ? "not applicable" : "time budget spent"})`,
+      );
+    }
+    return {
+      ...first,
+      data: withAlignmentWarnings(first.data, firstIssues),
+      alignment: {
+        issuesBefore: firstIssues.length,
+        issuesAfter: firstIssues.length,
+        retried: false,
+        keptPass: 1,
+      },
+    };
+  }
+
+  let second: ExtractionResult | null = null;
+  try {
+    second = await callAnthropic(
+      input,
+      `${basePrompt}\n\n${buildAlignmentRetryPrompt(first.data, firstIssues)}`,
+      RETRY_TIMEOUT_MS,
+    );
+  } catch (error) {
+    // La vérification ne doit JAMAIS faire échouer l'extraction.
+    console.error(
+      "alignment second pass failed, keeping first extraction:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  const secondIssues = second ? findRowConsistencyIssues(second.data) : null;
+  // Garde-fou : une seconde passe qui perd des lignes aurait mécaniquement
+  // moins d'incohérences — elle ne peut pas gagner à ce prix.
+  const secondKeepsAllRows =
+    second !== null &&
+    (second.data.employees?.length ?? 0) >= (first.data.employees?.length ?? 0);
+  const keepSecond =
+    second !== null &&
+    secondIssues !== null &&
+    secondKeepsAllRows &&
+    secondIssues.length <= firstIssues.length;
+
+  const winner = keepSecond && second ? second : first;
+  const winnerIssues = keepSecond && secondIssues ? secondIssues : firstIssues;
+
+  const discardReason =
+    second !== null && !keepSecond
+      ? secondKeepsAllRows
+        ? " (pass 2 had more inconsistencies)"
+        : " (pass 2 dropped employee rows)"
+      : "";
+  console.log(
+    `alignment check: ${firstIssues.length} inconsistent row(s) [${issueRowLabels(firstIssues)}] on pass 1, ` +
+      (secondIssues
+        ? `${secondIssues.length} [${issueRowLabels(secondIssues)}] on pass 2`
+        : "pass 2 unavailable") +
+      ` — keeping pass ${keepSecond ? 2 : 1} (${winnerIssues.length} left)${discardReason}`,
+  );
+
+  return {
+    data: withAlignmentWarnings(winner.data, winnerIssues),
+    // Coût réel du scan = les deux passes.
+    usage: {
+      input_tokens: first.usage.input_tokens + (second?.usage.input_tokens ?? 0),
+      output_tokens: first.usage.output_tokens + (second?.usage.output_tokens ?? 0),
+    },
+    model: winner.model,
+    alignment: {
+      issuesBefore: firstIssues.length,
+      issuesAfter: winnerIssues.length,
+      // false si la seconde passe a échoué : on n'a bien qu'une lecture exploitable.
+      retried: second !== null,
+      keptPass: keepSecond ? 2 : 1,
+    },
   };
 }

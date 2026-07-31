@@ -286,10 +286,53 @@ export function findTargetEmployee(
 
 // --- Contrôle de cohérence (somme durées vs total hebdo imprimé) -------------
 
+// Les plannings impriment des durées arrondies (7,5 pour 7 h 30) : sous ce
+// seuil, l'écart vient de l'arrondi, pas d'une ligne mal alignée.
+const HOURS_TOLERANCE = 0.25;
+
+export type RowHoursCheck = {
+  /** Somme des durées payées lues sur la ligne. */
+  readHours: number;
+  /** Total hebdo imprimé sur le planning (null s'il n'y en a pas). */
+  printedHours: number | null;
+  /**
+   * false quand la comparaison ne prouverait rien : total absent, jour illisible
+   * ou journée travaillée sans durée imprimée — l'écart serait alors attendu.
+   */
+  comparable: boolean;
+  /** true tant qu'aucune incohérence n'est DÉMONTRÉE (pas de fausse alerte). */
+  coherent: boolean;
+};
+
+/**
+ * Compare la somme des journées lues au total hebdo imprimé sur le planning.
+ *
+ * C'est le seul signal disponible contre le décalage de lignes : les noms sont
+ * lus dans le bon ordre mais le corps du tableau glisse d'un cran, chacune
+ * héritant des horaires de sa voisine du dessous. Les horaires restent
+ * plausibles un par un — seul le total trahit l'erreur.
+ */
+export function checkRowHours(employee: ExtractionEmployee): RowHoursCheck {
+  const readHours = employee.days.reduce((acc, d) => acc + (d.duration_hours ?? 0), 0);
+  const printedHours = employee.total_hours;
+  // Un jour non lu, ou travaillé sans durée imprimée, creuse un écart normal :
+  // on ne peut plus rien conclure du total.
+  const hasBlindDay = employee.days.some(
+    (d) => d.status === "unknown" || (d.status === "work" && d.duration_hours == null),
+  );
+  const comparable = printedHours != null && !hasBlindDay;
+  const gap = printedHours == null ? 0 : Math.abs(readHours - printedHours);
+  return {
+    readHours,
+    printedHours,
+    comparable,
+    coherent: !comparable || gap <= HOURS_TOLERANCE,
+  };
+}
+
+/** Raccourci booléen — `checkRowHours` donne le détail affichable. */
 export function isRowCoherent(employee: ExtractionEmployee): boolean {
-  if (employee.total_hours == null) return true;
-  const sum = employee.days.reduce((acc, d) => acc + (d.duration_hours ?? 0), 0);
-  return Math.abs(sum - employee.total_hours) <= 0.01;
+  return checkRowHours(employee).coherent;
 }
 
 // --- Conversion extraction → shifts éditables --------------------------------

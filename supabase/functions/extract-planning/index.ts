@@ -9,7 +9,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 import {
-  extractPlanning,
+  extractPlanningVerified,
   SUPPORTED_MEDIA_TYPES,
   type CustomShiftType,
   type PlanningExtraction,
@@ -117,7 +117,15 @@ async function processInBackground(
 ): Promise<void> {
   try {
     const customTypes = await loadCustomShiftTypes(service, uploaderId);
-    const result = await extractPlanning({ imageBase64, mediaType, apiKey, customTypes });
+    // Extraction + contrôle d'alignement (somme des durées vs total hebdo
+    // imprimé). Une seconde passe vision ciblée est déclenchée uniquement si
+    // une ligne est incohérente ; elle ne peut jamais faire échouer le scan.
+    const result = await extractPlanningVerified({
+      imageBase64,
+      mediaType,
+      apiKey,
+      customTypes,
+    });
     const extraction: PlanningExtraction = result.data;
     // Photo illisible = échec, pas un scan abouti : le statut `failed` le sort
     // du décompte de quota et de la reprise de validation (findPendingValidation).
@@ -151,8 +159,12 @@ async function processInBackground(
       const { error: rowsError } = await service.from("scan_rows").insert(rows);
       if (rowsError) throw new Error("scan_rows insert failed: " + rowsError.message);
     }
+    // Compteurs uniquement : jamais de nom ni d'horaire dans les logs.
+    const { issuesBefore, issuesAfter, retried, keptPass } = result.alignment;
     console.log(
-      `scan ${scanId}: ${isUnusable ? "unusable photo" : `extracted ${rows.length} rows`} (${result.usage.output_tokens} tokens out)`,
+      `scan ${scanId}: ${isUnusable ? "unusable photo" : `extracted ${rows.length} rows`} ` +
+        `(${result.usage.output_tokens} tokens out) — alignment ${issuesBefore}→${issuesAfter} ` +
+        `inconsistent row(s), ${retried ? `2 passes, kept #${keptPass}` : "1 pass"}`,
     );
     await sendPushNotification(
       service,

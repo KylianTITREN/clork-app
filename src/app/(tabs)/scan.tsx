@@ -1,6 +1,8 @@
 // Wizard « Ajouter mes horaires » v2 (maquette 4b) — modal plein écran :
 //   Étape 1/2 · méthode  : Scanner (carte primaire) / Ajouter à la main /
 //                          Photo existante / J'ai reçu un code (+ badge quota)
+//   Étape 1/2 · capture  : conseils de prise de vue + photo / galerie
+//   Étape 2/2 · alerte   : photo difficile à lire et/ou total incohérent
 //   Étape 2/2 · vérifier : récap « Tout est bon ? » (cocher = à revoir) puis
 //                          correction card-by-card « Vérifie tes jours »
 //   Succès : confettis discrets + stats + actions.
@@ -9,6 +11,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
 import { router, useFocusEffect } from "expo-router";
@@ -28,13 +31,16 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CaptureTipsStep } from "@/components/scan/CaptureTipsStep";
 import { ProcessingView, type ProcessingStep } from "@/components/scan/ProcessingView";
 import { RecapStep, type WizardDay } from "@/components/scan/RecapStep";
 import { ReviewStep } from "@/components/scan/ReviewStep";
+import { ScanAlertStep } from "@/components/scan/ScanAlertStep";
 import { ScanCorrectionScreen } from "@/components/scan/ScanCorrectionScreen";
 import { SuccessView } from "@/components/scan/SuccessView";
 import { TypeChipsRow, TypeSheet, type TypeChipOption } from "@/components/week/TypeSheet";
 import { Button } from "@/components/ui/Button";
+import { pressOpacity } from "@/components/ui/press";
 import { TimePickerField } from "@/components/ui/TimePickerField";
 import { WizardFrame } from "@/components/ui/WizardFrame";
 import {
@@ -53,6 +59,7 @@ import { addDays, dateToTime, isoDate, mondayOf, timeToDate, weekLabel } from "@
 import {
   applyDefaultBreak,
   applyWeekStart,
+  checkRowHours,
   createScan,
   diffDrafts,
   discardScan,
@@ -72,6 +79,7 @@ import {
   waitForExtraction,
   type DraftShift,
   type PendingScan,
+  type RowHoursCheck,
 } from "@/lib/scan-service";
 import { ensurePermission, exportWeek } from "@/lib/calendar-export";
 import { fetchPlan, isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
@@ -94,11 +102,13 @@ type WizardContext = {
 
 type WizardState =
   | { step: "method" }
+  | { step: "capture"; notice: string | null }
   | { step: "manual" }
   | { step: "code" }
   | { step: "processing"; processingStep: ProcessingStep }
   | { step: "pickWeek"; scanId: string; extraction: PlanningExtraction }
   | { step: "pickTarget"; scanId: string; extraction: PlanningExtraction }
+  | { step: "alert"; ctx: WizardContext; hours: RowHoursCheck | null }
   | { step: "recap"; ctx: WizardContext }
   | { step: "review"; ctx: WizardContext; queue: string[]; queueIndex: number }
   | {
@@ -115,6 +125,13 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   quality: 1,
   exif: false,
 };
+
+// Messages d'entrée de l'étape capture — ils disent aussi ce qu'il advient du
+// quota, pour qu'une reprise ne ressemble jamais à une punition.
+const UNUSABLE_NOTICE =
+  "La photo n'était pas assez nette pour une lecture fiable — elle ne t'a pas été décomptée. Reprends-la en suivant ces repères.";
+const RETAKE_NOTICE =
+  "Lecture précédente jetée : elle ne compte pas dans ton quota. Reprends la photo bien à plat.";
 
 // --- Ajout manuel (maquette écran 1 « Ajouter à la main ») -------------------
 
@@ -480,6 +497,11 @@ export default function AddWizardScreen() {
   const { session } = useAuth();
   const [state, setState] = useState<WizardState>({ step: "method" });
   const [isSaving, setIsSaving] = useState(false);
+  // Suppression de la lecture courante avant une reprise de photo : bloque les
+  // CTA de l'écran d'alerte le temps que le serveur libère le quota.
+  const [isDiscarding, setIsDiscarding] = useState(false);
+  // Un planning récupéré par code n'a pas de photo à reprendre chez nous.
+  const [canRetake, setCanRetake] = useState(true);
   const [pendingScan, setPendingScan] = useState<PendingScan | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
@@ -629,6 +651,22 @@ export default function AddWizardScreen() {
     return { scanId, extraction, target, rowIds, drafts, baseline: drafts, days, checked };
   }
 
+  /**
+   * Dernier filtre avant le récap. Une photo jugée difficile à lire, ou une
+   * ligne dont la somme des jours ne retombe pas sur le total hebdo imprimé
+   * (signature d'un décalage de lignes), passent d'abord par un écran d'alerte.
+   * On informe et on oriente : l'import n'est jamais bloqué d'autorité.
+   */
+  function enterRecapOrAlert(ctx: WizardContext) {
+    const hours = checkRowHours(ctx.target);
+    const isPhotoSuspect = ctx.extraction.photo_quality !== "good";
+    if (!isPhotoSuspect && hours.coherent) {
+      setState({ step: "recap", ctx });
+      return;
+    }
+    setState({ step: "alert", ctx, hours: hours.coherent ? null : hours });
+  }
+
   async function enterValidation(scanId: string, extraction: PlanningExtraction) {
     if (!userId) return;
     if (!hasResolvedDates(extraction)) {
@@ -647,12 +685,39 @@ export default function AddWizardScreen() {
       return;
     }
     const ctx = await buildContext(scanId, extraction, target);
-    setState({ step: "recap", ctx });
+    enterRecapOrAlert(ctx);
+  }
+
+  /**
+   * Reprise de photo depuis l'écran d'alerte : la lecture courante est JETÉE
+   * avant de relancer la capture. La ligne `scans` disparaît, donc le quota
+   * n'est pas consommé deux fois pour le même planning — et rien n'a encore
+   * été écrit dans le planning à ce stade.
+   */
+  async function retakePhoto(scanId: string) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsDiscarding(true);
+    const discarded = await discardScan(scanId).then(
+      () => true,
+      () => false,
+    );
+    setIsDiscarding(false);
+    if (!discarded) {
+      // Échec réseau : la ligne reste en base et pèsera sur le quota. Mieux
+      // vaut le dire que de laisser un « quota atteint » incompréhensible.
+      Alert.alert(
+        "Lecture précédente conservée",
+        "Elle n'a pas pu être supprimée. Tu pourras la retirer depuis « Un scan t'attend », sur l'écran d'ajout.",
+      );
+    }
+    setPendingScan(null);
+    setState({ step: "capture", notice: discarded ? RETAKE_NOTICE : null });
   }
 
   async function resumePendingScan(pending: PendingScan) {
     try {
       setPendingScan(null);
+      setCanRetake(true); // scan photo de l'utilisatrice : reprise possible
       await enterValidation(pending.id, pending.raw_extraction);
     } catch (error) {
       Alert.alert("Reprise impossible", error instanceof Error ? error.message : "Erreur inconnue");
@@ -715,6 +780,7 @@ export default function AddWizardScreen() {
   async function processPhoto(uri: string, width?: number, height?: number, autoOrient = false) {
     if (!userId) return;
     try {
+      setCanRetake(true); // photo prise ici : la reprise a du sens
       setState({ step: "processing", processingStep: "compress" });
       const image = await prepareImage(uri, width, height, autoOrient);
 
@@ -732,11 +798,10 @@ export default function AddWizardScreen() {
       // couvre une version de la fonction encore déployée sans ce correctif.
       if (extraction.photo_quality === "unusable") {
         await supabase.from("scans").update({ status: "failed" }).eq("id", scanId);
-        setState({ step: "method" });
-        Alert.alert(
-          "Photo illisible 📷",
-          "Le planning n'est pas assez net pour une lecture fiable. Rapproche-toi, évite les reflets et cadre tout le tableau, puis reprends la photo.",
-        );
+        // Reprise = chemin principal : on retourne directement aux conseils de
+        // prise de vue plutôt que de renvoyer au menu avec une alerte sèche.
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setState({ step: "capture", notice: UNUSABLE_NOTICE });
         return;
       }
 
@@ -754,6 +819,8 @@ export default function AddWizardScreen() {
     try {
       const claimed = await claimShare(joinCode);
       setJoinCode("");
+      // Planning d'une collègue : aucune photo à reprendre de notre côté.
+      setCanRetake(false);
       await enterValidation(claimed.scanId, claimed.extraction);
     } catch (error) {
       Alert.alert("Code refusé", error instanceof Error ? error.message : "Erreur inconnue");
@@ -1044,6 +1111,39 @@ export default function AddWizardScreen() {
     );
   }
 
+  if (state.step === "capture") {
+    return (
+      <WizardFrame step={1} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
+        <CaptureTipsStep
+          notice={state.notice}
+          onCamera={() => pickImage("camera")}
+          onLibrary={() => pickImage("library")}
+        />
+      </WizardFrame>
+    );
+  }
+
+  if (state.step === "alert") {
+    const ctx = state.ctx;
+    return (
+      <WizardFrame step={2} totalSteps={2} onClose={() => setState({ step: "method" })} closeIcon="back">
+        <ScanAlertStep
+          quality={ctx.extraction.photo_quality}
+          hours={state.hours}
+          employeeName={ctx.target.name}
+          isBusy={isDiscarding}
+          onContinue={() => setState({ step: "recap", ctx })}
+          onReview={() => {
+            // Quand le total ne tombe pas juste, aucun jour n'est au-dessus de
+            // tout soupçon : la file de correction les passe tous en revue.
+            setState({ step: "review", ctx, queue: ctx.days.map((d) => d.date), queueIndex: 0 });
+          }}
+          onRetake={canRetake ? () => void retakePhoto(ctx.scanId) : null}
+        />
+      </WizardFrame>
+    );
+  }
+
   if (state.step === "pickWeek") {
     const thisMonday = mondayOf(new Date());
     const options = [
@@ -1111,24 +1211,41 @@ export default function AddWizardScreen() {
           <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
             On n'a pas reconnu ton nom sur le planning — choisis ta ligne.
           </Text>
-          {state.extraction.employees.map((employee) => (
-            <Pressable
-              key={employee.row_index}
-              onPress={async () => {
-                const ctx = await buildContext(state.scanId, state.extraction, employee);
-                setState({ step: "recap", ctx });
-              }}
-              style={[styles.radioCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            >
-              <View style={styles.radioText}>
-                <Text style={[styles.radioLabel, { color: colors.text }]}>{employee.name}</Text>
-                <Text style={[styles.radioDates, { color: colors.textMuted }]}>
-                  {employee.total_hours != null ? `${employee.total_hours}h sur le planning` : "—"}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
-            </Pressable>
-          ))}
+          {state.extraction.employees.map((employee) => {
+            // Somme des jours ≠ total imprimé : la ligne a de fortes chances
+            // d'être décalée. Signalé ici, discrètement, AVANT le choix.
+            const isSuspect = !checkRowHours(employee).coherent;
+            return (
+              <Pressable
+                key={employee.row_index}
+                onPress={async () => {
+                  const ctx = await buildContext(state.scanId, state.extraction, employee);
+                  enterRecapOrAlert(ctx);
+                }}
+                style={({ pressed }) => [
+                  styles.radioCard,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  pressed && { opacity: pressOpacity.surface },
+                ]}
+              >
+                <View style={styles.radioText}>
+                  <Text style={[styles.radioLabel, { color: colors.text }]}>{employee.name}</Text>
+                  <Text style={[styles.radioDates, { color: colors.textMuted }]}>
+                    {employee.total_hours != null ? `${employee.total_hours}h sur le planning` : "—"}
+                  </Text>
+                  {isSuspect ? (
+                    <View style={styles.rowFlag}>
+                      <Ionicons name="alert-circle-outline" size={13} color={colors.shiftCp} />
+                      <Text style={[styles.rowFlagLabel, { color: colors.shiftCp }]}>
+                        total à vérifier
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </WizardFrame>
     );
@@ -1139,6 +1256,10 @@ export default function AddWizardScreen() {
     const readHours = ctx.drafts
       .filter((d) => d.include && (d.type === "work" || d.type === "meeting" || d.type === "training"))
       .reduce((acc, d) => acc + paidOf(d), 0);
+    // Total imprimé rappelé dans la barre du récap tant que l'écart persiste :
+    // l'alerte a pu être passée, la comparaison doit rester sous les yeux.
+    const rowHours = checkRowHours(ctx.target);
+    const printedHours = rowHours.coherent ? null : rowHours.printedHours;
     // Jour en cours de correction : TOUS ses créneaux + ce que le SCAN avait lu
     // (badge repère du 1ᵉʳ créneau lu ; un jour ajouté à la main n'en a pas).
     const correctionDay = correctionDate
@@ -1171,6 +1292,7 @@ export default function AddWizardScreen() {
             drafts={ctx.drafts}
             checked={ctx.checked}
             readHours={readHours}
+            printedHours={printedHours}
             isSaving={isSaving}
             onToggle={(date) => {
               const checked = new Set(ctx.checked);
@@ -1499,8 +1621,10 @@ export default function AddWizardScreen() {
           <Text style={[styles.scanSubtitle, { color: colors.onAccent, opacity: 0.85 }]}>
             La lecture couvre toute l'équipe en 30 secondes, ratures et notes comprises.
           </Text>
+          {/* Les conseils de cadrage passent AVANT l'appareil photo : une
+              photo prise en biais suffit à décaler toutes les lignes. */}
           <Pressable
-            onPress={() => pickImage("camera")}
+            onPress={() => setState({ step: "capture", notice: null })}
             style={({ pressed }) => [
               styles.scanCta,
               { backgroundColor: "rgba(255,255,255,0.16)", borderColor: "rgba(255,255,255,0.4)" },
@@ -1532,12 +1656,14 @@ export default function AddWizardScreen() {
         {/* Pilules épinglées en bas de l'écran (maquette : margin-top auto) */}
         <View style={styles.flexSpacer} />
         <View style={styles.pillRow}>
+          {/* Même écran que le scan : une photo de galerie prise en biais est
+              exactement le cas qu'on cherche à éviter. */}
           <Pressable
-            onPress={() => pickImage("library")}
+            onPress={() => setState({ step: "capture", notice: null })}
             style={({ pressed }) => [
               styles.pill,
               { backgroundColor: colors.surface, borderColor: colors.border },
-              pressed && { opacity: 0.85 },
+              pressed && { opacity: pressOpacity.surface },
             ]}
           >
             <Text style={[styles.pillLabel, { color: colors.text }]}>Photo existante</Text>
@@ -1685,6 +1811,16 @@ const styles = StyleSheet.create({
   radioDates: {
     fontSize: typeScale.caption,
     fontFamily: fonts.medium,
+  },
+  rowFlag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  rowFlagLabel: {
+    fontSize: typeScale.tiny,
+    fontFamily: fonts.semiBold,
   },
   // --- Ajouter à la main (écran plein maquette) ---
   stepContentFill: {
