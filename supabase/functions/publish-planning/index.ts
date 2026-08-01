@@ -49,6 +49,20 @@
 //   recalculé ensuite. Réenregistrer la même correction plus tard est un
 //   nouveau geste, donc une nouvelle évaluation.
 //
+// LE CARNET D'ÉQUIPE (store_roster) :
+//   Une liste de PRÉ-AUTORISATIONS. La responsable y inscrit « COPIN Typhanie ·
+//   son adresse e-mail » avant même que la personne ait l'app. Le jour où cette
+//   adresse crée un compte Clork, l'adhésion est créée CONFIRMÉE d'office : la
+//   responsable l'a désignée, c'est ça la confirmation. Le rattachement lui-même
+//   vit en base (`roster_link_account`), appelé des deux côtés — par l'app
+//   (`link_store_by_email`) et par cette fonction (`store_roster_upsert`), pour
+//   le cas où l'entrée est saisie APRÈS que la personne a déjà un compte.
+//
+//   CONFIDENTIALITÉ : la seule adresse qui sort d'ici est celle que la
+//   RESPONSABLE a saisie. L'adresse du COMPTE Clork d'une employée ne quitte
+//   jamais la base — elle appartient à l'employée, pas à son magasin. La
+//   présence d'un compte est réduite au booléen `on_clork`.
+//
 // Actions supportées (champ `action`, absent = publication) :
 //   · verify_only     : le couple (lien, code) est-il valide ?
 //   · dry_run         : aperçu de l'appariement, aucune écriture.
@@ -61,6 +75,11 @@
 //                       statut (correction du socle ou rature).
 //   · delete_edit     : retire une entrée du calque.
 //   · apply_week      : réécrit + notifie sans nouveau dépôt de fichier.
+//   · roster_list     : le carnet d'équipe, enrichi de l'état de chacune.
+//   · roster_upsert   : inscrit ou corrige une personne du carnet, et la
+//                       rattache aussitôt si son adresse a déjà un compte.
+//   · roster_delete   : retire une personne du carnet.
+//   · roster_suggest  : les noms du dernier planning absents du carnet.
 //   · (défaut)        : publication réelle + infos de la semaine + push.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -98,6 +117,9 @@ const MAX_EDIT_SHIFTS = 4;
 const MAX_LISTED_IMPORTS = 200;
 const MAX_LISTED_WEEKS = 26;
 const MAX_EDIT_ROWS_SCANNED = 1000;
+/** Carnet d'équipe : un magasin, pas un annuaire d'enseigne. */
+const MAX_ROSTER_ENTRIES = 200;
+const MAX_ROSTER_EMAIL = 200;
 /** Expo accepte 100 messages par requête. */
 const PUSH_CHUNK_SIZE = 100;
 /** Notification de changement : au-delà, on résume (« et N autres jours »). */
@@ -153,6 +175,22 @@ type PendingMember = {
   user_id: string;
   display_name: string;
   joined_at: string;
+};
+
+/**
+ * Une entrée du carnet d'équipe, telle que le site la lit.
+ *
+ * `email` est l'adresse que la RESPONSABLE a saisie, jamais celle du compte
+ * Clork de la personne. `on_clork` dit seulement qu'un compte existe :
+ * quelqu'un d'inscrit sur Clork mais sans adresse au carnet se lit donc
+ * `{ email: null, on_clork: true }`.
+ */
+type RosterEntry = {
+  id: string;
+  employee_name: string;
+  email: string | null;
+  on_clork: boolean;
+  membership_status: "confirmed" | "pending" | null;
 };
 
 /** Info de la semaine. date null = valable toute la semaine. */
@@ -553,6 +591,28 @@ function cleanEmployeeName(value: unknown): { name: string } | { error: string }
   }
   if (normalizeName(name).length === 0) return { error: `« ${name} » ne ressemble pas à un nom.` };
   return { name };
+}
+
+/**
+ * Forme plausible, rien de plus : on ne prétend pas valider une adresse (seul
+ * l'envoi le fait vraiment), on refuse ce qui est manifestement une faute de
+ * frappe. Absent, null ou vide vaut « pas d'adresse » — le carnet se remplit
+ * d'abord au nom, les adresses arrivent après.
+ */
+const EMAIL_RE = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
+
+function cleanRosterEmail(value: unknown): { email: string | null } | { error: string } {
+  if (value === undefined || value === null) return { email: null };
+  if (typeof value !== "string") return { error: "Adresse e-mail illisible." };
+  const email = value.trim().toLowerCase();
+  if (email.length === 0) return { email: null };
+  if (email.length > MAX_ROSTER_EMAIL) {
+    return { error: `Une adresse e-mail dépasse ${MAX_ROSTER_EMAIL} caractères.` };
+  }
+  if (!EMAIL_RE.test(email)) {
+    return { error: `« ${email} » ne ressemble pas à une adresse e-mail.` };
+  }
+  return { email };
 }
 
 /**
@@ -2060,9 +2120,190 @@ async function reassignMember(
   return { changed: true };
 }
 
+// --- Carnet d'équipe ----------------------------------------------------------
+//
+// Tout ce qui touche au rattachement vit en base : `store_roster_status` pour
+// la lecture enrichie (elle seule peut joindre `auth.users` sans jamais en
+// laisser sortir une adresse), `store_roster_upsert` pour l'écriture et le
+// rattachement immédiat, dans la même transaction. Cette couche-ci ne fait que
+// valider ce qui arrive du site et traduire les refus en français.
+
+/**
+ * Les refus remontent un CODE depuis le SQL ; la phrase lue par la responsable
+ * s'écrit ici, avec ses accents et ses apostrophes (le fichier de migration,
+ * lui, est appliqué via l'API management et s'en prive).
+ */
+const ROSTER_ERRORS: Record<string, string> = {
+  name_invalid: "Ce nom de ligne est invalide.",
+  email_invalid: "Cette adresse e-mail est invalide.",
+  store_unknown: "Ce magasin n'existe plus.",
+  roster_full: `Le carnet ne peut pas dépasser ${MAX_ROSTER_ENTRIES} personnes.`,
+  email_taken: "Cette adresse est déjà associée à une autre personne du carnet.",
+};
+
+async function handleRosterList(service: SupabaseClient, storeId: string): Promise<Response> {
+  const { data, error } = await service.rpc("store_roster_status", { p_store_id: storeId });
+  if (error) throw new Error("store_roster_status failed: " + error.message);
+  const roster = (Array.isArray(data) ? data : []) as RosterEntry[];
+  return jsonResponse(200, { success: true, roster });
+}
+
+/**
+ * Inscrire quelqu'un au carnet, c'est la pré-autoriser. Si son adresse a déjà
+ * un compte Clork, l'adhésion confirmée est créée SUR-LE-CHAMP : sans cela, une
+ * personne inscrite après avoir installé l'app attendrait sa prochaine
+ * ouverture pour être rattachée, alors que la responsable vient de la désigner.
+ */
+async function handleRosterUpsert(
+  service: SupabaseClient,
+  storeId: string,
+  employeeName: string,
+  email: string | null,
+): Promise<Response> {
+  const { data, error } = await service.rpc("store_roster_upsert", {
+    p_store_id: storeId,
+    p_employee_name: employeeName,
+    p_email: email,
+    p_max_entries: MAX_ROSTER_ENTRIES,
+  });
+  if (error) throw new Error("store_roster_upsert failed: " + error.message);
+
+  const result = (isRecord(data) ? data : {}) as {
+    success?: boolean;
+    error_code?: string;
+    linked?: boolean;
+    entry?: RosterEntry;
+  };
+  if (result.success !== true) {
+    const code = typeof result.error_code === "string" ? result.error_code : "";
+    return errorResponse(409, ROSTER_ERRORS[code] ?? "Impossible d'enregistrer cette personne.");
+  }
+  return jsonResponse(200, {
+    success: true,
+    entry: result.entry ?? null,
+    // Le site peut annoncer « rattachée » au lieu d'un simple « ajoutée ».
+    linked: result.linked === true,
+  });
+}
+
+/**
+ * Retirer quelqu'un du carnet retire la PRÉ-AUTORISATION, pas l'adhésion : une
+ * personne déjà rattachée le reste (c'est `confirm_members` / `reassign_member`
+ * qui gouvernent l'équipe elle-même). Le filtre store_id est indispensable : un
+ * identifiant deviné ne doit pas toucher le carnet d'un autre magasin.
+ */
+async function handleRosterDelete(
+  service: SupabaseClient,
+  storeId: string,
+  rosterId: string,
+): Promise<Response> {
+  const { data, error } = await service
+    .from("store_roster")
+    .delete()
+    .eq("store_id", storeId)
+    .eq("id", rosterId)
+    .select("id");
+  if (error) throw new Error("store_roster delete failed: " + error.message);
+
+  if (((data ?? []) as { id: string }[]).length === 0) {
+    return errorResponse(404, "Cette personne ne figure plus au carnet.");
+  }
+  return jsonResponse(200, { success: true, deleted: 1 });
+}
+
+/** Le dernier planning déposé, toutes semaines confondues. */
+async function loadLastImport(
+  service: SupabaseClient,
+  storeId: string,
+): Promise<ImportRow | null> {
+  const { data, error } = await service
+    .from("store_imports")
+    .select("id, week_start, source_file_name, payload, published_at, created_at")
+    .eq("store_id", storeId)
+    .order("week_start", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error("store_imports read failed: " + error.message);
+  const rows = (data ?? []) as ImportRow[];
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Les noms de lignes du dernier planning qui ne sont pas encore au carnet.
+ * Retaper vingt noms qu'on vient de déposer est le genre de corvée qui fait
+ * abandonner un outil : la responsable coche, elle ne saisit pas.
+ *
+ * Le rapprochement passe par normalizeName, comme partout ailleurs : « COPIN
+ * Typhanie » déjà au carnet ne ressort pas parce que le fichier écrit
+ * « Typhanie COPIN ».
+ */
+async function handleRosterSuggest(service: SupabaseClient, storeId: string): Promise<Response> {
+  const latest = await loadLastImport(service, storeId);
+  if (!latest) {
+    return jsonResponse(200, { success: true, week_start: null, names: [] });
+  }
+
+  const validation = validatePlanning(latest.payload);
+  if ("error" in validation) {
+    console.error(`store ${storeId}: stored payload rejected for suggest: ${validation.error}`);
+    return jsonResponse(200, { success: true, week_start: latest.week_start, names: [] });
+  }
+
+  const { data, error } = await service
+    .from("store_roster")
+    .select("employee_name")
+    .eq("store_id", storeId)
+    .limit(MAX_ROSTER_ENTRIES);
+  if (error) throw new Error("store_roster read failed: " + error.message);
+
+  const known = new Set(
+    ((data ?? []) as { employee_name: string }[]).map((row) => normalizeName(row.employee_name)),
+  );
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const employee of validation.planning.employees) {
+    const key = normalizeName(employee.name);
+    if (key.length === 0 || known.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    names.push(employee.name);
+  }
+
+  return jsonResponse(200, { success: true, week_start: latest.week_start, names });
+}
+
 // --- Point d'entrée -----------------------------------------------------------
 
-type StoreRow = { id: string; label: string; access_code: string; join_code: string };
+type StoreRow = {
+  id: string;
+  label: string;
+  access_code: string;
+  join_code: string;
+  store_number: string | null;
+  organization_id: string | null;
+};
+
+/**
+ * L'enseigne du magasin, lue à part plutôt qu'en jointure imbriquée : le site
+ * en a besoin pour afficher « Nocibé · 1064 » et pour composer le QR de
+ * rattachement, mais aucun autre chemin ne la réclame.
+ */
+async function loadOrganization(
+  service: SupabaseClient,
+  organizationId: string | null,
+): Promise<{ name: string; slug: string } | null> {
+  if (!organizationId) return null;
+  const { data, error } = await service
+    .from("organizations")
+    .select("name, slug")
+    .eq("id", organizationId)
+    .maybeSingle();
+  if (error) {
+    // Une enseigne illisible ne doit pas empêcher la responsable de déposer.
+    console.error("organizations read failed:", error.message);
+    return null;
+  }
+  return (data as { name: string; slug: string } | null) ?? null;
+}
 
 async function authenticateStore(
   service: SupabaseClient,
@@ -2071,7 +2312,7 @@ async function authenticateStore(
 ): Promise<StoreRow | null> {
   const { data, error } = await service
     .from("stores")
-    .select("id, label, access_code, join_code")
+    .select("id, label, access_code, join_code, store_number, organization_id")
     .eq("access_token", storeToken)
     .eq("is_active", true)
     .maybeSingle();
@@ -2096,6 +2337,10 @@ const ACTIONS = [
   "save_edit",
   "delete_edit",
   "apply_week",
+  "roster_list",
+  "roster_upsert",
+  "roster_delete",
+  "roster_suggest",
 ] as const;
 
 type Action = typeof ACTIONS[number];
@@ -2471,6 +2716,26 @@ Deno.serve(async (req) => {
     editId = rawEditId;
   }
 
+  let rosterName = "";
+  let rosterEmail: string | null = null;
+  if (action === "roster_upsert") {
+    const cleanedName = cleanEmployeeName(body.employee_name);
+    if ("error" in cleanedName) return errorResponse(400, cleanedName.error);
+    const cleanedEmail = cleanRosterEmail(body.email);
+    if ("error" in cleanedEmail) return errorResponse(400, cleanedEmail.error);
+    rosterName = cleanedName.name;
+    rosterEmail = cleanedEmail.email;
+  }
+
+  let rosterId = "";
+  if (action === "roster_delete") {
+    const rawRosterId = body.roster_id;
+    if (typeof rawRosterId !== "string" || !UUID_RE.test(rawRosterId)) {
+      return errorResponse(400, "Aucune personne valide à retirer du carnet.");
+    }
+    rosterId = rawRosterId;
+  }
+
   // Seule la publication (et son aperçu) porte un planning : valider les autres
   // modes contre le contrat du planning renverrait une erreur incompréhensible.
   const skipPlanning = verifyOnly || action !== null;
@@ -2506,9 +2771,17 @@ Deno.serve(async (req) => {
   }
 
   if (verifyOnly) {
+    // Champs ajoutés, jamais retirés : un site déployé qui ne lit que `label`
+    // et `join_code` continue de fonctionner à l'identique.
+    const organization = await loadOrganization(service, store.organization_id);
     return jsonResponse(200, {
       success: true,
-      store: { label: store.label, join_code: store.join_code },
+      store: {
+        label: store.label,
+        join_code: store.join_code,
+        store_number: store.store_number,
+        organization,
+      },
     });
   }
 
@@ -2581,6 +2854,45 @@ Deno.serve(async (req) => {
     } catch (error) {
       console.error(`store ${store.id}: apply_week failed:`, error);
       return errorResponse(500, "Impossible d'envoyer les modifications.");
+    }
+  }
+
+  if (action === "roster_list") {
+    try {
+      return await handleRosterList(service, store.id);
+    } catch (error) {
+      console.error(`store ${store.id}: roster_list failed:`, error);
+      return errorResponse(500, "Impossible de lire le carnet d'équipe.");
+    }
+  }
+
+  if (action === "roster_upsert") {
+    try {
+      const response = await handleRosterUpsert(service, store.id, rosterName, rosterEmail);
+      // Jamais de nom ni d'adresse dans les logs : le carnet est nominatif.
+      console.log(`store ${store.id} roster_upsert: HTTP ${response.status}`);
+      return response;
+    } catch (error) {
+      console.error(`store ${store.id}: roster_upsert failed:`, error);
+      return errorResponse(500, "Impossible d'enregistrer cette personne au carnet.");
+    }
+  }
+
+  if (action === "roster_delete") {
+    try {
+      return await handleRosterDelete(service, store.id, rosterId);
+    } catch (error) {
+      console.error(`store ${store.id}: roster_delete failed:`, error);
+      return errorResponse(500, "Impossible de retirer cette personne du carnet.");
+    }
+  }
+
+  if (action === "roster_suggest") {
+    try {
+      return await handleRosterSuggest(service, store.id);
+    } catch (error) {
+      console.error(`store ${store.id}: roster_suggest failed:`, error);
+      return errorResponse(500, "Impossible de lire le dernier planning déposé.");
     }
   }
 

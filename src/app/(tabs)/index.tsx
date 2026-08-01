@@ -52,6 +52,7 @@ import { isPremiumPlan, showPremiumGate, usePlan } from "@/lib/plan-service";
 import { listFollowed, type FollowedUser } from "@/lib/follow-service";
 import { getReminderPrefs, rescheduleFromShifts } from "@/lib/reminder-service";
 import { findShiftMates, findTargetEmployee } from "@/lib/scan-service";
+import { autoLinkStoreOnce } from "@/lib/store-service";
 import { addDays, mondayOf, toShortTime, weekLabel } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { refreshWidgetSnapshot } from "@/lib/widget-data";
@@ -329,6 +330,16 @@ export default function HomeScreen() {
       setMorningReminder(prefs.morningEnabled ? prefs.morningTime : null),
     );
   }, []);
+
+  // Rattachement automatique au magasin (Clork Pro) : si sa responsable a inscrit
+  // son adresse au carnet d'équipe, l'adhésion est créée confirmée d'office et
+  // « Mon magasin » l'affichera à sa prochaine ouverture. Effet isolé, sans état
+  // ni annonce : elle découvrira son planning, c'est le vrai signal. Sans compte
+  // (mode invité) il n'y a pas d'adresse à chercher.
+  useEffect(() => {
+    if (!userId || isGuest) return;
+    void autoLinkStoreOnce(userId);
+  }, [userId, isGuest]);
 
   const days = useMemo(
     () =>

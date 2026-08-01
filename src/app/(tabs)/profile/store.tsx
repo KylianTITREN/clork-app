@@ -1,8 +1,13 @@
 // Mon magasin (v2) — rattachement Clork Pro + horaires d'ouverture.
-// Trois états d'adhésion : aucun magasin (saisie du code d'équipe), en attente
-// (la responsable doit confirmer la ligne du planning), confirmée (nom reconnu
-// + renvoi vers le réglage de notification). La carte « Horaires du magasin »
-// (déduction ouvre/ferme sur l'accueil) est présente dans les trois états.
+// Trois états d'adhésion : aucun magasin (enseigne + numéro de magasin, avec le
+// code d'invitation en repli), en attente (la responsable doit confirmer la ligne
+// du planning), confirmée (nom reconnu + renvoi vers le réglage de notification).
+// La carte « Horaires du magasin » (déduction ouvre/ferme sur l'accueil) est
+// présente dans les trois états.
+//
+// Le rattachement automatique par le carnet d'équipe (adresse pré-autorisée par
+// la responsable) se joue ailleurs, à l'ouverture de l'app : cet écran n'a rien
+// à en dire, il montre simplement l'adhésion telle qu'elle est.
 
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -26,7 +31,14 @@ import { SubPageHeader } from "@/components/profile/SubPageHeader";
 import { Button } from "@/components/ui/Button";
 import { pressOpacity } from "@/components/ui/press";
 import { fonts, radius, spacing, typeScale, useThemeColors } from "@/constants/tokens";
-import { getMyStore, joinStore, type MyStore } from "@/lib/store-service";
+import {
+  getMyStore,
+  joinStore,
+  joinStoreByNumber,
+  listOrganizations,
+  type MyStore,
+  type StoreOrganization,
+} from "@/lib/store-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -34,6 +46,8 @@ import { TimeSettingPill } from "./planning";
 
 /** Longueur du code d'équipe distribué par la responsable. */
 const JOIN_CODE_LENGTH = 6;
+/** Longueur maximale d'un numéro de magasin, alignée sur la RPC. */
+const STORE_NUMBER_MAX_LENGTH = 20;
 
 /** Carte blanche v2 : titre + sous-titre DANS la carte. */
 function SettingsCard({
@@ -66,17 +80,29 @@ export default function StoreSettingsScreen() {
   // --- Adhésion au magasin ---
   const [membership, setMembership] = useState<MyStore | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [code, setCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+  // Saisie principale : enseigne + numéro de magasin, celui qu'elle lit sur ses
+  // documents. Le code d'invitation reste en repli, replié par défaut.
+  const [organizations, setOrganizations] = useState<StoreOrganization[]>([]);
+  const [orgSlug, setOrgSlug] = useState<string | null>(null);
+  const [storeNumber, setStoreNumber] = useState("");
+  const [code, setCode] = useState("");
+  const [wantsInviteCode, setWantsInviteCode] = useState(false);
 
-  // Rechargée au focus : la responsable peut confirmer l'adhésion pendant que
+  // Rechargées au focus : la responsable peut confirmer l'adhésion pendant que
   // l'écran vit dans la pile (retour depuis Notifications, par exemple).
+  // Adhésion et enseignes ensemble : l'écran ne s'affiche qu'une fois les deux
+  // connues, sinon la saisie basculerait sous les doigts.
   useFocusEffect(
     useCallback(() => {
       let isCancelled = false;
-      getMyStore()
-        .then((store) => {
-          if (!isCancelled) setMembership(store);
+      Promise.all([getMyStore(), listOrganizations()])
+        .then(([store, orgs]) => {
+          if (isCancelled) return;
+          setMembership(store);
+          setOrganizations(orgs);
+          // Une seule enseigne : il n'y a rien à choisir, on la pré-sélectionne.
+          setOrgSlug((current) => current ?? (orgs.length === 1 ? orgs[0].slug : null));
         })
         .catch((error: unknown) => {
           if (isCancelled) return;
@@ -94,19 +120,30 @@ export default function StoreSettingsScreen() {
     }, []),
   );
 
+  // Sans liste d'enseignes, il n'y a rien à proposer : le code d'invitation
+  // redevient la seule saisie, sans bascule à afficher.
+  const hasOrganizations = organizations.length > 0;
+  const isNumberMode = hasOrganizations && !wantsInviteCode;
+  const isCodeReady = code.trim().length === JOIN_CODE_LENGTH;
+  const isNumberReady = orgSlug !== null && storeNumber.trim().length > 0;
+  const canJoin = isNumberMode ? isNumberReady : isCodeReady;
+
   async function handleJoin() {
-    if (isJoining) return;
+    if (isJoining || !canJoin) return;
     setIsJoining(true);
     try {
-      const joined = await joinStore(code);
+      const joined = isNumberMode
+        ? await joinStoreByNumber(orgSlug ?? "", storeNumber)
+        : await joinStore(code);
       setMembership(joined);
       setCode("");
+      setStoreNumber("");
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert(
         "Rattachement impossible",
-        error instanceof Error ? error.message : "Code magasin invalide",
+        error instanceof Error ? error.message : "Magasin introuvable",
       );
     } finally {
       setIsJoining(false);
@@ -148,8 +185,6 @@ export default function StoreSettingsScreen() {
     }
   }
 
-  const isCodeReady = code.trim().length === JOIN_CODE_LENGTH;
-
   return (
     <SafeAreaView edges={["top"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
@@ -169,42 +204,127 @@ export default function StoreSettingsScreen() {
               <ActivityIndicator color={colors.textMuted} />
             </View>
           ) : membership === null ? (
-            /* ÉTAT 1 — pas de magasin : saisie du code d'équipe. */
+            /* ÉTAT 1 — pas de magasin : enseigne + numéro, code en repli. */
             <SettingsCard
               title="Rejoindre mon magasin"
               subtitle="Ton magasin peut publier le planning directement dans Clork"
             >
-              <View style={styles.codeRow}>
-                <TextInput
-                  value={code}
-                  onChangeText={(value) => setCode(value.toUpperCase())}
-                  placeholder="CODE MAGASIN"
-                  placeholderTextColor={colors.textDisabled}
-                  accessibilityLabel="Code magasin"
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  autoComplete="off"
-                  maxLength={JOIN_CODE_LENGTH}
-                  returnKeyType="done"
-                  onSubmitEditing={() => {
-                    if (isCodeReady) void handleJoin();
-                  }}
-                  style={[
-                    styles.codeInput,
-                    { backgroundColor: colors.background, color: colors.text },
+              {isNumberMode ? (
+                <>
+                  <View style={styles.orgRow}>
+                    {organizations.map((org) => {
+                      const isSelected = org.slug === orgSlug;
+                      return (
+                        <Pressable
+                          key={org.slug}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          onPress={() => {
+                            void Haptics.selectionAsync();
+                            setOrgSlug(org.slug);
+                          }}
+                          style={({ pressed }) => [
+                            styles.orgChip,
+                            {
+                              backgroundColor: isSelected ? colors.accent : colors.background,
+                              borderColor: isSelected ? colors.accent : colors.border,
+                              opacity: pressed ? pressOpacity.control : 1,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.orgChipLabel,
+                              { color: isSelected ? colors.onAccent : colors.textSoft },
+                            ]}
+                          >
+                            {org.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <View style={styles.codeRow}>
+                    <TextInput
+                      value={storeNumber}
+                      onChangeText={setStoreNumber}
+                      placeholder="1064"
+                      placeholderTextColor={colors.textDisabled}
+                      accessibilityLabel="Numéro de magasin"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      autoComplete="off"
+                      maxLength={STORE_NUMBER_MAX_LENGTH}
+                      returnKeyType="done"
+                      onSubmitEditing={() => void handleJoin()}
+                      style={[
+                        styles.numberInput,
+                        { backgroundColor: colors.background, color: colors.text },
+                      ]}
+                    />
+                    <Button
+                      label="Rejoindre"
+                      onPress={() => void handleJoin()}
+                      disabled={!canJoin}
+                      isLoading={isJoining}
+                      style={styles.joinButton}
+                    />
+                  </View>
+                  <Text style={[styles.hint, { color: colors.textDisabled }]}>
+                    Le numéro de ton magasin, celui qui figure sur tes documents. Ta responsable
+                    confirmera ensuite que tu fais partie de l'équipe.
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.codeRow}>
+                    <TextInput
+                      value={code}
+                      onChangeText={(value) => setCode(value.toUpperCase())}
+                      placeholder="CODE MAGASIN"
+                      placeholderTextColor={colors.textDisabled}
+                      accessibilityLabel="Code magasin"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      autoComplete="off"
+                      maxLength={JOIN_CODE_LENGTH}
+                      returnKeyType="done"
+                      onSubmitEditing={() => void handleJoin()}
+                      style={[
+                        styles.codeInput,
+                        { backgroundColor: colors.background, color: colors.text },
+                      ]}
+                    />
+                    <Button
+                      label="Rejoindre"
+                      onPress={() => void handleJoin()}
+                      disabled={!canJoin}
+                      isLoading={isJoining}
+                      style={styles.joinButton}
+                    />
+                  </View>
+                  <Text style={[styles.hint, { color: colors.textDisabled }]}>
+                    Le code magasin ({JOIN_CODE_LENGTH} caractères) est donné par ta responsable.
+                  </Text>
+                </>
+              )}
+
+              {hasOrganizations ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setWantsInviteCode((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.switchRow,
+                    { opacity: pressed ? pressOpacity.control : 1 },
                   ]}
-                />
-                <Button
-                  label="Rejoindre"
-                  onPress={() => void handleJoin()}
-                  disabled={!isCodeReady}
-                  isLoading={isJoining}
-                  style={styles.joinButton}
-                />
-              </View>
-              <Text style={[styles.hint, { color: colors.textDisabled }]}>
-                Le code magasin ({JOIN_CODE_LENGTH} caractères) est donné par ta responsable.
-              </Text>
+                >
+                  <Text style={[styles.switchLabel, { color: colors.textMuted }]}>
+                    {isNumberMode
+                      ? "J'ai un code d'invitation"
+                      : "Rejoindre avec le numéro de mon magasin"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </SettingsCard>
           ) : membership.status === "pending" ? (
             /* ÉTAT 2 — en attente de confirmation par la responsable. */
@@ -319,6 +439,44 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
   },
   joinButton: { paddingHorizontal: spacing.md },
+  // Numéro de magasin : même gabarit que le code, sans l'espacement de lettres
+  // (« 1064 » se lit d'un bloc, un code se déchiffre caractère par caractère).
+  numberInput: {
+    flex: 1,
+    borderRadius: radius.input,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 5,
+    minHeight: 52,
+    fontSize: typeScale.body,
+    fontFamily: fonts.bold,
+    letterSpacing: 0.5,
+  },
+  // Enseignes : chips qui passent à la ligne quand la liste s'allonge.
+  orgRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  orgChip: {
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  orgChipLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+  },
+  // Bascule discrète vers l'autre saisie : un lien texte, pas un bouton.
+  switchRow: {
+    alignSelf: "flex-start",
+    paddingVertical: 2,
+  },
+  switchLabel: {
+    fontSize: typeScale.caption,
+    fontFamily: fonts.semiBold,
+    textDecorationLine: "underline",
+  },
   hint: {
     fontSize: typeScale.tiny,
     fontFamily: fonts.medium,
