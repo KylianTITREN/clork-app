@@ -1,7 +1,8 @@
 // Mon magasin (v2) — rattachement Clork Pro + horaires d'ouverture.
 // Trois états d'adhésion : aucun magasin (enseigne + numéro de magasin, avec le
 // code d'invitation en repli), en attente (la responsable doit confirmer la ligne
-// du planning), confirmée (nom reconnu + renvoi vers le réglage de notification).
+// du planning), confirmée (nom reconnu + renvoi vers les réglages de notification
+// — alerte à la publication et envoi par e-mail, qui vivent dans Notifications).
 // La carte « Horaires du magasin » (déduction ouvre/ferme sur l'accueil) est
 // présente dans les trois états.
 //
@@ -359,6 +360,8 @@ export default function StoreSettingsScreen() {
                   {membership.employeeName ?? "Ligne non précisée"}
                 </Text>
               </View>
+              {/* Renvoi, pas de doublon : les interrupteurs (notification, envoi
+                  par e-mail) vivent dans Notifications, cette ligne dit où. */}
               <Pressable
                 accessibilityRole="button"
                 onPress={() => router.push("/profile/notifications")}
@@ -368,7 +371,8 @@ export default function StoreSettingsScreen() {
                 ]}
               >
                 <Text style={[styles.linkText, { color: colors.textSoft }]}>
-                  Être prévenue à chaque publication : réglage « Planning de mon magasin »
+                  Être prévenue à chaque publication, par notification ou par e-mail : réglage
+                  « Planning de mon magasin »
                 </Text>
                 <Ionicons name="chevron-forward" size={15} color={colors.textDisabled} />
               </Pressable>

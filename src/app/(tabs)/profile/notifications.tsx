@@ -2,8 +2,8 @@
 // bodySm/semiBold + sous-titre caption à gauche, toggle à droite ; réglage
 // conditionnel (heure sur fond neutre, jour en chips) sous la ligne du toggle.
 
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Switch, Text, View, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -20,6 +20,7 @@ import {
   type ReminderPrefs,
   type ReminderShift,
 } from "@/lib/reminder-service";
+import { getMyStore } from "@/lib/store-service";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -100,21 +101,57 @@ export default function NotificationsSettingsScreen() {
     );
   }
 
-  // Préférence de notification employeur : stockée dans profiles (le serveur
-  // doit pouvoir la lire au moment de publier). Optimiste, avec retour arrière
+  // Préférences de publication employeur : stockées dans profiles (le serveur
+  // doit pouvoir les lire au moment de publier). Optimistes, avec retour arrière
   // si l'écriture échoue — sinon l'interrupteur mentirait.
   const [employerNotify, setEmployerNotify] = useState(true);
+  // « Aussi par e-mail » : par défaut faux pour qui a déjà l'app — la push suffit.
+  const [planningByEmail, setPlanningByEmail] = useState(false);
+
+  // La carte employeur ne parle que d'un magasin qui publie : sans adhésion
+  // (my_store renvoie null), elle décrirait un employeur qui n'existe pas pour
+  // cette personne. `null` = réponse pas encore connue, on n'affiche rien.
+  const [hasStoreMembership, setHasStoreMembership] = useState<boolean | null>(null);
+
+  // Relue au focus : elle peut rejoindre son magasin depuis « Mon magasin » et
+  // revenir ici sans que l'écran ait été démonté entre-temps.
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) {
+        setHasStoreMembership(false);
+        return;
+      }
+      let isCancelled = false;
+      getMyStore()
+        .then((store) => {
+          if (!isCancelled) setHasStoreMembership(store !== null);
+        })
+        .catch(() => {
+          // Adhésion illisible : on garde la carte masquée plutôt que de proposer
+          // un réglage dont on ignore s'il concerne cette personne.
+          if (!isCancelled) setHasStoreMembership(false);
+        });
+      return () => {
+        isCancelled = true;
+      };
+    }, [userId]),
+  );
 
   useEffect(() => {
     if (!userId) return;
     let alive = true;
     void supabase
       .from("profiles")
-      .select("notify_employer_planning")
+      .select("notify_employer_planning, planning_by_email")
       .eq("id", userId)
-      .maybeSingle<{ notify_employer_planning: boolean | null }>()
+      .maybeSingle<{
+        notify_employer_planning: boolean | null;
+        planning_by_email: boolean | null;
+      }>()
       .then(({ data }) => {
-        if (alive && data) setEmployerNotify(data.notify_employer_planning !== false);
+        if (!alive || !data) return;
+        setEmployerNotify(data.notify_employer_planning !== false);
+        setPlanningByEmail(data.planning_by_email === true);
       });
     return () => {
       alive = false;
@@ -130,6 +167,17 @@ export default function NotificationsSettingsScreen() {
       .update({ notify_employer_planning: next })
       .eq("id", userId);
     if (error) setEmployerNotify(previous);
+  }
+
+  async function setPlanningByEmailPref(next: boolean) {
+    if (!userId) return;
+    const previous = planningByEmail;
+    setPlanningByEmail(next);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ planning_by_email: next })
+      .eq("id", userId);
+    if (error) setPlanningByEmail(previous);
   }
 
   function renderToggleRow(title: string, subtitle: string, toggle: React.ReactNode) {
@@ -247,14 +295,25 @@ export default function NotificationsSettingsScreen() {
 
         {/* Publication par l'employeur : la seule notification décidée par le
             SERVEUR (les autres sont des rappels programmés par le téléphone),
-            donc la préférence vit dans le profil et non en local. */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {renderToggleRow(
-            "Planning de mon magasin",
-            "Quand mon employeur publie ou modifie mes horaires",
-            renderSwitch(employerNotify, setEmployerNotifyPref),
-          )}
-        </View>
+            donc les préférences vivent dans le profil et non en local.
+            Carte réservée aux employées rattachées à un magasin. */}
+        {hasStoreMembership ? (
+          <View
+            style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            {renderToggleRow(
+              "Planning de mon magasin",
+              "Quand mon employeur publie ou modifie mes horaires",
+              renderSwitch(employerNotify, setEmployerNotifyPref),
+            )}
+            <View style={[styles.toggleSeparator, { backgroundColor: colors.separator }]} />
+            {renderToggleRow(
+              "Recevoir aussi par e-mail",
+              "Utile si tu changes de téléphone ou désinstalles l'app",
+              renderSwitch(planningByEmail, setPlanningByEmailPref),
+            )}
+          </View>
+        ) : null}
 
         <Text style={[styles.footnote, { color: colors.textMuted }]}>
           Les notifications de fin de scan (push) arriveront avec une prochaine version.
@@ -300,6 +359,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
+  // Filet entre deux réglages d'une même carte (v2 : 1px, couleur separator).
+  toggleSeparator: { height: 1 },
   toggleTextBox: { flex: 1, gap: 2 },
   toggleTitle: { fontSize: typeScale.bodySm, fontFamily: fonts.semiBold },
   toggleSubtitle: { fontSize: typeScale.caption, fontFamily: fonts.regular, lineHeight: 17 },

@@ -81,8 +81,39 @@
 //   · roster_delete   : retire une personne du carnet.
 //   · roster_suggest  : les noms du dernier planning absents du carnet.
 //   · (défaut)        : publication réelle + infos de la semaine + push.
+//
+// L'E-MAIL, pour les 14 employées sur 15 qui n'ont pas l'app :
+//   Après l'écriture des créneaux et les notifications push, on sert par
+//   e-mail celles que la push n'a pas atteintes. DEUX messages au total, jamais
+//   plus : le PLANNING à la publication (ses horaires, l'invitation à installer
+//   l'app en PIED de message) et le CHANGEMENT si ses horaires bougent ensuite.
+//   Aucun e-mail « rejoignez Clork » séparé — ce serait de la publicité.
+//
+//   Qui reçoit quoi : pas de compte Clork → l'e-mail. Compte Clork → la push et
+//   PAS d'e-mail, sauf si elle a coché `profiles.planning_by_email` ou si sa
+//   notification échoue (jeton mort = app désinstallée). Chaque destinataire
+//   envisagée laisse une ligne dans `email_deliveries`, servie ou non, avec la
+//   raison : c'est ce qui permettra de répondre à « est-ce qu'elle a reçu ? ».
+//
+//   Sans BREVO_API_KEY (l'état d'aujourd'hui), rien n'est envoyé et RIEN NE
+//   CHANGE : la publication se comporte exactement comme avant.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import {
+  buildEmail,
+  type EmailChange,
+  type EmailDay,
+  type EmailKind,
+  type EmailShift,
+  type EmailShiftType,
+  type EmailStatus,
+  firstNameOf,
+  installUrl,
+  isEmailConfigured,
+  type OutgoingEmail,
+  sendEmails,
+  unsubscribeUrl,
+} from "../_shared/email.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -122,6 +153,8 @@ const MAX_ROSTER_ENTRIES = 200;
 const MAX_ROSTER_EMAIL = 200;
 /** Expo accepte 100 messages par requête. */
 const PUSH_CHUNK_SIZE = 100;
+/** Journal des e-mails : `email_deliveries.reason` est borné à 200 caractères. */
+const MAX_DELIVERY_REASON = 200;
 /** Notification de changement : au-delà, on résume (« et N autres jours »). */
 const MAX_CHANGES_IN_BODY = 2;
 /** Temporisation sur échec d'authentification (frein à la force brute). */
@@ -822,7 +855,13 @@ type ProfileRow = {
   employee_aliases: string[] | null;
   expo_push_token: string | null;
   notify_employer_planning: boolean | null;
+  /** « Recevoir AUSSI mes horaires par e-mail », pour celles qui ont l'app. */
+  planning_by_email: boolean | null;
 };
+
+const PROFILE_COLUMNS =
+  "id, display_name, employee_aliases, expo_push_token, notify_employer_planning, " +
+  "planning_by_email";
 
 type ProfileCandidate = { profile: ProfileRow; keys: string[] };
 
@@ -911,7 +950,7 @@ async function loadProfiles(service: SupabaseClient): Promise<ProfileRow[]> {
     const from = page * PROFILE_PAGE_SIZE;
     const { data, error } = await service
       .from("profiles")
-      .select("id, display_name, employee_aliases, expo_push_token, notify_employer_planning")
+      .select(PROFILE_COLUMNS)
       .order("id", { ascending: true })
       .range(from, from + PROFILE_PAGE_SIZE - 1);
     if (error) throw new Error("profiles read failed: " + error.message);
@@ -951,7 +990,7 @@ async function loadProfilesByIds(
     const chunk = ids.slice(index, index + PROFILE_ID_CHUNK);
     const { data, error } = await service
       .from("profiles")
-      .select("id, display_name, employee_aliases, expo_push_token, notify_employer_planning")
+      .select(PROFILE_COLUMNS)
       .in("id", chunk);
     if (error) throw new Error("profiles read failed: " + error.message);
     rows.push(...((data ?? []) as ProfileRow[]));
@@ -1705,12 +1744,30 @@ function isExpoToken(token: string | null | undefined): token is string {
 }
 
 /**
+ * Sort de l'envoi, message par message. La distinction est ce qui gouverne le
+ * repli par e-mail :
+ *   · "ok"       : Expo a accepté le message.
+ *   · "rejected" : Expo l'a refusé, presque toujours un jeton mort (app
+ *                  désinstallée). La personne n'a RIEN reçu : l'e-mail prend
+ *                  le relais.
+ *   · "unknown"  : Expo n'a pas répondu (panne, réseau). Le message est peut-être
+ *                  parti. On ne double PAS par e-mail : une panne d'Expo ne doit
+ *                  pas se traduire par un e-mail à toute l'équipe.
+ */
+type PushDelivery = "ok" | "rejected" | "unknown";
+
+/**
  * Best-effort absolu : une panne d'Expo ne doit jamais faire échouer une
  * publication déjà écrite en base — l'employée verra ses horaires en ouvrant
  * l'app, la notification n'est qu'un confort.
+ *
+ * Le résultat est ALIGNÉ sur `messages` : Expo renvoie ses tickets dans l'ordre
+ * des messages du lot, c'est ce qui permet de savoir QUI n'a pas été servie.
  */
-async function sendPushNotifications(messages: readonly PushMessage[]): Promise<number> {
-  let delivered = 0;
+async function sendPushNotifications(
+  messages: readonly PushMessage[],
+): Promise<PushDelivery[]> {
+  const results: PushDelivery[] = messages.map(() => "unknown");
   for (let index = 0; index < messages.length; index += PUSH_CHUNK_SIZE) {
     const chunk = messages.slice(index, index + PUSH_CHUNK_SIZE);
     try {
@@ -1724,21 +1781,26 @@ async function sendPushNotifications(messages: readonly PushMessage[]): Promise<
         continue;
       }
       const payload = (await response.json()) as { data?: { status?: string }[] };
-      delivered += (payload.data ?? []).filter((ticket) => ticket?.status === "ok").length;
+      const tickets = payload.data ?? [];
+      chunk.forEach((_message, offset) => {
+        const ticket = tickets[offset];
+        if (!ticket || typeof ticket.status !== "string") return;
+        results[index + offset] = ticket.status === "ok" ? "ok" : "rejected";
+      });
     } catch (error) {
       console.error("expo push chunk failed:", error);
     }
   }
-  return delivered;
+  return results;
 }
 
-function arrivalMessage(token: string, weekStart: string, daysWritten: number): PushMessage {
+type PushContent = { title: string; body: string };
+
+function arrivalContent(weekStart: string, daysWritten: number): PushContent {
   const days = daysWritten <= 1 ? `${daysWritten} jour travaillé` : `${daysWritten} jours travaillés`;
   return {
-    to: token.trim(),
     title: "Ton planning de la semaine est arrivé",
     body: `Semaine du ${frenchDate(weekStart)} — ${days}`,
-    sound: "default",
   };
 }
 
@@ -1747,36 +1809,64 @@ function arrivalMessage(token: string, weekStart: string, daysWritten: number): 
  * 19:00-20:00 ». Une notification qui ne dit pas CE QUI a changé oblige à
  * ouvrir l'app pour comparer de tête : autant ne rien envoyer.
  */
-function changeMessage(token: string, changes: readonly DayChange[]): PushMessage | null {
+function changeContent(changes: readonly DayChange[]): PushContent | null {
   if (changes.length === 0) return null;
   const shown = changes
     .slice(0, MAX_CHANGES_IN_BODY)
     .map((change) => `${frenchWeekday(change.date)} : ${change.text}`);
   const rest = changes.length - shown.length;
   const tail = rest === 0 ? "" : rest === 1 ? " et 1 autre jour" : ` et ${rest} autres jours`;
-  return {
-    to: token.trim(),
-    title: "Tes horaires ont changé",
-    body: `${shown.join(" · ")}${tail}`,
-    sound: "default",
-  };
+  return { title: "Tes horaires ont changé", body: `${shown.join(" · ")}${tail}` };
 }
+
+/**
+ * Y a-t-il quelque chose à annoncer, et de quelle nature ? Cette question est
+ * commune à la notification et à l'e-mail : les deux canaux doivent dire la
+ * même chose, ou se taire ensemble.
+ */
+function announcementOf(outcome: WriteOutcome): EmailKind | null {
+  if (outcome.isFirstWeek) return outcome.daysWritten > 0 ? "planning" : null;
+  return outcome.changes.length > 0 ? "change" : null;
+}
+
+/**
+ * Pourquoi une notification n'est pas partie compte autant que le fait qu'elle
+ * soit partie : seul « pas de jeton » (l'app n'est pas, ou plus, installée)
+ * justifie un e-mail de repli. Une employée qui a COUPÉ la notification
+ * employeur a dit ce qu'elle voulait — on ne la contourne pas par e-mail.
+ */
+type PushPlan =
+  | { state: "queued"; message: PushMessage }
+  | { state: "no_token" }
+  | { state: "disabled" }
+  | { state: "nothing" };
 
 function pushForOutcome(
   profile: ProfileRow | null,
   outcome: WriteOutcome,
   weekStart: string,
-): PushMessage | null {
+): PushPlan {
   // Préférence serveur : une employée peut couper cette notification depuis
   // Notifications. Absente (ancien profil) = on notifie.
-  if (!profile || profile.notify_employer_planning === false) return null;
-  if (!isExpoToken(profile.expo_push_token)) return null;
-  if (outcome.isFirstWeek) {
-    return outcome.daysWritten > 0
-      ? arrivalMessage(profile.expo_push_token, weekStart, outcome.daysWritten)
-      : null;
-  }
-  return changeMessage(profile.expo_push_token, outcome.changes);
+  if (profile && profile.notify_employer_planning === false) return { state: "disabled" };
+
+  const kind = announcementOf(outcome);
+  if (kind === null) return { state: "nothing" };
+  const content = kind === "planning"
+    ? arrivalContent(weekStart, outcome.daysWritten)
+    : changeContent(outcome.changes);
+  if (content === null) return { state: "nothing" };
+
+  if (!profile || !isExpoToken(profile.expo_push_token)) return { state: "no_token" };
+  return {
+    state: "queued",
+    message: {
+      to: profile.expo_push_token.trim(),
+      title: content.title,
+      body: content.body,
+      sound: "default",
+    },
+  };
 }
 
 // --- Semaine effective : préparation partagée ---------------------------------
@@ -1851,21 +1941,43 @@ async function prepareWeek(
   return { planning, weekDates, effective, pairing, unmatched, targets: [...byUser.values()] };
 }
 
+/** Ce qu'une employée a reçu, ou pas : la matière première du repli par e-mail. */
+type TargetOutcome = {
+  target: WriteTarget;
+  outcome: WriteOutcome;
+  /** L'état de sa notification, une fois l'envoi Expo terminé. */
+  push: PushPlan["state"] | PushDelivery;
+};
+
 type PublishOutcome = {
   matched: MatchedEmployee[];
   notified: number;
   failures: number;
   skippedManual: number;
+  emailed: number;
+  emailSkipped: number;
+  emailFailed: number;
 };
 
-/** Écriture réelle de la semaine préparée, puis notifications ciblées. */
+/**
+ * Écriture réelle de la semaine préparée, notifications ciblées, puis e-mails
+ * pour celles que la notification n'a pas atteintes.
+ *
+ * L'ORDRE COMPTE : les créneaux d'abord (c'est la seule chose qui doit
+ * absolument réussir), la push ensuite, l'e-mail en dernier. Chaque étape est
+ * best-effort pour celle qui la suit.
+ */
 async function publishPreparedWeek(
   service: SupabaseClient,
-  storeId: string,
+  store: StoreRow,
   prepared: PreparedWeek,
+  context: StoreContext,
 ): Promise<PublishOutcome> {
   const matched: MatchedEmployee[] = [];
+  const written: TargetOutcome[] = [];
   const messages: PushMessage[] = [];
+  /** Index de `written` correspondant à chaque message, pour reporter le ticket. */
+  const messageOwners: number[] = [];
   let failures = 0;
   let skippedManual = 0;
 
@@ -1880,18 +1992,362 @@ async function publishPreparedWeek(
         days_written: outcome.daysWritten,
         source: target.source,
       });
-      const message = pushForOutcome(target.profile, outcome, prepared.planning.week_start);
-      if (message) messages.push(message);
+      const plan = pushForOutcome(target.profile, outcome, prepared.planning.week_start);
+      written.push({ target, outcome, push: plan.state });
+      if (plan.state === "queued") {
+        messages.push(plan.message);
+        messageOwners.push(written.length - 1);
+      }
     } catch (error) {
       // Jamais de nom dans les logs : la ligne du fichier suffit à retrouver
       // la personne dans le payload conservé par store_imports.
       failures += 1;
-      console.error(`store ${storeId}: user write failed:`, error);
+      console.error(`store ${store.id}: user write failed:`, error);
     }
   }
 
-  const notified = await sendPushNotifications(messages);
-  return { matched, notified, failures, skippedManual };
+  const deliveries = await sendPushNotifications(messages);
+  const notified = deliveries.filter((delivery) => delivery === "ok").length;
+
+  // Le ticket d'Expo remplace l'état « en file » de chaque message envoyé.
+  const ticketByTarget = new Map<number, PushDelivery>(
+    deliveries.map((delivery, index) => [messageOwners[index], delivery]),
+  );
+  const settled: TargetOutcome[] = written.map((entry, index) => {
+    const ticket = ticketByTarget.get(index);
+    return ticket === undefined ? entry : { ...entry, push: ticket };
+  });
+
+  // L'e-mail ne doit JAMAIS faire échouer une publication déjà écrite : ses
+  // pannes se lisent dans les logs et dans email_deliveries, pas dans la
+  // réponse envoyée à la responsable.
+  let mail = { emailed: 0, skipped: 0, failed: 0 };
+  try {
+    mail = await deliverPlanningEmails(service, store, prepared, settled, context);
+  } catch (error) {
+    console.error(`store ${store.id}: planning emails failed:`, error);
+  }
+
+  return {
+    matched,
+    notified,
+    failures,
+    skippedManual,
+    emailed: mail.emailed,
+    emailSkipped: mail.skipped,
+    emailFailed: mail.failed,
+  };
+}
+
+/**
+ * Ce que la responsable doit pouvoir lire sur son écran. `email_enabled` évite
+ * le pire message possible : « 0 e-mail envoyé » alors que l'envoi n'est
+ * simplement pas encore branché sur ce projet.
+ */
+function emailReport(outcome: PublishOutcome): Record<string, unknown> {
+  return {
+    email_enabled: isEmailConfigured(),
+    emailed: outcome.emailed,
+    email_skipped: outcome.emailSkipped,
+    email_failed: outcome.emailFailed,
+  };
+}
+
+// --- L'e-mail du planning -----------------------------------------------------
+//
+// Pour les 14 employées sur 15 qui n'ont pas l'app. L'e-mail ne remplace pas la
+// notification : il sert celles que la notification n'a pas pu atteindre.
+
+type RosterEmailRow = {
+  id: string;
+  employee_name: string;
+  email: string | null;
+  email_opt_out: boolean | null;
+  unsubscribe_token: string | null;
+  linked_user_id: string | null;
+};
+
+async function loadRosterForEmail(
+  service: SupabaseClient,
+  storeId: string,
+): Promise<RosterEmailRow[]> {
+  const { data, error } = await service
+    .from("store_roster")
+    .select("id, employee_name, email, email_opt_out, unsubscribe_token, linked_user_id")
+    .eq("store_id", storeId)
+    .limit(MAX_ROSTER_ENTRIES);
+  if (error) throw new Error("store_roster read failed: " + error.message);
+  return (data ?? []) as RosterEmailRow[];
+}
+
+/** Une ligne du journal `email_deliveries`. */
+type DeliveryRow = {
+  store_id: string;
+  week_start: string;
+  roster_id: string;
+  email: string | null;
+  kind: EmailKind;
+  status: EmailStatus;
+  reason: string | null;
+};
+
+/**
+ * La semaine telle qu'elle se lit dans un e-mail : les 7 jours, repos compris,
+ * avec les heures PAYÉES (amplitude moins la pause déduite). C'est exactement
+ * ce qui vient d'être écrit dans l'app de ses collègues équipées.
+ */
+function emailDaysOf(rows: readonly ShiftRow[], weekDates: readonly string[]): EmailDay[] {
+  return weekDates.map((date) => {
+    const dayRows = rows.filter((row) => row.date === date);
+    const shifts: EmailShift[] = sortShifts(
+      dayRows.map((row) => ({
+        // "2026-08-03T09:30:00+02:00" → "09:30" : l'heure de pendule française,
+        // déjà calculée à l'écriture. La reconvertir ici serait un risque de
+        // dérive d'une heure les semaines de changement d'heure.
+        start: row.start_at.slice(11, 16),
+        end: row.end_at.slice(11, 16),
+        type: row.type as EmailShiftType,
+      })),
+    );
+    const worked = shifts.reduce(
+      (sum, shift) => sum + minutesOf(shift.end) - minutesOf(shift.start),
+      0,
+    );
+    const breaks = dayRows.reduce((sum, row) => sum + row.break_minutes, 0);
+    return { date, shifts, paid_minutes: Math.max(worked - breaks, 0) };
+  });
+}
+
+/** Best-effort : un journal en échec ne remet pas en cause un e-mail parti. */
+async function writeDeliveryJournal(
+  service: SupabaseClient,
+  rows: readonly DeliveryRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const { error } = await service.from("email_deliveries").insert(rows);
+  if (error) console.error("email_deliveries insert failed:", error.message);
+}
+
+type MailOutcome = { emailed: number; skipped: number; failed: number };
+
+/**
+ * QUI REÇOIT QUOI, en un endroit :
+ *   · entrée de carnet avec adresse, PAS de compte Clork → l'e-mail.
+ *   · entrée avec compte Clork → l'e-mail SEULEMENT si elle a coché
+ *     `planning_by_email`, ou si sa notification n'a pas pu la joindre (jeton
+ *     mort ou absent = app désinstallée). Une employée qui a COUPÉ la
+ *     notification employeur a dit ce qu'elle voulait : on ne la contourne pas.
+ *   · rien à annoncer (aucun changement) → rien, comme pour la push. Les deux
+ *     canaux se taisent ensemble.
+ *
+ * Chaque entrée du carnet laisse une ligne dans `email_deliveries`, servie ou
+ * non, avec la raison : c'est ce qui permettra de répondre à la responsable
+ * quand elle demandera « est-ce qu'elle a reçu ? ».
+ */
+async function deliverPlanningEmails(
+  service: SupabaseClient,
+  store: StoreRow,
+  prepared: PreparedWeek,
+  written: readonly TargetOutcome[],
+  context: StoreContext,
+): Promise<MailOutcome> {
+  // Aucune clé configurée : on ne lit rien, on n'écrit rien, on ne journalise
+  // rien. La publication se comporte EXACTEMENT comme avant cette fonction.
+  if (!isEmailConfigured()) {
+    console.log(`store ${store.id}: email disabled (BREVO_API_KEY not configured)`);
+    return { emailed: 0, skipped: 0, failed: 0 };
+  }
+
+  const roster = await loadRosterForEmail(service, store.id);
+  if (roster.length === 0) return { emailed: 0, skipped: 0, failed: 0 };
+
+  const weekStart = prepared.planning.week_start;
+
+  // Deux façons de retrouver la semaine d'une personne du carnet : par son
+  // compte quand on le connaît, par le nom de sa ligne sinon. Un nom porté par
+  // deux écritures est retiré de l'index plutôt que tranché au hasard —
+  // envoyer les horaires de quelqu'un d'autre est le pire échec possible.
+  const byUser = new Map<string, TargetOutcome>();
+  const byName = new Map<string, TargetOutcome>();
+  const ambiguousNames = new Set<string>();
+  for (const entry of written) {
+    byUser.set(entry.target.user_id, entry);
+    const key = normalizeName(entry.target.name);
+    if (key.length === 0) continue;
+    if (byName.has(key)) {
+      ambiguousNames.add(key);
+      continue;
+    }
+    byName.set(key, entry);
+  }
+  for (const key of ambiguousNames) byName.delete(key);
+
+  // Une entrée de carnet sans `linked_user_id` peut tout de même désigner
+  // quelqu'un qui a l'app : l'adhésion confirmée porte le même nom de ligne.
+  const memberByName = new Map<string, string>();
+  const ambiguousMembers = new Set<string>();
+  for (const member of context.confirmedMembers) {
+    const key = normalizeName(member.employee_name ?? "");
+    if (key.length === 0) continue;
+    if (memberByName.has(key)) {
+      ambiguousMembers.add(key);
+      continue;
+    }
+    memberByName.set(key, member.user_id);
+  }
+  for (const key of ambiguousMembers) memberByName.delete(key);
+
+  const accountOf = (entry: RosterEmailRow): string | null =>
+    entry.linked_user_id ?? memberByName.get(normalizeName(entry.employee_name)) ?? null;
+
+  // Une écriture en échec n'est PAS une absence du planning : le journal doit
+  // dire laquelle des deux, sinon la responsable cherchera un nom manquant dans
+  // son fichier alors que le problème est ailleurs.
+  const attemptedUsers = new Set(prepared.targets.map((target) => target.user_id));
+  const attemptedNames = new Set(
+    prepared.targets.map((target) => normalizeName(target.name)).filter((key) => key.length > 0),
+  );
+
+  // Les profils des comptes rattachés hors adhésion ne sont pas dans le
+  // contexte : sans eux, `planning_by_email` serait lu comme absent et une
+  // employée qui a demandé l'e-mail ne le recevrait pas.
+  const profileById = new Map(context.profileById);
+  const missing = [
+    ...new Set(
+      roster
+        .map(accountOf)
+        .filter((userId): userId is string => userId !== null && !profileById.has(userId)),
+    ),
+  ];
+  for (const profile of missing.length > 0 ? await loadProfilesByIds(service, missing) : []) {
+    profileById.set(profile.id, profile);
+  }
+
+  const journal: DeliveryRow[] = [];
+  const skip = (entry: RosterEmailRow, reason: string, kind: EmailKind = "planning") => {
+    journal.push({
+      store_id: store.id,
+      week_start: weekStart,
+      roster_id: entry.id,
+      email: entry.email,
+      kind,
+      status: "skipped",
+      reason,
+    });
+  };
+
+  type Candidate = {
+    entry: RosterEmailRow;
+    email: string;
+    kind: EmailKind;
+    found: TargetOutcome;
+    token: string;
+  };
+  const candidates: Candidate[] = [];
+
+  for (const entry of roster) {
+    const email = typeof entry.email === "string" ? entry.email.trim() : "";
+    if (email.length === 0) {
+      skip(entry, "no_email");
+      continue;
+    }
+    if (entry.email_opt_out === true) {
+      skip(entry, "opted_out");
+      continue;
+    }
+
+    const key = normalizeName(entry.employee_name);
+    const userId = accountOf(entry);
+    const found = (userId === null ? undefined : byUser.get(userId)) ?? byName.get(key);
+    if (!found) {
+      const attempted = (userId !== null && attemptedUsers.has(userId)) || attemptedNames.has(key);
+      // Au carnet, mais absente de cette semaine (ou ligne non appariée) —
+      // sauf si l'écriture de ses créneaux vient justement d'échouer.
+      skip(entry, attempted ? "write_failed" : "not_in_planning");
+      continue;
+    }
+
+    const kind = announcementOf(found.outcome);
+    if (kind === null) {
+      skip(entry, "no_change");
+      continue;
+    }
+
+    if (userId !== null) {
+      const profile = profileById.get(userId) ?? found.target.profile;
+      if (profile?.planning_by_email !== true) {
+        if (found.push === "disabled") {
+          skip(entry, "push_disabled", kind);
+          continue;
+        }
+        if (found.push !== "no_token" && found.push !== "rejected") {
+          skip(entry, "has_app", kind);
+          continue;
+        }
+      }
+    }
+
+    // Un e-mail dont on ne saurait pas se désinscrire ne part pas. La colonne
+    // est NOT NULL en base ; ce garde-fou couvre une ligne écrite avant la
+    // migration par un chemin qu'on n'aurait pas prévu.
+    const token = typeof entry.unsubscribe_token === "string" ? entry.unsubscribe_token.trim() : "";
+    if (token.length === 0) {
+      skip(entry, "no_unsubscribe_token", kind);
+      continue;
+    }
+
+    candidates.push({ entry, email, kind, found, token });
+  }
+
+  if (candidates.length === 0) {
+    await writeDeliveryJournal(service, journal);
+    return { emailed: 0, skipped: journal.length, failed: 0 };
+  }
+
+  // Le code magasin du pied de message : « Nocibé · 1064 », celui qu'elle lit
+  // sur son badge et qui lui servira à se rattacher depuis l'app.
+  const organization = await loadOrganization(service, store.organization_id);
+  const storeCode = { organization: organization?.name ?? null, number: store.store_number };
+  const install = installUrl();
+
+  const messages: OutgoingEmail[] = candidates.map((candidate) =>
+    buildEmail(candidate.email, candidate.entry.employee_name, {
+      kind: candidate.kind,
+      first_name: firstNameOf(candidate.entry.employee_name),
+      store_label: store.label,
+      week_start: weekStart,
+      days: emailDaysOf(candidate.found.target.rows, prepared.weekDates),
+      // Le détail des jours qui bougent, exactement celui de la notification.
+      changes: candidate.kind === "change"
+        ? (candidate.found.outcome.changes as readonly EmailChange[])
+        : [],
+      store_code: storeCode,
+      unsubscribe_url: unsubscribeUrl(candidate.token),
+      install_url: install,
+    })
+  );
+
+  const results = await sendEmails(messages);
+
+  let emailed = 0;
+  let failed = 0;
+  results.forEach((result, index) => {
+    const candidate = candidates[index];
+    if (result.status === "sent") emailed += 1;
+    else if (result.status === "failed") failed += 1;
+    journal.push({
+      store_id: store.id,
+      week_start: weekStart,
+      roster_id: candidate.entry.id,
+      email: candidate.email,
+      kind: candidate.kind,
+      status: result.status,
+      reason: result.reason === null ? null : result.reason.slice(0, MAX_DELIVERY_REASON),
+    });
+  });
+
+  await writeDeliveryJournal(service, journal);
+  return { emailed, skipped: journal.length - emailed - failed, failed };
 }
 
 // --- Vue « semaine effective » pour le site -----------------------------------
@@ -2580,7 +3036,7 @@ async function handleApplyWeek(
   const context = await loadStoreContext(service, store.id);
   const edits = await loadPlanningEdits(service, store.id, weekStart);
   const prepared = await prepareWeek(service, validation.planning, edits, context);
-  const outcome = await publishPreparedWeek(service, store.id, prepared);
+  const outcome = await publishPreparedWeek(service, store, prepared, context);
 
   // Pas de nouvelle ligne de journal : il n'y a pas eu de dépôt. On date la
   // dernière publication pour que la liste des semaines reste honnête.
@@ -2597,8 +3053,9 @@ async function handleApplyWeek(
     `store ${store.id} apply week ${weekStart}: ` +
       `${outcome.matched.length} matched, ${prepared.unmatched.length} unmatched, ` +
       `${outcome.failures} failed, ${outcome.skippedManual} shift(s) kept manual, ` +
-      `${outcome.notified} notified, ${counts.edit_count} edit(s), ` +
-      `${counts.pre_publication_count} pre-publication`,
+      `${outcome.notified} notified, ${outcome.emailed} emailed, ` +
+      `${outcome.emailSkipped} email skipped, ${outcome.emailFailed} email failed, ` +
+      `${counts.edit_count} edit(s), ${counts.pre_publication_count} pre-publication`,
   );
 
   const body = {
@@ -2607,6 +3064,7 @@ async function handleApplyWeek(
     unmatched: prepared.unmatched,
     pending_members: context.pendingMembers,
     notified: outcome.notified,
+    ...emailReport(outcome),
     ...counts,
   };
 
@@ -2937,6 +3395,12 @@ Deno.serve(async (req) => {
       unmatched: prepared.unmatched,
       pending_members: context.pendingMembers,
       notified: 0,
+      // L'aperçu n'envoie rien, mais garde la même forme de réponse que la
+      // publication : le site n'a pas à tester la présence des compteurs.
+      email_enabled: isEmailConfigured(),
+      emailed: 0,
+      email_skipped: 0,
+      email_failed: 0,
       // « N modifications manuelles conservées » : la responsable doit savoir
       // que ses ratures ne sont pas emportées par le nouveau fichier. Compté à
       // part de `pre_publication_count`, sans quoi l'aperçu d'un premier dépôt
@@ -2965,7 +3429,7 @@ Deno.serve(async (req) => {
     return errorResponse(500, "Impossible d'enregistrer les infos de la semaine.");
   }
 
-  const outcome = await publishPreparedWeek(service, store.id, prepared);
+  const outcome = await publishPreparedWeek(service, store, prepared, context);
 
   const { error: importError } = await service.from("store_imports").insert({
     store_id: store.id,
@@ -2987,6 +3451,8 @@ Deno.serve(async (req) => {
       `${planning.employees.length} rows, ${outcome.matched.length} matched, ` +
       `${prepared.unmatched.length} unmatched, ${outcome.failures} failed, ` +
       `${outcome.skippedManual} shift(s) kept manual, ${outcome.notified} notified, ` +
+      `${outcome.emailed} emailed, ${outcome.emailSkipped} email skipped, ` +
+      `${outcome.emailFailed} email failed, ` +
       `${notices.length} notice(s), ${counts.edit_count} edit(s) kept, ` +
       `${counts.pre_publication_count} pre-publication, ` +
       `${context.pendingMembers.length} pending, scoped=${prepared.pairing.scopedToStore}`,
@@ -2998,6 +3464,7 @@ Deno.serve(async (req) => {
     unmatched: prepared.unmatched,
     pending_members: context.pendingMembers,
     notified: outcome.notified,
+    ...emailReport(outcome),
     ...counts,
     orphan_edit_ids: prepared.effective.orphanEditIds,
   };
